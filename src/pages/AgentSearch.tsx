@@ -172,8 +172,8 @@ export const AgentSearch = () => {
         await registration.unregister();
       }
     }
-    // Force a hard reload from the server
-    window.location.reload();
+    // Force a hard reload to the root to prevent Vercel 404s before SPA rules load
+    window.location.href = '/';
   };
 
   return (
