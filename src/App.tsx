@@ -12,7 +12,6 @@ import { ManagerAgents } from './pages/ManagerAgents';
 import { ManagerReports } from './pages/ManagerReports';
 import { ManagerConsumers } from './pages/ManagerConsumers';
 import { ManagerConsumerProfile } from './pages/ManagerConsumerProfile';
-import { PrivateRoute } from './components/PrivateRoute';
 
 function App() {
   useEffect(() => {
