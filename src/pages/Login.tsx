@@ -97,9 +97,17 @@ export const Login = () => {
           }
             
           if (allConsumers.length > 0) {
+            const formattedConsumers = allConsumers.map(c => {
+              const searchWords = [
+                ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
+                ...(c.consumer_number ? [c.consumer_number] : []),
+                ...(c.mobile ? [c.mobile] : [])
+              ];
+              return { ...c, searchWords };
+            });
             await db.consumers.clear(); 
-            await db.consumers.bulkAdd(allConsumers);
-            console.log(`Hydrated ${allConsumers.length} consumers into Dexie`);
+            await db.consumers.bulkAdd(formattedConsumers);
+            console.log(`Hydrated ${formattedConsumers.length} consumers into Dexie`);
           }
         } else {
           toast.success('Agent logged in! Local data ready.');

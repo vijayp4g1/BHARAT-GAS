@@ -13,6 +13,7 @@ export interface Consumer {
   isDeleted?: boolean;
   has_location?: boolean;
   has_photos?: boolean;
+  searchWords?: string[];
 }
 
 export interface ConsumerLocation {
@@ -58,8 +59,8 @@ const db = new Dexie('BGCLS_Database') as Dexie & {
 };
 
 // Schema declaration
-db.version(5).stores({
-  consumers: 'id, consumer_number, consumer_name, mobile, synced, isDeleted',
+db.version(6).stores({
+  consumers: 'id, consumer_number, consumer_name, mobile, synced, isDeleted, *searchWords',
   consumer_locations: '++id, consumer_id, synced',
   consumer_photos: '++id, consumer_id, synced',
   delivery_notes: '++id, consumer_id, synced'

@@ -49,76 +49,73 @@ export const AgentSearch = () => {
   }, [debouncedSearch, filterStatus]);
 
   // Use Dexie live query to fetch and filter consumers with limit for infinite scroll
+  // Use Dexie live query to fetch and filter consumers with limit for infinite scroll
   const consumers = useLiveQuery(async () => {
-    let collection = db.consumers.filter(c => {
-      if (c.isDeleted) return false;
-      
-      if (filterStatus === 'completed') {
-        return !!(c.has_location && c.has_photos);
-      } else if (filterStatus === 'pending') {
-        return !(c.has_location && c.has_photos);
-      }
-      return true;
-    });
+    const term = debouncedSearch.toLowerCase().trim();
+    const searchWords = term.split(/\s+/).filter(w => w.length > 0);
     
-    // Quick filter if no search term
-    if (!debouncedSearch) {
-      return await collection.limit(limit).toArray();
+    if (searchWords.length === 0) {
+      // No search term: Fast scan with early exit (limit)
+      return await db.consumers.filter(c => {
+        if (c.isDeleted) return false;
+        if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+        if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+        return true;
+      }).limit(limit).toArray();
     }
     
-    const term = debouncedSearch.toLowerCase().trim();
+    // Has search term: Use ultra-fast index
+    let baseCollection = db.consumers.where('searchWords').startsWithIgnoreCase(searchWords[0]);
     
-    // If there is a search term, we already filtered by status above, just filter by term
-    let results = await collection.filter(c => {
-      // Re-apply status filter because filter() overwrites previous filters in Dexie
+    // Apply remaining filters
+    let results = await baseCollection.filter(c => {
       if (c.isDeleted) return false;
       if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
       if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
       
-      return c.consumer_number.includes(term) || 
-             c.consumer_name.toLowerCase().includes(term) ||
-             c.mobile.includes(term);
+      if (searchWords.length > 1) {
+        return searchWords.slice(1).every(word => 
+          c.searchWords && c.searchWords.some(sw => sw.startsWith(word))
+        );
+      }
+      return true;
     }).toArray();
-
-    // Sort by relevance
+    
+    // Sort by relevance (exact match first)
     return results.sort((a, b) => {
       if (a.consumer_number === term && b.consumer_number !== term) return -1;
       if (b.consumer_number === term && a.consumer_number !== term) return 1;
-      
-      const aStarts = a.consumer_number.startsWith(term);
-      const bStarts = b.consumer_number.startsWith(term);
-      if (aStarts && !bStarts) return -1;
-      if (bStarts && !aStarts) return 1;
-
       if (a.mobile === term && b.mobile !== term) return -1;
       if (b.mobile === term && a.mobile !== term) return 1;
-
       return 0;
     }).slice(0, limit);
   }, [debouncedSearch, filterStatus, limit]);
 
-  // Total count for the results header (only count up to a reasonable number to avoid slow downs)
+  // Total count for the results header
   const totalCount = useLiveQuery(async () => {
-    let collection = db.consumers.filter(c => {
-      if (c.isDeleted) return false;
-      if (filterStatus === 'completed') return !!(c.has_location && c.has_photos);
-      if (filterStatus === 'pending') return !(c.has_location && c.has_photos);
-      return true;
-    });
-
-    if (!debouncedSearch) {
-      return await collection.count();
+    const term = debouncedSearch.toLowerCase().trim();
+    const searchWords = term.split(/\s+/).filter(w => w.length > 0);
+    
+    if (searchWords.length === 0) {
+      return await db.consumers.filter(c => {
+        if (c.isDeleted) return false;
+        if (filterStatus === 'completed') return !!(c.has_location && c.has_photos);
+        if (filterStatus === 'pending') return !(c.has_location && c.has_photos);
+        return true;
+      }).count();
     }
     
-    const term = debouncedSearch.toLowerCase().trim();
-    return await db.consumers.filter(c => {
+    return await db.consumers.where('searchWords').startsWithIgnoreCase(searchWords[0]).filter(c => {
       if (c.isDeleted) return false;
       if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
       if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
       
-      return c.consumer_number.includes(term) || 
-             c.consumer_name.toLowerCase().includes(term) ||
-             c.mobile.includes(term);
+      if (searchWords.length > 1) {
+        return searchWords.slice(1).every(word => 
+          c.searchWords && c.searchWords.some(sw => sw.startsWith(word))
+        );
+      }
+      return true;
     }).count();
   }, [debouncedSearch, filterStatus]);
 
