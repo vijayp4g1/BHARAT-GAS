@@ -30,24 +30,32 @@ export async function syncOfflineData() {
           console.error('Failed to sync consumer deletion:', error);
         }
       } else {
-        // Upsert to Supabase (handles both Create and Edit)
-        const { error } = await supabase
-          .from('consumers')
-          .upsert({
-            id: consumer.id,
-            consumer_number: consumer.consumer_number,
-            consumer_name: consumer.consumer_name,
-            mobile: consumer.mobile,
-            address: consumer.address,
-            verification_status: consumer.verification_status,
-            assigned_agent_id: user.id,
-            area_code: consumer.area_code,
-            created_at: consumer.created_at
+        // Upsert to Supabase (handles both Create and Edit) using RPC for conflict resolution
+        const { data, error } = await supabase
+          .rpc('sync_consumer', {
+            p_id: consumer.id,
+            p_consumer_number: consumer.consumer_number,
+            p_consumer_name: consumer.consumer_name,
+            p_mobile: consumer.mobile,
+            p_address: consumer.address,
+            p_verification_status: consumer.verification_status,
+            p_assigned_agent_id: user.id,
+            p_area_code: consumer.area_code,
+            p_created_at: consumer.created_at,
+            p_updated_at: consumer.updated_at || new Date().toISOString()
           });
 
-        if (!error) {
+        if (!error && data === true) {
           console.log(`Synced consumer ${consumer.consumer_number}`);
           await db.consumers.update(consumer.id, { synced: true });
+        } else if (!error && data === false) {
+           console.warn(`Sync conflict for consumer ${consumer.consumer_number}, server has newer data`);
+           // Fetch latest data and update local DB to resolve conflict
+           const { data: latestData } = await supabase.from('consumers').select('*').eq('id', consumer.id).single();
+           if (latestData) {
+             await db.consumers.put({ ...latestData, synced: true });
+             console.log(`Reverted local changes for consumer ${consumer.consumer_number} due to conflict.`);
+           }
         } else {
           console.error('Failed to sync consumer:', error);
         }

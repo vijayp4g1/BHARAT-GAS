@@ -140,7 +140,7 @@ export const ConsumerProfile = () => {
         latitude: pendingLocation.coords.latitude,
         longitude: pendingLocation.coords.longitude,
         accuracy: pendingLocation.coords.accuracy,
-        uploaded_by: 'agent-1', // Mock agent ID for now
+        uploaded_by: localStorage.getItem('bgcls_agent_id') || 'unknown',
         uploaded_at: new Date().toISOString(),
         synced: false 
       });
@@ -207,7 +207,7 @@ export const ConsumerProfile = () => {
         photo_data_url: compressedBase64,
         photo_type: typeStr, 
         status: 'Pending',
-        uploaded_by: 'agent-1',
+        uploaded_by: localStorage.getItem('bgcls_agent_id') || 'unknown',
         uploaded_at: new Date().toISOString(),
         synced: false
       });
@@ -365,7 +365,7 @@ export const ConsumerProfile = () => {
       await db.delivery_notes.add({
         consumer_id: id,
         note: newNote.trim(),
-        uploaded_by: 'agent-1',
+        uploaded_by: localStorage.getItem('bgcls_agent_id') || 'unknown',
         created_at: new Date().toISOString(),
         synced: false
       });

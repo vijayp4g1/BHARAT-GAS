@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { adminSupabase } from '../lib/adminSupabase';
 import { ArrowLeft, Loader2, UserPlus, Users, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -53,45 +52,30 @@ export const ManagerAgents = () => {
     setIsSubmitting(true);
     try {
       const safeUsername = username.toLowerCase().trim();
-      const dummyEmail = `${safeUsername}@bgcls.local`;
 
-      // 1. Create User securely via Admin API (doesn't log current manager out)
-      const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
-        email: dummyEmail,
-        password: password,
-        email_confirm: true // Auto confirm so they can log in immediately
-      });
-
-      if (authError) throw authError;
-
-      // 2. Insert into the agents table linked by the new Auth UUID
-      const { data: agentData, error: dbError } = await adminSupabase
-        .from('agents')
-        .insert({
-          id: authData.user.id, // Link the DB record to Auth ID
+      // Call the edge function securely
+      const { data, error } = await supabase.functions.invoke('create-agent', {
+        body: {
           name,
           username: safeUsername,
-          role,
-          status: 'ACTIVE'
-        })
-        .select()
-        .single();
+          password,
+          role
+        }
+      });
 
-      if (dbError) {
-        // Rollback auth user creation if DB insert fails
-        await adminSupabase.auth.admin.deleteUser(authData.user.id);
-        throw dbError;
+      if (error) {
+        throw new Error(error.message || 'Failed to create agent');
       }
 
       toast.success('Agent account created! They can now log in.');
       
-      setAgents([agentData, ...agents]);
+      setAgents([data, ...agents]);
       setName('');
       setUsername('');
       setPassword('');
     } catch (error: any) {
       console.error('Error creating agent:', error);
-      if (error.code === '23505' || error.message?.includes('already registered')) {
+      if (error.message?.includes('already registered')) {
         toast.error('This username already exists');
       } else {
         toast.error(error.message || 'Failed to create agent account');
@@ -129,15 +113,12 @@ export const ManagerAgents = () => {
 
   const executeDelete = async (id: string) => {
     try {
-      // Delete from DB
-      const { error: dbError } = await adminSupabase.from('agents').delete().eq('id', id);
+      // NOTE: For a full solution, a delete-agent edge function should be created.
+      // We will soft-delete the agent by setting their status for now.
+      const { error: dbError } = await supabase.from('agents').update({ status: 'DELETED' }).eq('id', id);
       if (dbError) throw dbError;
       
-      // Delete from Auth via Admin API
-      const { error: authError } = await adminSupabase.auth.admin.deleteUser(id);
-      if (authError) console.error('Failed to delete auth user, but db record removed', authError);
-      
-      toast.success('Agent completely deleted');
+      toast.success('Agent deleted (soft delete)');
       setAgents(agents.filter(a => a.id !== id));
     } catch (error) {
       console.error('Error deleting agent:', error);

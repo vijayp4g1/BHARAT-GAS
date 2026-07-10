@@ -9,6 +9,7 @@ export interface Consumer {
   verification_status: 'Pending' | 'Verified' | 'Rejected' | 'Not Collected';
   area_code?: string;
   created_at: string;
+  updated_at?: string;
   synced?: boolean;
   isDeleted?: boolean;
   has_location?: boolean;

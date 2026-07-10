@@ -64,6 +64,10 @@ export const Login = () => {
       });
 
       if (error) throw error;
+      
+      if (data?.user?.id) {
+        localStorage.setItem('bgcls_agent_id', data.user.id);
+      }
 
       if (role === 'AGENT') {
         const consumerCount = await db.consumers.count();

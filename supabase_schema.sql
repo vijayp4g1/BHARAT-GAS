@@ -22,8 +22,22 @@ CREATE TABLE consumers (
     verification_status TEXT NOT NULL DEFAULT 'Not Collected' CHECK (verification_status IN ('Not Collected', 'Pending', 'Verified', 'Rejected')),
     assigned_agent_id UUID REFERENCES agents(id),
     area_code TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Trigger to auto-update consumers updated_at
+CREATE OR REPLACE FUNCTION update_consumer_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_consumer_updated_at
+BEFORE UPDATE ON consumers
+FOR EACH ROW EXECUTE FUNCTION update_consumer_updated_at();
 
 CREATE TABLE consumer_locations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,6 +85,14 @@ CREATE TABLE audit_logs (
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE delivery_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consumer_id UUID REFERENCES consumers(id) NOT NULL,
+    note TEXT NOT NULL,
+    uploaded_by UUID REFERENCES agents(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Trigger for audit logging on location uploads
 CREATE OR REPLACE FUNCTION log_location_upload()
 RETURNS TRIGGER AS $$
@@ -92,6 +114,7 @@ ALTER TABLE consumers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE consumer_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE consumer_photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE delivery_notes ENABLE ROW LEVEL SECURITY;
 
 -- 3. Create basic RLS policies (allow all authenticated users for now for ease of development)
 CREATE POLICY "Allow authenticated read/write on consumers" ON consumers FOR ALL USING (auth.role() = 'authenticated');
@@ -99,6 +122,7 @@ CREATE POLICY "Allow authenticated read/write on locations" ON consumer_location
 CREATE POLICY "Allow authenticated read/write on photos" ON consumer_photos FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow authenticated read on agents" ON agents FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow authenticated read/write on audit_logs" ON audit_logs FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Allow authenticated read/write on delivery_notes" ON delivery_notes FOR ALL USING (auth.role() = 'authenticated');
 
 -- 4. Create Storage Bucket for photos
 INSERT INTO storage.buckets (id, name, public) VALUES ('consumer-photos', 'consumer-photos', true);
@@ -129,3 +153,59 @@ BEGIN
     WHERE l.location_point && ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)::geography;
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+-- Sync Consumer RPC for offline conflict resolution
+CREATE OR REPLACE FUNCTION sync_consumer(
+    p_id UUID,
+    p_consumer_number TEXT,
+    p_consumer_name TEXT,
+    p_mobile TEXT,
+    p_address TEXT,
+    p_verification_status TEXT,
+    p_assigned_agent_id UUID,
+    p_area_code TEXT,
+    p_created_at TIMESTAMP WITH TIME ZONE,
+    p_updated_at TIMESTAMP WITH TIME ZONE
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_existing_updated_at TIMESTAMP WITH TIME ZONE;
+BEGIN
+    -- Check if record exists and get its updated_at
+    SELECT updated_at INTO v_existing_updated_at
+    FROM consumers
+    WHERE id = p_id;
+
+    IF FOUND THEN
+        -- If local update is older than server update, reject it
+        IF v_existing_updated_at > p_updated_at THEN
+            RETURN FALSE; -- Conflict, local lost
+        ELSE
+            -- Update record
+            UPDATE consumers SET
+                consumer_number = p_consumer_number,
+                consumer_name = p_consumer_name,
+                mobile = p_mobile,
+                address = p_address,
+                verification_status = p_verification_status,
+                assigned_agent_id = p_assigned_agent_id,
+                area_code = p_area_code,
+                updated_at = p_updated_at
+            WHERE id = p_id;
+            RETURN TRUE;
+        END IF;
+    ELSE
+        -- Insert new record
+        INSERT INTO consumers (
+            id, consumer_number, consumer_name, mobile, address, 
+            verification_status, assigned_agent_id, area_code, 
+            created_at, updated_at
+        ) VALUES (
+            p_id, p_consumer_number, p_consumer_name, p_mobile, p_address,
+            p_verification_status, p_assigned_agent_id, p_area_code,
+            p_created_at, p_updated_at
+        );
+        RETURN TRUE;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
