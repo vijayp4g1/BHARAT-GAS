@@ -249,6 +249,7 @@ export const ConsumerProfile = () => {
   };
   
   const executeDelete = async (photoId: number) => {
+    if (!id) return;
     try {
       await db.consumer_photos.update(photoId, { isDeleted: true, synced: false });
       
@@ -292,6 +293,7 @@ export const ConsumerProfile = () => {
   };
   
   const executeDeleteLocation = async (locationId: number) => {
+    if (!id) return;
     try {
       await db.consumer_locations.update(locationId, { isDeleted: true, synced: false });
       
