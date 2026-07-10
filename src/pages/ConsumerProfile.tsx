@@ -40,12 +40,12 @@ export const ConsumerProfile = () => {
   , [id]);
 
   const photos = useLiveQuery(() => 
-    id ? db.consumer_photos.where({ consumer_id: id }).filter(p => !p.isDeleted).toArray() : undefined
-  , [id]);
+    id ? db.consumer_photos.where({ consumer_id: id }).filter(p => !p.isDeleted).toArray() : []
+  , [id]) || [];
 
   const notes = useLiveQuery(() => 
-    id ? db.delivery_notes.where({ consumer_id: id }).filter(n => !n.isDeleted).toArray() : undefined
-  , [id]);
+    id ? db.delivery_notes.where({ consumer_id: id }).filter(n => !n.isDeleted).toArray() : []
+  , [id]) || [];
 
   if (consumer === undefined) {
     return <div className="p-8 text-center text-slate-500">Loading...</div>;
@@ -423,7 +423,7 @@ export const ConsumerProfile = () => {
                   <div className="flex gap-2">
                     {hasLocation && (
                       <button 
-                        onClick={() => handleDeleteLocation(location.id)}
+                        onClick={() => handleDeleteLocation(location.id as number)}
                         className="p-2.5 rounded-xl bg-red-100 text-red-600 hover:bg-red-200 transition-colors shadow-sm"
                         title="Delete Location"
                       >
