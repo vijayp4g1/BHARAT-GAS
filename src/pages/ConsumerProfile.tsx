@@ -171,10 +171,10 @@ export const ConsumerProfile = () => {
         });
       }
       
-      toast.success('Photo saved!');
+      toast.success('Photo saved!', { duration: 3000 });
     } catch (error) {
       console.error('Failed to save compressed photo locally', error);
-      toast.error('Failed to process image. Please try again.');
+      toast.error('Failed to process image. Please try again.', { duration: 3000 });
     } finally {
       setIsCompressing(false);
     }
@@ -285,11 +285,11 @@ export const ConsumerProfile = () => {
         isDeleted: true,
         synced: false
       });
-      toast.success('Consumer deleted');
+      toast.success('Consumer deleted', { duration: 3000 });
       navigate(-1); // Go back to search/dashboard
     } catch (error) {
       console.error("Failed to delete consumer", error);
-      toast.error("Failed to delete consumer");
+      toast.error("Failed to delete consumer", { duration: 3000 });
     }
   };
 
@@ -305,10 +305,10 @@ export const ConsumerProfile = () => {
       });
       setNewNote('');
       setIsAddingNote(false);
-      toast.success('Note added successfully');
+      toast.success('Note added successfully', { duration: 3000 });
     } catch (error) {
       console.error("Failed to add note", error);
-      toast.error("Failed to add note");
+      toast.error("Failed to add note", { duration: 3000 });
     }
   };
 
@@ -483,6 +483,7 @@ export const ConsumerProfile = () => {
                   <input 
                     type="file" 
                     accept="image/*" 
+                    capture="environment"
                     className="hidden" 
                     onChange={handlePhotoCapture} 
                     disabled={isCompressing}
