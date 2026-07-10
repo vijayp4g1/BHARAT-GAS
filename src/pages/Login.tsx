@@ -14,14 +14,26 @@ export const Login = () => {
   
   const navigate = useNavigate();
 
-  // Load remembered username on mount
+  // Check session on mount
   React.useEffect(() => {
-    const savedUsername = localStorage.getItem('bgcls_remember_username');
-    if (savedUsername) {
-      setUsername(savedUsername);
-      setRememberMe(true);
-    }
-  }, []);
+    const checkSession = async () => {
+      const savedUsername = localStorage.getItem('bgcls_remember_username');
+      if (savedUsername) {
+        setUsername(savedUsername);
+        setRememberMe(true);
+      }
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && session.user) {
+        if (session.user.email?.includes('@bgcls.local')) {
+          navigate('/agent/search');
+        } else {
+          navigate('/manager/dashboard');
+        }
+      }
+    };
+    checkSession();
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,38 +66,43 @@ export const Login = () => {
       if (error) throw error;
 
       if (role === 'AGENT') {
-        toast.success('Agent logged in! Downloading data...');
-        // Hydrate offline database with consumers from Supabase in batches to bypass 1000 row limit
-        let allConsumers: any[] = [];
-        let from = 0;
-        const step = 1000;
-        let fetchMore = true;
+        const consumerCount = await db.consumers.count();
+        if (consumerCount === 0) {
+          toast.success('Agent logged in! Downloading data...');
+          // Hydrate offline database with consumers from Supabase in batches
+          let allConsumers: any[] = [];
+          let from = 0;
+          const step = 1000;
+          let fetchMore = true;
 
-        while (fetchMore) {
-          const { data, error } = await supabase
-            .from('consumers')
-            .select('*')
-            .range(from, from + step - 1);
+          while (fetchMore) {
+            const { data, error } = await supabase
+              .from('consumers')
+              .select('*')
+              .range(from, from + step - 1);
+              
+            if (error) {
+              console.error('Error fetching consumers:', error);
+              break;
+            }
             
-          if (error) {
-            console.error('Error fetching consumers:', error);
-            break;
+            if (data && data.length > 0) {
+              allConsumers = [...allConsumers, ...data];
+              from += step;
+            }
+            
+            if (!data || data.length < step) {
+              fetchMore = false;
+            }
           }
-          
-          if (data && data.length > 0) {
-            allConsumers = [...allConsumers, ...data];
-            from += step;
+            
+          if (allConsumers.length > 0) {
+            await db.consumers.clear(); 
+            await db.consumers.bulkAdd(allConsumers);
+            console.log(`Hydrated ${allConsumers.length} consumers into Dexie`);
           }
-          
-          if (!data || data.length < step) {
-            fetchMore = false;
-          }
-        }
-          
-        if (allConsumers.length > 0) {
-          await db.consumers.clear(); 
-          await db.consumers.bulkAdd(allConsumers);
-          console.log(`Hydrated ${allConsumers.length} consumers into Dexie`);
+        } else {
+          toast.success('Agent logged in! Local data ready.');
         }
         navigate('/agent/search');
       } else {

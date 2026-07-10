@@ -9,6 +9,7 @@ import db from '../lib/db';
 import { compressImage } from '../lib/imageUtils';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
+import { syncOfflineData } from '../lib/sync';
 
 // Fix Leaflet default marker
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -106,6 +107,7 @@ export const ConsumerProfile = () => {
         });
       }
       setPendingLocation(null);
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error('Failed to save location', error);
       setGpsError('Failed to save location locally.');
@@ -172,6 +174,7 @@ export const ConsumerProfile = () => {
       }
       
       toast.success('Photo saved!', { duration: 3000 });
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error('Failed to save compressed photo locally', error);
       toast.error('Failed to process image. Please try again.', { duration: 3000 });
@@ -210,6 +213,7 @@ export const ConsumerProfile = () => {
     try {
       await db.consumer_photos.update(photoId, { isDeleted: true, synced: false });
       toast.success('Photo deleted', { duration: 3000 });
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error("Failed to delete photo", error);
       toast.error("Failed to delete photo");
@@ -246,6 +250,7 @@ export const ConsumerProfile = () => {
     try {
       await db.consumer_locations.update(locationId, { isDeleted: true, synced: false });
       toast.success('Location deleted', { duration: 3000 });
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error("Failed to delete location", error);
       toast.error("Failed to delete location");
@@ -286,6 +291,7 @@ export const ConsumerProfile = () => {
         synced: false
       });
       toast.success('Consumer deleted', { duration: 3000 });
+      syncOfflineData().catch(console.error);
       navigate(-1); // Go back to search/dashboard
     } catch (error) {
       console.error("Failed to delete consumer", error);
@@ -306,6 +312,7 @@ export const ConsumerProfile = () => {
       setNewNote('');
       setIsAddingNote(false);
       toast.success('Note added successfully', { duration: 3000 });
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error("Failed to add note", error);
       toast.error("Failed to add note", { duration: 3000 });
@@ -316,6 +323,7 @@ export const ConsumerProfile = () => {
     try {
       await db.delivery_notes.update(noteId, { isDeleted: true, synced: false });
       toast.success('Note deleted', { duration: 3000 });
+      syncOfflineData().catch(console.error);
     } catch (error) {
       console.error("Failed to delete note", error);
       toast.error("Failed to delete note");
