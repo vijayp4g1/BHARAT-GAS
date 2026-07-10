@@ -10,6 +10,7 @@ import { compressImage } from '../lib/imageUtils';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { syncOfflineData } from '../lib/sync';
+import { supabase } from '../lib/supabase';
 
 // Fix Leaflet default marker
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -47,6 +48,41 @@ export const ConsumerProfile = () => {
   const notes = useLiveQuery(() => 
     id ? db.delivery_notes.where({ consumer_id: id }).filter(n => !n.isDeleted).toArray() : []
   , [id]) || [];
+
+  // Fetch latest data for this specific consumer from the cloud when online
+  React.useEffect(() => {
+    const fetchLatestData = async () => {
+      if (!id || !navigator.onLine) return;
+      
+      try {
+        // Fetch locations
+        const { data: locations } = await supabase.from('consumer_locations').select('*').eq('consumer_id', id);
+        if (locations && locations.length > 0) {
+          const formattedLocations = locations.map(l => ({ ...l, synced: true }));
+          await db.consumer_locations.bulkPut(formattedLocations);
+        }
+
+        // Fetch photos
+        const { data: photosData } = await supabase.from('consumer_photos').select('*').eq('consumer_id', id);
+        if (photosData && photosData.length > 0) {
+          const formattedPhotos = photosData.map(p => ({ ...p, synced: true }));
+          await db.consumer_photos.bulkPut(formattedPhotos);
+        }
+
+        // Fetch notes
+        const { data: notesData } = await supabase.from('delivery_notes').select('*').eq('consumer_id', id);
+        if (notesData && notesData.length > 0) {
+          const formattedNotes = notesData.map(n => ({ ...n, synced: true }));
+          await db.delivery_notes.bulkPut(formattedNotes);
+        }
+        
+      } catch (err) {
+        console.error('Failed to fetch latest consumer data from cloud:', err);
+      }
+    };
+    
+    fetchLatestData();
+  }, [id]);
 
   if (consumer === undefined) {
     return <div className="p-8 text-center text-slate-500">Loading...</div>;
