@@ -79,9 +79,9 @@ export const ManagerMap = () => {
   const [isFetching, setIsFetching] = useState(false);
   const [viewMode, setViewMode] = useState<'cluster' | 'heatmap'>('cluster');
 
-  // Default center (India roughly)
-  const center: [number, number] = [20.5937, 78.9629];
-  const zoom = 5;
+  // Default center (Hyderabad roughly)
+  const center: [number, number] = [17.3850, 78.4867];
+  const zoom = 11;
 
   return (
     <div className="min-h-screen bg-premium-gradient flex flex-col relative">
@@ -139,24 +139,44 @@ export const ManagerMap = () => {
               maxClusterRadius={40}
               spiderfyOnMaxZoom={true}
             >
-              {locations.map(loc => (
-                <Marker key={loc.consumer_id} position={[loc.latitude, loc.longitude]}>
-                  <Popup className="premium-popup">
-                    <div className="p-1">
-                      <h3 className="font-bold text-slate-800 text-sm mb-1">{loc.consumer_name}</h3>
-                      <p className="text-xs font-semibold text-blue-600 mb-2">#{loc.consumer_number}</p>
-                      <a 
-                        href={`https://www.google.com/maps/dir/?api=1&destination=${loc.latitude},${loc.longitude}`}
-                        target="_blank" rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                      >
-                        <MapPin size={12} />
-                        Open in Maps
-                      </a>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+              {locations.map(loc => {
+                const customIcon = L.divIcon({
+                  className: 'custom-map-marker',
+                  html: `
+                    <div class="marker-pin"></div>
+                    <div class="marker-pulse"></div>
+                  `,
+                  iconSize: [32, 32],
+                  iconAnchor: [16, 32],
+                  popupAnchor: [0, -32]
+                });
+
+                return (
+                  <Marker key={loc.consumer_id} position={[loc.latitude, loc.longitude]} icon={customIcon}>
+                    <Popup className="premium-popup">
+                      <div className="flex flex-col gap-2 p-1 min-w-[160px]">
+                        <div className="flex items-center gap-3 border-b border-slate-100 pb-2">
+                          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-lg shrink-0">
+                            {loc.consumer_name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-800 text-sm leading-tight">{loc.consumer_name}</h3>
+                            <p className="text-xs font-semibold text-slate-500">#{loc.consumer_number}</p>
+                          </div>
+                        </div>
+                        <a 
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${loc.latitude},${loc.longitude}`}
+                          target="_blank" rel="noreferrer"
+                          className="mt-1 flex items-center justify-center gap-1.5 w-full bg-gradient-to-r from-emerald-500 to-emerald-400 text-white font-bold px-3 py-2 rounded-xl shadow-md hover:from-emerald-600 hover:to-emerald-500 transition-all active:scale-95 text-xs"
+                        >
+                          <MapPin size={14} />
+                          Navigate
+                        </a>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
             </MarkerClusterGroup>
           )}
         </MapContainer>

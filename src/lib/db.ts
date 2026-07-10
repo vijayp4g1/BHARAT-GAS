@@ -13,6 +13,7 @@ export interface Consumer {
   isDeleted?: boolean;
   has_location?: boolean;
   has_photos?: boolean;
+  last_interacted_at?: string;
   searchWords?: string[];
 }
 
@@ -64,6 +65,10 @@ db.version(6).stores({
   consumer_locations: '++id, consumer_id, synced',
   consumer_photos: '++id, consumer_id, synced',
   delivery_notes: '++id, consumer_id, synced'
+});
+
+db.version(7).stores({
+  consumers: 'id, consumer_number, consumer_name, mobile, synced, isDeleted, last_interacted_at, *searchWords'
 });
 
 export default db;

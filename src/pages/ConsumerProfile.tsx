@@ -86,6 +86,13 @@ export const ConsumerProfile = () => {
     fetchLatestData();
   }, [id]);
 
+  // Update last_interacted_at when profile is viewed
+  React.useEffect(() => {
+    if (id && consumer) {
+      db.consumers.update(id, { last_interacted_at: new Date().toISOString() }).catch(console.error);
+    }
+  }, [id, consumer?.id]);
+
   if (consumer === undefined) {
     return <div className="p-8 text-center text-slate-500">Loading...</div>;
   }
@@ -558,10 +565,10 @@ export const ConsumerProfile = () => {
                   {photos.map((photo) => (
                     <div key={photo.id} className="relative w-24 h-24 rounded-xl overflow-hidden shadow-sm border border-slate-200/50 shrink-0 group">
                       <img 
-                        src={photo.photo_data_url} 
+                        src={photo.photo_data_url || photo.photo_url} 
                         alt="Consumer Upload" 
                         className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform" 
-                        onClick={() => setSelectedPhoto(photo.photo_data_url)}
+                        onClick={() => setSelectedPhoto(photo.photo_data_url || photo.photo_url || null)}
                       />
                       <button 
                         onClick={(e) => { e.stopPropagation(); if(photo.id) handleDeletePhoto(photo.id); }}

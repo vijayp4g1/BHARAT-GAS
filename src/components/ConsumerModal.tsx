@@ -54,7 +54,13 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
           address: formData.address,
           verification_status: 'Not Collected',
           created_at: new Date().toISOString(),
-          synced: false
+          synced: false,
+          searchWords: [
+            ...(formData.consumer_name ? formData.consumer_name.toLowerCase().split(/\s+/) : []),
+            ...(formData.consumer_number ? [formData.consumer_number.toLowerCase()] : []),
+            ...(formData.mobile ? [formData.mobile.toLowerCase()] : [])
+          ],
+          last_interacted_at: new Date().toISOString()
         });
         toast.success('Consumer added successfully!');
       } else {
@@ -64,7 +70,13 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
           consumer_name: formData.consumer_name,
           mobile: formData.mobile,
           address: formData.address,
-          synced: false
+          synced: false,
+          searchWords: [
+            ...(formData.consumer_name ? formData.consumer_name.toLowerCase().split(/\s+/) : []),
+            ...(formData.consumer_number ? [formData.consumer_number.toLowerCase()] : []),
+            ...(formData.mobile ? [formData.mobile.toLowerCase()] : [])
+          ],
+          last_interacted_at: new Date().toISOString()
         });
         toast.success('Consumer updated successfully!');
       }

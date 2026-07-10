@@ -100,10 +100,10 @@ export const Login = () => {
             const formattedConsumers = allConsumers.map(c => {
               const searchWords = [
                 ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
-                ...(c.consumer_number ? [c.consumer_number] : []),
-                ...(c.mobile ? [c.mobile] : [])
+                ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
+                ...(c.mobile ? [c.mobile.toLowerCase()] : [])
               ];
-              return { ...c, searchWords };
+              return { ...c, searchWords, last_interacted_at: c.created_at || new Date().toISOString() };
             });
             await db.consumers.clear(); 
             await db.consumers.bulkAdd(formattedConsumers);

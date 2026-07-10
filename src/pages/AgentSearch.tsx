@@ -55,13 +55,38 @@ export const AgentSearch = () => {
     const searchWords = term.split(/\s+/).filter(w => w.length > 0);
     
     if (searchWords.length === 0) {
-      // No search term: Fast scan with early exit (limit)
-      return await db.consumers.filter(c => {
-        if (c.isDeleted) return false;
-        if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
-        if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
-        return true;
-      }).limit(limit).toArray();
+      // Fetch consumers with last_interacted_at
+      let recent = await db.consumers
+        .orderBy('last_interacted_at')
+        .reverse()
+        .filter(c => {
+          if (c.isDeleted) return false;
+          if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+          if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+          return true;
+        })
+        .limit(limit)
+        .toArray();
+
+      if (recent.length < limit) {
+        const remainingLimit = limit - recent.length;
+        
+        // Fetch older consumers without last_interacted_at to fill the gap
+        let older = await db.consumers
+          .filter(c => {
+            if (c.isDeleted) return false;
+            if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+            if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+            if (c.last_interacted_at) return false; // Already included in recent
+            return true;
+          })
+          .limit(remainingLimit)
+          .toArray();
+          
+        return [...recent, ...older];
+      }
+      
+      return recent;
     }
     
     // Has search term: Use ultra-fast index
