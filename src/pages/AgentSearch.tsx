@@ -155,7 +155,11 @@ export const AgentSearch = () => {
         <div className="flex items-center gap-3 mb-4">
           <div className="relative group flex-1">
             <input 
-              type="text" 
+              type="search" 
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
               placeholder="Search Consumer No, Name, Mobile..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

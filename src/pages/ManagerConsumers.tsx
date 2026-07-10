@@ -83,7 +83,11 @@ export const ManagerConsumers = () => {
                 <Search size={18} className="text-blue-200" />
               </div>
               <input
-                type="text"
+                type="search"
+                inputMode="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                autoCorrect="off"
                 placeholder="Search name, number..."
                 value={searchQuery}
                 onChange={(e) => {
