@@ -24,6 +24,8 @@ export const AgentSearch = () => {
     navigate('/');
   };
 
+  const [isHydrating, setIsHydrating] = useState(false);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -34,6 +36,60 @@ export const AgentSearch = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Check if DB is empty and hydrate if needed (fixes 0 search results after clear cache)
+  useEffect(() => {
+    const hydrateIfNeeded = async () => {
+      if (!isOnline) return;
+      const count = await db.consumers.count();
+      if (count === 0) {
+        setIsHydrating(true);
+        try {
+          toast.loading('Downloading offline data...', { id: 'hydrate' });
+          let allConsumers: any[] = [];
+          let from = 0;
+          const step = 1000;
+          let fetchMore = true;
+
+          while (fetchMore) {
+            const { data, error } = await supabase
+              .from('manager_consumer_summary')
+              .select('*')
+              .range(from, from + step - 1);
+              
+            if (error) break;
+            if (data && data.length > 0) {
+              allConsumers = [...allConsumers, ...data];
+              from += step;
+            }
+            if (!data || data.length < step) {
+              fetchMore = false;
+            }
+          }
+            
+          if (allConsumers.length > 0) {
+            const formattedConsumers = allConsumers.map(c => {
+              const searchWords = [
+                ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
+                ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
+                ...(c.mobile ? [c.mobile.toLowerCase()] : [])
+              ];
+              return { ...c, searchWords, last_interacted_at: c.created_at || new Date().toISOString() };
+            });
+            await db.consumers.bulkAdd(formattedConsumers);
+            toast.success('App ready for offline use!', { id: 'hydrate' });
+          } else {
+            toast.dismiss('hydrate');
+          }
+        } catch (e) {
+          toast.error('Failed to download data.', { id: 'hydrate' });
+        } finally {
+          setIsHydrating(false);
+        }
+      }
+    };
+    hydrateIfNeeded();
+  }, [isOnline]);
 
   // Debounce search to prevent UI freezing on every keystroke
   useEffect(() => {
