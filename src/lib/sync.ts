@@ -59,7 +59,13 @@ export async function syncOfflineData() {
     for (const loc of unsyncedLocations) {
       if (loc.id) {
         if (loc.isDeleted) {
-          const { error } = await supabase.from('consumer_locations').delete().eq('consumer_id', loc.consumer_id).eq('uploaded_at', loc.uploaded_at);
+          let query = supabase.from('consumer_locations').delete().eq('consumer_id', loc.consumer_id);
+          if (typeof loc.id === 'string') {
+            query = query.eq('id', loc.id);
+          } else {
+            query = query.eq('uploaded_at', loc.uploaded_at);
+          }
+          const { error } = await query;
           if (!error) {
             console.log(`Synced deletion of location for consumer ${loc.consumer_id}`);
             await db.consumer_locations.delete(loc.id);
@@ -93,7 +99,27 @@ export async function syncOfflineData() {
     for (const photo of unsyncedPhotos) {
       if (photo.id) {
         if (photo.isDeleted) {
-          const { error } = await supabase.from('consumer_photos').delete().eq('consumer_id', photo.consumer_id).eq('uploaded_at', photo.uploaded_at);
+          // Extract filename from photo_url to delete from storage bucket
+          // Expected URL format: .../storage/v1/object/public/consumer-photos/CONSUMER_ID/TIMESTAMP-TYPE.jpg
+          try {
+            if (photo.photo_url) {
+              const urlParts = photo.photo_url.split('/consumer-photos/');
+              if (urlParts.length > 1) {
+                const fileName = urlParts[1];
+                await supabase.storage.from('consumer-photos').remove([fileName]);
+              }
+            }
+          } catch (e) {
+            console.error('Failed to delete photo from storage:', e);
+          }
+
+          let query = supabase.from('consumer_photos').delete().eq('consumer_id', photo.consumer_id);
+          if (typeof photo.id === 'string') {
+            query = query.eq('id', photo.id);
+          } else {
+            query = query.eq('uploaded_at', photo.uploaded_at);
+          }
+          const { error } = await query;
           if (!error) {
             console.log(`Synced deletion of photo for consumer ${photo.consumer_id}`);
             await db.consumer_photos.delete(photo.id);
@@ -150,7 +176,13 @@ export async function syncOfflineData() {
     for (const note of unsyncedNotes) {
       if (note.id) {
         if (note.isDeleted) {
-          const { error } = await supabase.from('delivery_notes').delete().eq('consumer_id', note.consumer_id).eq('created_at', note.created_at);
+          let query = supabase.from('delivery_notes').delete().eq('consumer_id', note.consumer_id);
+          if (typeof note.id === 'string') {
+            query = query.eq('id', note.id);
+          } else {
+            query = query.eq('created_at', note.created_at);
+          }
+          const { error } = await query;
           if (!error) {
             console.log(`Synced deletion of note for consumer ${note.consumer_id}`);
             await db.delivery_notes.delete(note.id);

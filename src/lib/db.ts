@@ -31,6 +31,7 @@ export interface ConsumerPhoto {
   id?: number;
   consumer_id: string;
   photo_data_url: string; // Base64 for offline storage
+  photo_url?: string;     // URL from Supabase storage
   photo_type: string;
   status: 'Pending' | 'Approved' | 'Rejected';
   uploaded_by: string;
