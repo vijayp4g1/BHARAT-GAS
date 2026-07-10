@@ -100,12 +100,9 @@ export const ConsumerProfile = () => {
         synced: false 
       });
       
-      const hasPhotos = await db.consumer_photos.where({ consumer_id: id }).count() > 0;
-      if (hasPhotos) {
-        await db.consumers.update(id, {
-          verification_status: 'Pending'
-        });
-      }
+      // Update consumer status locally
+      await db.consumers.update(id, { verification_status: 'Pending', synced: false });
+      
       setPendingLocation(null);
       syncOfflineData().catch(console.error);
     } catch (error) {
@@ -166,12 +163,8 @@ export const ConsumerProfile = () => {
         synced: false
       });
       
-      const hasLocation = await db.consumer_locations.where({ consumer_id: id }).count() > 0;
-      if (hasLocation) {
-        await db.consumers.update(id, {
-          verification_status: 'Pending'
-        });
-      }
+      // Update consumer status locally
+      await db.consumers.update(id, { verification_status: 'Pending', synced: false });
       
       toast.success('Photo saved!', { duration: 3000 });
       syncOfflineData().catch(console.error);
