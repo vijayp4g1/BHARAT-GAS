@@ -50,32 +50,35 @@ export const AgentSearch = () => {
 
   // Use Dexie live query to fetch and filter consumers with limit for infinite scroll
   const consumers = useLiveQuery(async () => {
-    let collection = db.consumers.filter(c => !c.isDeleted);
+    let collection = db.consumers.filter(c => {
+      if (c.isDeleted) return false;
+      
+      if (filterStatus === 'completed') {
+        return !!(c.has_location && c.has_photos);
+      } else if (filterStatus === 'pending') {
+        return !(c.has_location && c.has_photos);
+      }
+      return true;
+    });
     
     // Quick filter if no search term
     if (!debouncedSearch) {
-      if (filterStatus === 'completed') {
-        collection = collection.filter(c => !!(c.has_location && c.has_photos));
-      } else if (filterStatus === 'pending') {
-        collection = collection.filter(c => !(c.has_location && c.has_photos));
-      }
       return await collection.limit(limit).toArray();
     }
     
     const term = debouncedSearch.toLowerCase().trim();
     
-    // If there is a search term, we must filter all matches then limit
-    let results = await collection.filter(c => 
-      c.consumer_number.includes(term) || 
-      c.consumer_name.toLowerCase().includes(term) ||
-      c.mobile.includes(term)
-    ).toArray();
-
-    if (filterStatus === 'completed') {
-      results = results.filter(c => !!(c.has_location && c.has_photos));
-    } else if (filterStatus === 'pending') {
-      results = results.filter(c => !(c.has_location && c.has_photos));
-    }
+    // If there is a search term, we already filtered by status above, just filter by term
+    let results = await collection.filter(c => {
+      // Re-apply status filter because filter() overwrites previous filters in Dexie
+      if (c.isDeleted) return false;
+      if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+      if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+      
+      return c.consumer_number.includes(term) || 
+             c.consumer_name.toLowerCase().includes(term) ||
+             c.mobile.includes(term);
+    }).toArray();
 
     // Sort by relevance
     return results.sort((a, b) => {
@@ -96,24 +99,27 @@ export const AgentSearch = () => {
 
   // Total count for the results header (only count up to a reasonable number to avoid slow downs)
   const totalCount = useLiveQuery(async () => {
-    let collection = db.consumers.filter(c => !c.isDeleted);
-    
-    if (filterStatus === 'completed') {
-      collection = collection.filter(c => !!(c.has_location && c.has_photos));
-    } else if (filterStatus === 'pending') {
-      collection = collection.filter(c => !(c.has_location && c.has_photos));
-    }
+    let collection = db.consumers.filter(c => {
+      if (c.isDeleted) return false;
+      if (filterStatus === 'completed') return !!(c.has_location && c.has_photos);
+      if (filterStatus === 'pending') return !(c.has_location && c.has_photos);
+      return true;
+    });
 
     if (!debouncedSearch) {
       return await collection.count();
     }
     
     const term = debouncedSearch.toLowerCase().trim();
-    return await collection.filter(c => 
-      c.consumer_number.includes(term) || 
-      c.consumer_name.toLowerCase().includes(term) ||
-      c.mobile.includes(term)
-    ).count();
+    return await db.consumers.filter(c => {
+      if (c.isDeleted) return false;
+      if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+      if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+      
+      return c.consumer_number.includes(term) || 
+             c.consumer_name.toLowerCase().includes(term) ||
+             c.mobile.includes(term);
+    }).count();
   }, [debouncedSearch, filterStatus]);
 
   // Intersection Observer for Infinite Scrolling
