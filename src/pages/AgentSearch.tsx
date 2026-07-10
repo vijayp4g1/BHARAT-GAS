@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Search, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { ConsumerCard } from '../components/ConsumerCard';
 import { ConsumerModal } from '../components/ConsumerModal';
@@ -164,15 +164,30 @@ export const AgentSearch = () => {
     };
   }, [observerTarget.current]);
 
+  const handleClearCache = async () => {
+    toast.loading('Checking for updates...');
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        await registration.unregister();
+      }
+    }
+    // Force a hard reload from the server
+    window.location.reload();
+  };
+
   return (
     <div className="min-h-screen bg-premium-gradient flex flex-col">
       <header className="glass-header text-white p-5 sticky top-0 z-10">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">SIDDHARTHA BHARAT GAS</h1>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5 text-sm font-medium bg-white/10 px-2.5 py-1 rounded-full border border-white/10">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate mr-2">SIDDHARTHA BHARAT GAS</h1>
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <button onClick={handleClearCache} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/10 shadow-sm" title="Force App Update">
+              <RefreshCw size={16} className="text-white" />
+            </button>
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-medium bg-white/10 px-2.5 py-1 rounded-full border border-white/10">
               {isOnline ? <Wifi size={14} className="text-green-400" /> : <WifiOff size={14} className="text-red-400" />}
-              {isOnline ? 'Online' : 'Offline'}
+              <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
             </span>
             <button onClick={handleLogout} className="text-sm font-medium text-white/80 hover:text-white transition-colors cursor-pointer">Logout</button>
           </div>
