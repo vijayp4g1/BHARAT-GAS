@@ -11,6 +11,8 @@ export interface Consumer {
   created_at: string;
   synced?: boolean;
   isDeleted?: boolean;
+  has_location?: boolean;
+  has_photos?: boolean;
 }
 
 export interface ConsumerLocation {

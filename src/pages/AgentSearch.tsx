@@ -55,11 +55,9 @@ export const AgentSearch = () => {
     // Quick filter if no search term
     if (!debouncedSearch) {
       if (filterStatus === 'completed') {
-        // For performance, assume Verified means completed. 
-        // Pending means they uploaded something, which counts as locally completed until synced.
-        collection = collection.filter(c => c.verification_status === 'Verified' || c.verification_status === 'Pending');
+        collection = collection.filter(c => !!(c.has_location && c.has_photos));
       } else if (filterStatus === 'pending') {
-        collection = collection.filter(c => c.verification_status !== 'Verified' && c.verification_status !== 'Pending');
+        collection = collection.filter(c => !(c.has_location && c.has_photos));
       }
       return await collection.limit(limit).toArray();
     }
@@ -74,9 +72,9 @@ export const AgentSearch = () => {
     ).toArray();
 
     if (filterStatus === 'completed') {
-      results = results.filter(c => c.verification_status === 'Verified' || c.verification_status === 'Pending');
+      results = results.filter(c => !!(c.has_location && c.has_photos));
     } else if (filterStatus === 'pending') {
-      results = results.filter(c => c.verification_status !== 'Verified' && c.verification_status !== 'Pending');
+      results = results.filter(c => !(c.has_location && c.has_photos));
     }
 
     // Sort by relevance
@@ -101,9 +99,9 @@ export const AgentSearch = () => {
     let collection = db.consumers.filter(c => !c.isDeleted);
     
     if (filterStatus === 'completed') {
-      collection = collection.filter(c => c.verification_status === 'Verified' || c.verification_status === 'Pending');
+      collection = collection.filter(c => !!(c.has_location && c.has_photos));
     } else if (filterStatus === 'pending') {
-      collection = collection.filter(c => c.verification_status !== 'Verified' && c.verification_status !== 'Pending');
+      collection = collection.filter(c => !(c.has_location && c.has_photos));
     }
 
     if (!debouncedSearch) {

@@ -60,6 +60,7 @@ export const ConsumerProfile = () => {
         if (locations && locations.length > 0) {
           const formattedLocations = locations.map(l => ({ ...l, synced: true }));
           await db.consumer_locations.bulkPut(formattedLocations);
+          await db.consumers.update(id, { has_location: true });
         }
 
         // Fetch photos
@@ -67,6 +68,7 @@ export const ConsumerProfile = () => {
         if (photosData && photosData.length > 0) {
           const formattedPhotos = photosData.map(p => ({ ...p, synced: true }));
           await db.consumer_photos.bulkPut(formattedPhotos);
+          await db.consumers.update(id, { has_photos: true });
         }
 
         // Fetch notes
@@ -137,7 +139,11 @@ export const ConsumerProfile = () => {
       });
       
       // Update consumer status locally
-      await db.consumers.update(id, { verification_status: 'Pending', synced: false });
+      await db.consumers.update(id, { 
+        verification_status: 'Pending', 
+        has_location: true,
+        synced: false 
+      });
       
       setPendingLocation(null);
       syncOfflineData().catch(console.error);
@@ -200,7 +206,11 @@ export const ConsumerProfile = () => {
       });
       
       // Update consumer status locally
-      await db.consumers.update(id, { verification_status: 'Pending', synced: false });
+      await db.consumers.update(id, { 
+        verification_status: 'Pending', 
+        has_photos: true,
+        synced: false 
+      });
       
       toast.success('Photo saved!', { duration: 3000 });
       syncOfflineData().catch(console.error);
@@ -241,6 +251,12 @@ export const ConsumerProfile = () => {
   const executeDelete = async (photoId: number) => {
     try {
       await db.consumer_photos.update(photoId, { isDeleted: true, synced: false });
+      
+      const remainingPhotos = await db.consumer_photos.where({ consumer_id: id }).filter(p => !p.isDeleted).count();
+      if (remainingPhotos === 0) {
+        await db.consumers.update(id, { has_photos: false });
+      }
+      
       toast.success('Photo deleted', { duration: 3000 });
       syncOfflineData().catch(console.error);
     } catch (error) {
@@ -278,6 +294,12 @@ export const ConsumerProfile = () => {
   const executeDeleteLocation = async (locationId: number) => {
     try {
       await db.consumer_locations.update(locationId, { isDeleted: true, synced: false });
+      
+      const remainingLocations = await db.consumer_locations.where({ consumer_id: id }).filter(l => !l.isDeleted).count();
+      if (remainingLocations === 0) {
+        await db.consumers.update(id, { has_location: false });
+      }
+      
       toast.success('Location deleted', { duration: 3000 });
       syncOfflineData().catch(console.error);
     } catch (error) {

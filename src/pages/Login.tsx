@@ -77,7 +77,7 @@ export const Login = () => {
 
           while (fetchMore) {
             const { data, error } = await supabase
-              .from('consumers')
+              .from('manager_consumer_summary')
               .select('*')
               .range(from, from + step - 1);
               
