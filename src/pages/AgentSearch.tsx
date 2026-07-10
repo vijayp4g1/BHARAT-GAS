@@ -65,7 +65,7 @@ export const AgentSearch = () => {
     }
     
     // Has search term: Use ultra-fast index
-    let baseCollection = db.consumers.where('searchWords').startsWithIgnoreCase(searchWords[0]);
+    let baseCollection = db.consumers.where('searchWords').startsWith(searchWords[0]);
     
     // Apply remaining filters
     let results = await baseCollection.filter(c => {
@@ -105,7 +105,7 @@ export const AgentSearch = () => {
       }).count();
     }
     
-    return await db.consumers.where('searchWords').startsWithIgnoreCase(searchWords[0]).filter(c => {
+    return await db.consumers.where('searchWords').startsWith(searchWords[0]).filter(c => {
       if (c.isDeleted) return false;
       if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
       if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
