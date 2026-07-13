@@ -86,9 +86,13 @@ export const ManagerMap = () => {
     if (!showAgents) return;
 
     const fetchAgents = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('agent_locations')
         .select('*, agents(name)');
+      
+      if (error) {
+        console.error('Error fetching agent locations:', error);
+      }
       
       if (data) {
         const locationsMap = data.reduce((acc: any, curr: any) => {
@@ -105,7 +109,10 @@ export const ManagerMap = () => {
       .channel('agent_tracking')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_locations' }, async (payload) => {
         const newLocation = payload.new as any;
-        const { data } = await supabase.from('agents').select('name').eq('id', newLocation.agent_id).single();
+        const { data, error } = await supabase.from('agents').select('name').eq('id', newLocation.agent_id).single();
+        if (error) {
+           console.error('Error fetching agent name on realtime update:', error);
+        }
         if (data) {
            newLocation.agents = { name: data.name };
         }

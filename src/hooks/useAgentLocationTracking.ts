@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import toast from 'react-hot-toast';
 
 export function useAgentLocationTracking() {
   useEffect(() => {
@@ -37,7 +38,7 @@ export function useAgentLocationTracking() {
           const { latitude, longitude } = position.coords;
 
           try {
-            await supabase
+            const { error } = await supabase
               .from('agent_locations')
               .upsert({
                 agent_id: agentId,
@@ -45,6 +46,12 @@ export function useAgentLocationTracking() {
                 longitude,
                 updated_at: new Date().toISOString()
               }, { onConflict: 'agent_id' });
+              
+            if (error) {
+              console.error('Failed to update agent location in DB:', error);
+            } else {
+              console.log('Successfully updated agent location in DB:', latitude, longitude);
+            }
           } catch (error) {
             console.error('Failed to update agent location:', error);
           }
