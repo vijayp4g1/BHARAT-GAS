@@ -237,7 +237,10 @@ export const ManagerMap = () => {
           )}
 
           {/* Render Agents */}
-          {showAgents && Object.values(agentLocations).map((agent: any) => {
+          {showAgents && Object.values(agentLocations).filter((agent: any) => {
+            const ACTIVE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+            return Date.now() - new Date(agent.updated_at).getTime() < ACTIVE_THRESHOLD_MS;
+          }).map((agent: any) => {
             const agentIcon = L.divIcon({
               className: 'custom-agent-marker',
               html: `
@@ -274,7 +277,7 @@ export const ManagerMap = () => {
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
           <div className="bg-white/90 backdrop-blur-md border border-white/50 shadow-lg px-4 py-2 rounded-full flex items-center gap-2 pointer-events-auto">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-sm font-bold text-slate-700">Showing {locations.length} consumers {showAgents ? `and ${Object.keys(agentLocations).length} agents` : ''} in view</span>
+            <span className="text-sm font-bold text-slate-700">Showing {locations.length} consumers {showAgents ? `and ${Object.values(agentLocations).filter((agent: any) => Date.now() - new Date(agent.updated_at).getTime() < 15 * 60 * 1000).length} agents` : ''} in view</span>
           </div>
         </div>
       </main>
