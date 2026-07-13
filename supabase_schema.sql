@@ -209,3 +209,31 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 6. Real-time Agent Location Tracking
+CREATE TABLE agent_locations (
+    agent_id UUID PRIMARY KEY REFERENCES agents(id),
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- RLS for agent_locations
+ALTER TABLE agent_locations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Agents can update own location" 
+ON agent_locations FOR ALL 
+USING (auth.uid() = agent_id);
+
+CREATE POLICY "Managers can view agent locations" 
+ON agent_locations FOR SELECT 
+USING (
+    EXISTS (
+        SELECT 1 FROM agents 
+        WHERE id = auth.uid() AND role = 'MANAGER'
+    )
+);
+
+-- Enable Realtime for agent_locations
+-- Supabase requires this to push changes over WebSockets
+ALTER PUBLICATION supabase_realtime ADD TABLE agent_locations;

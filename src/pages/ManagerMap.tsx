@@ -6,7 +6,7 @@ import MarkerClusterGroup from 'react-leaflet-cluster';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import 'leaflet.heat';
-import { ArrowLeft, Loader2, MapPin, Layers, Flame } from 'lucide-react';
+import { ArrowLeft, Loader2, MapPin, Layers, Flame, Navigation, Truck } from 'lucide-react';
 
 // Fix for default marker icons in React-Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -78,6 +78,48 @@ export const ManagerMap = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [viewMode, setViewMode] = useState<'cluster' | 'heatmap'>('cluster');
+  
+  const [showAgents, setShowAgents] = useState(false);
+  const [agentLocations, setAgentLocations] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    if (!showAgents) return;
+
+    const fetchAgents = async () => {
+      const { data } = await supabase
+        .from('agent_locations')
+        .select('*, agents(name)');
+      
+      if (data) {
+        const locationsMap = data.reduce((acc: any, curr: any) => {
+          acc[curr.agent_id] = curr;
+          return acc;
+        }, {});
+        setAgentLocations(locationsMap);
+      }
+    };
+
+    fetchAgents();
+
+    const channel = supabase
+      .channel('agent_tracking')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_locations' }, async (payload) => {
+        const newLocation = payload.new as any;
+        const { data } = await supabase.from('agents').select('name').eq('id', newLocation.agent_id).single();
+        if (data) {
+           newLocation.agents = { name: data.name };
+        }
+        setAgentLocations(prev => ({
+          ...prev,
+          [newLocation.agent_id]: newLocation
+        }));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [showAgents]);
 
   // Default center (Hyderabad roughly)
   const center: [number, number] = [17.3850, 78.4867];
@@ -106,6 +148,13 @@ export const ManagerMap = () => {
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'heatmap' ? 'bg-white text-orange-600 shadow-sm' : 'text-white/80 hover:text-white'}`}
             >
               <Flame size={16} /> Heatmap
+            </button>
+            <div className="w-px h-6 bg-white/20 mx-1"></div>
+            <button 
+              onClick={() => setShowAgents(!showAgents)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${showAgents ? 'bg-indigo-600 text-white shadow-sm' : 'text-white/80 hover:text-white'}`}
+            >
+              <Truck size={16} /> Agents
             </button>
           </div>
           
@@ -179,12 +228,46 @@ export const ManagerMap = () => {
               })}
             </MarkerClusterGroup>
           )}
+
+          {/* Render Agents */}
+          {showAgents && Object.values(agentLocations).map((agent: any) => {
+            const agentIcon = L.divIcon({
+              className: 'custom-agent-marker',
+              html: `
+                <div style="background-color: #4f46e5; width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3"/><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5"/><path d="M14 17h1"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+                </div>
+                <div class="marker-pulse" style="background-color: #4f46e5; opacity: 0.3;"></div>
+              `,
+              iconSize: [32, 32],
+              iconAnchor: [16, 16],
+              popupAnchor: [0, -16]
+            });
+
+            return (
+              <Marker key={agent.agent_id} position={[agent.latitude, agent.longitude]} icon={agentIcon}>
+                <Popup className="premium-popup">
+                  <div className="flex flex-col gap-2 p-1 min-w-[140px]">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-2">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+                        {agent.agents?.name?.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-sm leading-tight">{agent.agents?.name}</h3>
+                        <p className="text-xs font-semibold text-indigo-600">Active Now</p>
+                      </div>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
         </MapContainer>
         
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
           <div className="bg-white/90 backdrop-blur-md border border-white/50 shadow-lg px-4 py-2 rounded-full flex items-center gap-2 pointer-events-auto">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-sm font-bold text-slate-700">Showing {locations.length} consumers in view</span>
+            <span className="text-sm font-bold text-slate-700">Showing {locations.length} consumers {showAgents ? `and ${Object.keys(agentLocations).length} agents` : ''} in view</span>
           </div>
         </div>
       </main>

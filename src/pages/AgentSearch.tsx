@@ -7,8 +7,10 @@ import { ConsumerModal } from '../components/ConsumerModal';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 
 export const AgentSearch = () => {
+  useAgentLocationTracking();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
