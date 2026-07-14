@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { syncOfflineData } from '../lib/sync';
 import { supabase } from '../lib/supabase';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 
 // Fix Leaflet default marker
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -32,6 +33,9 @@ export const ConsumerProfile = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [newNote, setNewNote] = useState('');
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const [photoToDelete, setPhotoToDelete] = useState<number | null>(null);
+  const [locationToDelete, setLocationToDelete] = useState<number | null>(null);
+  const [consumerToDelete, setConsumerToDelete] = useState(false);
 
   const consumer = useLiveQuery(() => 
     id ? db.consumers.get(id) : undefined
@@ -234,31 +238,9 @@ export const ConsumerProfile = () => {
   };
 
   const handleDeletePhoto = (photoId: number) => {
-    toast((t) => (
-      <div className="flex flex-col gap-3">
-        <p className="font-bold text-slate-800">Delete this photo?</p>
-        <p className="text-sm text-slate-500">This action cannot be undone.</p>
-        <div className="flex gap-2 mt-1">
-          <button 
-            onClick={() => {
-              toast.dismiss(t.id);
-              executeDelete(photoId);
-            }} 
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold flex-1 transition-colors shadow-md"
-          >
-            Delete
-          </button>
-          <button 
-            onClick={() => toast.dismiss(t.id)} 
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold flex-1 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    ), { duration: Infinity });
+    setPhotoToDelete(photoId);
   };
-  
+
   const executeDelete = async (photoId: number) => {
     if (!id) return;
     try {
@@ -278,29 +260,7 @@ export const ConsumerProfile = () => {
   };
 
   const handleDeleteLocation = (locationId: number) => {
-    toast((t) => (
-      <div className="flex flex-col gap-3">
-        <p className="font-bold text-slate-800">Delete this GPS location?</p>
-        <p className="text-sm text-slate-500">This action cannot be undone.</p>
-        <div className="flex gap-2 mt-1">
-          <button 
-            onClick={() => {
-              toast.dismiss(t.id);
-              executeDeleteLocation(locationId);
-            }} 
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold flex-1 transition-colors shadow-md"
-          >
-            Delete
-          </button>
-          <button 
-            onClick={() => toast.dismiss(t.id)} 
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold flex-1 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    ), { duration: Infinity });
+    setLocationToDelete(locationId);
   };
   
   const executeDeleteLocation = async (locationId: number) => {
@@ -322,29 +282,7 @@ export const ConsumerProfile = () => {
   };
 
   const handleDeleteConsumer = () => {
-    toast((t) => (
-      <div className="flex flex-col gap-3">
-        <p className="font-bold text-slate-800">Delete this consumer?</p>
-        <p className="text-sm text-slate-500">This action will mark the consumer as deleted.</p>
-        <div className="flex gap-2 mt-1">
-          <button 
-            onClick={() => {
-              toast.dismiss(t.id);
-              executeDeleteConsumer();
-            }} 
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold flex-1 transition-colors shadow-md"
-          >
-            Delete
-          </button>
-          <button 
-            onClick={() => toast.dismiss(t.id)} 
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold flex-1 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    ), { duration: Infinity });
+    setConsumerToDelete(true);
   };
   
   const executeDeleteConsumer = async () => {
@@ -424,10 +362,40 @@ export const ConsumerProfile = () => {
         </div>
       </header>
 
-      <ConsumerModal 
-        isOpen={isEditModalOpen} 
-        onClose={() => setIsEditModalOpen(false)} 
-        initialData={consumer}
+      <ConsumerModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} consumerToEdit={consumer} />
+
+      <ConfirmationModal
+        isOpen={photoToDelete !== null}
+        onClose={() => setPhotoToDelete(null)}
+        onConfirm={() => {
+          if (photoToDelete !== null) executeDelete(photoToDelete);
+        }}
+        title="Delete this photo?"
+        message="This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+      />
+
+      <ConfirmationModal
+        isOpen={locationToDelete !== null}
+        onClose={() => setLocationToDelete(null)}
+        onConfirm={() => {
+          if (locationToDelete !== null) executeDeleteLocation(locationToDelete);
+        }}
+        title="Delete this location?"
+        message="This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+      />
+      
+      <ConfirmationModal
+        isOpen={consumerToDelete}
+        onClose={() => setConsumerToDelete(false)}
+        onConfirm={executeDeleteConsumer}
+        title="Delete this consumer?"
+        message="This action will mark the consumer as deleted."
+        confirmText="Delete"
+        cancelText="Cancel"
       />
 
       <main className="p-4 sm:p-6 space-y-6 max-w-4xl mx-auto w-full relative z-10">
