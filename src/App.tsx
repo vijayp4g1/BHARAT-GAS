@@ -22,7 +22,14 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Toaster position="top-center" toastOptions={{ duration: 3000 }} />
+      <Toaster 
+        position="top-center" 
+        toastOptions={{ duration: 3000 }} 
+        containerStyle={{
+          top: '50%',
+          transform: 'translateY(-50%)'
+        }}
+      />
       <Routes>
         <Route path="/" element={<Login />} />
         
