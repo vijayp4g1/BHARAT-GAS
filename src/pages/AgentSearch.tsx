@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Wifi, WifiOff, Loader2, RefreshCw } from 'lucide-react';
-import db, { type Consumer } from '../lib/db';
+import { Search, Wifi, WifiOff, Loader2, RefreshCw, Database, Users } from 'lucide-react';
+import db from '../lib/db';
 import { ConsumerCard } from '../components/ConsumerCard';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -19,14 +19,14 @@ export const AgentSearch = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [limit, setLimit] = useState(20);
   const observerTarget = useRef(null);
+  const [isHydrating, setIsHydrating] = useState(false);
+  const [hydrationProgress, setHydrationProgress] = useState(0);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     toast.success('Logged out successfully');
     navigate('/');
   };
-
-  const [isHydrating, setIsHydrating] = useState(false);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -47,7 +47,9 @@ export const AgentSearch = () => {
       if (count === 0) {
         setIsHydrating(true);
         try {
-          toast.loading('Downloading offline data...', { id: 'hydrate' });
+          const { count: totalRemote } = await supabase.from('manager_consumer_summary').select('*', { count: 'exact', head: true });
+          const totalToFetch = totalRemote || 10000;
+          
           let allConsumers: any[] = [];
           let from = 0;
           const step = 1000;
@@ -63,6 +65,7 @@ export const AgentSearch = () => {
             if (data && data.length > 0) {
               allConsumers = [...allConsumers, ...data];
               from += step;
+              setHydrationProgress(Math.min(100, Math.round((allConsumers.length / totalToFetch) * 100)));
             }
             if (!data || data.length < step) {
               fetchMore = false;
@@ -79,12 +82,10 @@ export const AgentSearch = () => {
               return { ...c, searchWords, last_interacted_at: c.created_at || new Date().toISOString() };
             });
             await db.consumers.bulkAdd(formattedConsumers);
-            toast.success('App ready for offline use!', { id: 'hydrate' });
-          } else {
-            toast.dismiss('hydrate');
+            console.log(`Hydrated ${allConsumers.length} consumers from background sync`);
           }
-        } catch (e) {
-          toast.error('Failed to download data.', { id: 'hydrate' });
+        } catch (_e) {
+          toast.error('Failed to download data.');
         } finally {
           setIsHydrating(false);
         }
@@ -106,7 +107,6 @@ export const AgentSearch = () => {
     setLimit(20);
   }, [debouncedSearch, filterStatus]);
 
-  // Use Dexie live query to fetch and filter consumers with limit for infinite scroll
   // Use Dexie live query to fetch and filter consumers with limit for infinite scroll
   const consumers = useLiveQuery(async () => {
     const term = debouncedSearch.toLowerCase().trim();
@@ -213,14 +213,16 @@ export const AgentSearch = () => {
       { threshold: 1.0 }
     );
     
+    const currentTarget = observerTarget.current;
+    
     if (observerTarget.current) {
       observer.observe(observerTarget.current);
     }
     
     return () => {
-      if (observerTarget.current) observer.unobserve(observerTarget.current);
+      if (currentTarget) observer.unobserve(currentTarget);
     };
-  }, [observerTarget.current]);
+  }, [hasMore, filteredConsumers.length]);
 
   const handleClearCache = async () => {
     toast.loading('Checking for updates...');
@@ -235,19 +237,48 @@ export const AgentSearch = () => {
   };
 
   return (
-    <div className="min-h-screen bg-premium-gradient flex flex-col">
-      <header className="glass-header text-white p-5 sticky top-0 z-10">
+    <div className="min-h-screen bg-premium-gradient flex flex-col relative overflow-hidden">
+      {/* Background blobs for premium feel */}
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-400/20 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-indigo-500/20 rounded-full blur-[80px] translate-y-1/2 -translate-x-1/4 pointer-events-none"></div>
+
+      {isHydrating && (
+        <div className="fixed top-0 left-0 right-0 z-50">
+          <div className="h-1.5 w-full bg-blue-900/50 backdrop-blur-sm overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-300 shadow-[0_0_10px_rgba(52,211,153,0.5)]" 
+              style={{ width: `${hydrationProgress}%` }}
+            ></div>
+          </div>
+          <div className="bg-blue-900/90 backdrop-blur-md text-white text-xs py-1.5 px-4 flex items-center justify-center gap-2 border-b border-white/10">
+            <Database size={12} className="animate-pulse text-emerald-400" />
+            <span className="font-medium tracking-wide">Downloading offline data... {hydrationProgress}%</span>
+          </div>
+        </div>
+      )}
+
+      <header className={`glass-header text-white p-5 sticky ${isHydrating ? 'top-8' : 'top-0'} z-10 transition-all duration-300`}>
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate mr-2">SIDDHARTHA BHARAT GAS</h1>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-white/20 to-white/5 border border-white/20 flex items-center justify-center backdrop-blur-sm shadow-inner">
+              <span className="font-black text-white text-lg tracking-tighter">BG</span>
+            </div>
+            <h1 className="text-lg sm:text-xl font-bold tracking-wide truncate">Siddhartha Gas</h1>
+          </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            <button onClick={handleClearCache} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-full transition-colors border border-white/10 shadow-sm" title="Force App Update">
+            <button onClick={handleClearCache} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10 shadow-sm active:scale-95" title="Force App Update">
               <RefreshCw size={16} className="text-white" />
             </button>
-            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-medium bg-white/10 px-2.5 py-1 rounded-full border border-white/10">
-              {isOnline ? <Wifi size={14} className="text-green-400" /> : <WifiOff size={14} className="text-red-400" />}
-              <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 shadow-sm backdrop-blur-sm">
+              {isOnline ? (
+                <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse"></span> <span className="hidden sm:inline">Online</span></>
+              ) : (
+                <><span className="w-1.5 h-1.5 rounded-full bg-red-400"></span> <span className="hidden sm:inline text-red-200">Offline</span></>
+              )}
             </span>
-            <button onClick={handleLogout} className="text-sm font-medium text-white/80 hover:text-white transition-colors cursor-pointer">Logout</button>
+            <button onClick={handleLogout} className="p-2 bg-white/5 hover:bg-red-500/80 rounded-xl transition-all border border-white/10 shadow-sm text-white cursor-pointer active:scale-95">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
           </div>
         </div>
         
@@ -259,16 +290,16 @@ export const AgentSearch = () => {
               enterKeyHint="search"
               autoComplete="off"
               autoCorrect="off"
-              placeholder="Search Consumer No, Name, Mobile..." 
+              placeholder="Search by ID, Name or Mobile..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full glass-input text-gray-900 rounded-full pl-12 pr-5 py-3.5 focus:outline-none transition-all placeholder:text-gray-500 font-medium"
+              className="w-full bg-white/90 backdrop-blur-xl border border-white/40 text-slate-900 rounded-2xl pl-12 pr-5 py-3.5 focus:outline-none transition-all placeholder:text-slate-400 font-medium shadow-[0_4px_20px_rgba(0,0,0,0.1)] focus:bg-white focus:ring-2 focus:ring-blue-400/50"
             />
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20} />
           </div>
           <button 
             onClick={() => setIsAddModalOpen(true)}
-            className="shrink-0 bg-white/20 hover:bg-white/30 border border-white/30 backdrop-blur-md text-white px-4 py-3.5 rounded-full font-bold shadow-lg flex items-center justify-center transition-all active:scale-95"
+            className="shrink-0 bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-400/50 text-white px-5 py-3.5 rounded-2xl font-bold shadow-lg shadow-emerald-500/20 flex items-center justify-center transition-all active:scale-95"
             title="Add New Consumer"
           >
             + Add
@@ -276,22 +307,22 @@ export const AgentSearch = () => {
         </div>
 
         {/* Filter Options */}
-        <div className="flex gap-2 bg-white/10 p-1.5 rounded-full backdrop-blur-sm border border-white/10 overflow-x-auto hide-scrollbar">
+        <div className="flex gap-2 bg-black/20 p-1.5 rounded-2xl backdrop-blur-md border border-white/10 overflow-x-auto hide-scrollbar">
           <button 
             onClick={() => setFilterStatus('all')}
-            className={`flex-1 min-w-[80px] px-3 py-1.5 rounded-full text-sm font-bold transition-all ${filterStatus === 'all' ? 'bg-white text-blue-900 shadow-sm' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
+            className={`flex-1 min-w-[80px] px-3 py-2 rounded-xl text-sm font-bold transition-all ${filterStatus === 'all' ? 'bg-white text-blue-900 shadow-md transform scale-[1.02]' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
           >
             All
           </button>
           <button 
             onClick={() => setFilterStatus('pending')}
-            className={`flex-1 min-w-[80px] px-3 py-1.5 rounded-full text-sm font-bold transition-all ${filterStatus === 'pending' ? 'bg-white text-amber-600 shadow-sm' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
+            className={`flex-1 min-w-[80px] px-3 py-2 rounded-xl text-sm font-bold transition-all ${filterStatus === 'pending' ? 'bg-amber-100 text-amber-700 shadow-md transform scale-[1.02]' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
           >
             Pending
           </button>
           <button 
             onClick={() => setFilterStatus('completed')}
-            className={`flex-1 min-w-[80px] px-3 py-1.5 rounded-full text-sm font-bold transition-all ${filterStatus === 'completed' ? 'bg-white text-emerald-600 shadow-sm' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
+            className={`flex-1 min-w-[80px] px-3 py-2 rounded-xl text-sm font-bold transition-all ${filterStatus === 'completed' ? 'bg-emerald-100 text-emerald-700 shadow-md transform scale-[1.02]' : 'text-white/80 hover:bg-white/20 hover:text-white'}`}
           >
             Completed
           </button>
@@ -300,24 +331,66 @@ export const AgentSearch = () => {
 
       <ConsumerModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} />
 
-      <main className="flex-1 p-5 overflow-y-auto">
+      <main className="flex-1 p-4 sm:p-5 overflow-y-auto relative z-0">
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-white/90 font-semibold tracking-wide">
+          <h2 className="text-white font-bold tracking-wide flex items-center gap-2 text-lg">
             {debouncedSearch ? 'Search Results' : 'Recent Consumers'}
           </h2>
-          <span className="text-sm font-medium text-white/90 bg-white/10 backdrop-blur-md border border-white/20 px-3 py-1 rounded-full shadow-sm">
-            {totalCount !== undefined ? totalCount : '...'}
-          </span>
+          <div className="flex items-center gap-1.5 bg-black/20 backdrop-blur-md border border-white/10 px-3 py-1 rounded-xl shadow-inner">
+            <Users size={14} className="text-blue-200" />
+            <span className="text-sm font-bold text-white">
+              {totalCount !== undefined ? totalCount.toLocaleString() : '...'}
+            </span>
+          </div>
         </div>
 
         <div className="space-y-4 pb-20">
           {consumers === undefined ? (
-            <div className="flex justify-center py-12 text-white/70">
-               <Loader2 className="animate-spin" size={28} />
+            // Skeleton Loader
+            <div className="space-y-4">
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="glass-card rounded-2xl p-5 border-white/20 relative overflow-hidden">
+                  <div className="absolute inset-0 skeleton opacity-20"></div>
+                  <div className="flex justify-between items-start mb-4 relative z-10">
+                    <div className="flex gap-3">
+                      <div className="w-11 h-11 rounded-full bg-slate-200/50"></div>
+                      <div className="space-y-2">
+                        <div className="w-16 h-4 bg-slate-200/50 rounded"></div>
+                        <div className="w-32 h-5 bg-slate-200/50 rounded"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-3/4 h-3 bg-slate-200/50 rounded mb-2 ml-[56px] relative z-10"></div>
+                  <div className="w-1/2 h-3 bg-slate-200/50 rounded mb-4 ml-[56px] relative z-10"></div>
+                  <div className="flex gap-2 ml-[56px] relative z-10">
+                    <div className="w-16 h-6 bg-slate-200/50 rounded-full"></div>
+                    <div className="w-16 h-6 bg-slate-200/50 rounded-full"></div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : consumers.length === 0 ? (
-            <div className="text-center py-12 text-white/70 font-medium">No consumers found.</div>
-
+            // Empty State
+            <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+              <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center mb-6 shadow-inner border border-white/20">
+                <Search size={40} className="text-blue-200" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">No consumers found</h3>
+              <p className="text-blue-100/80 mb-8 max-w-xs text-sm">
+                We couldn't find any consumers matching your search criteria. Try a different filter or search term.
+              </p>
+              {filterStatus !== 'all' || debouncedSearch !== '' ? (
+                <button 
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setSearchTerm('');
+                  }}
+                  className="bg-white/20 hover:bg-white/30 text-white border border-white/30 px-6 py-2.5 rounded-xl font-bold transition-colors active:scale-95"
+                >
+                  Clear Filters
+                </button>
+              ) : null}
+            </div>
           ) : (
             <>
               {consumers.map(consumer => (
@@ -330,8 +403,10 @@ export const AgentSearch = () => {
               
               {/* Infinite Scroll Trigger */}
               {(totalCount ?? 0) > consumers.length && (
-                <div ref={observerTarget} className="py-4 flex justify-center text-gray-400">
-                  <Loader2 className="animate-spin" size={24} />
+                <div ref={observerTarget} className="py-6 flex justify-center">
+                  <div className="bg-white/10 backdrop-blur-md p-3 rounded-full border border-white/20">
+                    <Loader2 className="animate-spin text-white" size={24} />
+                  </div>
                 </div>
               )}
             </>

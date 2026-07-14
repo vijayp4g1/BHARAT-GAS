@@ -224,6 +224,11 @@ export const Login = () => {
           </form>
         </div>
       </div>
+      
+      {/* Version Label */}
+      <div className="absolute bottom-6 text-white/50 text-xs font-medium font-mono tracking-wider z-10 backdrop-blur-sm bg-black/10 px-3 py-1 rounded-full border border-white/10">
+        v2.0.0
+      </div>
     </div>
   );
 };
