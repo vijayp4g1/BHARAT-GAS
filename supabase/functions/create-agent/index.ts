@@ -15,7 +15,7 @@ serve(async (req) => {
   try {
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
     // Check if the requesting user is a MANAGER
@@ -27,15 +27,24 @@ serve(async (req) => {
       throw new Error('Unauthorized')
     }
 
-    const { data: agentData } = await supabaseClient
-      .from('agents')
-      .select('role')
-      .eq('id', user.id)
-      .single()
+    // Managers log in with real emails (not @bgcls.local).
+    // Agents log in with @bgcls.local dummy emails.
+    // So: if user has a real email, they are the owner/manager → allow.
+    // If user has @bgcls.local email, check the agents table for MANAGER role.
+    const isAgentEmail = user.email?.endsWith('@bgcls.local');
+    
+    if (isAgentEmail) {
+      const { data: agentData } = await supabaseClient
+        .from('agents')
+        .select('role')
+        .eq('id', user.id)
+        .single()
 
-    if (agentData?.role !== 'MANAGER') {
-      throw new Error('Forbidden: Only managers can create agents.')
+      if (agentData?.role !== 'MANAGER') {
+        throw new Error('Forbidden: Only managers can create agents.')
+      }
     }
+    // If real email → they are the owner, allow through
 
     // Process request
     const { name, username, password, role } = await req.json()
