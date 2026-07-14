@@ -248,31 +248,7 @@ export const ManagerConsumerProfile = () => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     
-    toast((t) => (
-      <div className="flex flex-col gap-3">
-        <p className="font-bold text-slate-800">What type of photo is this?</p>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => {
-              toast.dismiss(t.id);
-              processPhoto(file, 'house');
-            }} 
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex-1 transition-colors"
-          >
-            House
-          </button>
-          <button 
-            onClick={() => {
-              toast.dismiss(t.id);
-              processPhoto(file, 'document');
-            }} 
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-4 py-2 rounded-lg font-medium flex-1 transition-colors"
-          >
-            Document / ID
-          </button>
-        </div>
-      </div>
-    ), { duration: Infinity, position: 'top-center' });
+    processPhoto(file, 'house');
     
     e.target.value = '';
   };
