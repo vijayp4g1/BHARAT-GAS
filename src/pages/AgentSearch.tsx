@@ -222,7 +222,7 @@ export const AgentSearch = () => {
     return () => {
       if (currentTarget) observer.unobserve(currentTarget);
     };
-  }, [hasMore, filteredConsumers.length]);
+  }, [consumers?.length, totalCount]);
 
   const handleClearCache = async () => {
     toast.loading('Checking for updates...');
