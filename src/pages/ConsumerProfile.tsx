@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { ArrowLeft, MapPin, Camera, Navigation, CheckCircle, AlertTriangle, Loader2, Trash2, X, Edit2, FileText, Plus } from 'lucide-react';
+import { ArrowLeft, MapPin, Camera, Navigation, CheckCircle, Loader2, Trash2, X, Edit2, FileText, Plus } from 'lucide-react';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -55,27 +55,36 @@ export const ConsumerProfile = () => {
       if (!id || !navigator.onLine) return;
       
       try {
-        // Fetch locations
+        // Fetch locations - only overwrite if there are no unsynced local changes
         const { data: locations } = await supabase.from('consumer_locations').select('*').eq('consumer_id', id);
         if (locations && locations.length > 0) {
-          const formattedLocations = locations.map(l => ({ ...l, synced: true }));
-          await db.consumer_locations.bulkPut(formattedLocations);
-          await db.consumers.update(id, { has_location: true });
+          const unsyncedLoc = await db.consumer_locations.where({ consumer_id: id }).filter(l => l.synced === false).first();
+          if (!unsyncedLoc) {
+            const formattedLocations = locations.map(l => ({ ...l, synced: true }));
+            await db.consumer_locations.bulkPut(formattedLocations);
+            await db.consumers.update(id, { has_location: true });
+          }
         }
 
-        // Fetch photos
+        // Fetch photos - only overwrite if there are no unsynced local changes
         const { data: photosData } = await supabase.from('consumer_photos').select('*').eq('consumer_id', id);
         if (photosData && photosData.length > 0) {
-          const formattedPhotos = photosData.map(p => ({ ...p, synced: true }));
-          await db.consumer_photos.bulkPut(formattedPhotos);
-          await db.consumers.update(id, { has_photos: true });
+          const unsyncedPhotos = await db.consumer_photos.where({ consumer_id: id }).filter(p => p.synced === false).toArray();
+          if (unsyncedPhotos.length === 0) {
+            const formattedPhotos = photosData.map(p => ({ ...p, synced: true }));
+            await db.consumer_photos.bulkPut(formattedPhotos);
+            await db.consumers.update(id, { has_photos: true });
+          }
         }
 
-        // Fetch notes
+        // Fetch notes - only overwrite if there are no unsynced local changes
         const { data: notesData } = await supabase.from('delivery_notes').select('*').eq('consumer_id', id);
         if (notesData && notesData.length > 0) {
-          const formattedNotes = notesData.map(n => ({ ...n, synced: true }));
-          await db.delivery_notes.bulkPut(formattedNotes);
+          const unsyncedNotes = await db.delivery_notes.where({ consumer_id: id }).filter(n => n.synced === false).toArray();
+          if (unsyncedNotes.length === 0) {
+            const formattedNotes = notesData.map(n => ({ ...n, synced: true }));
+            await db.delivery_notes.bulkPut(formattedNotes);
+          }
         }
         
       } catch (err) {
@@ -135,6 +144,18 @@ export const ConsumerProfile = () => {
     
     setIsCapturingGPS(true);
     try {
+      // Clear existing locations for this consumer first to avoid duplicates
+      const existingLocs = await db.consumer_locations.where({ consumer_id: id }).toArray();
+      for (const loc of existingLocs) {
+        if (loc.id) {
+          if (loc.synced) {
+            await db.consumer_locations.update(loc.id, { isDeleted: true, synced: false });
+          } else {
+            await db.consumer_locations.delete(loc.id);
+          }
+        }
+      }
+
       await db.consumer_locations.add({
         consumer_id: id,
         latitude: pendingLocation.coords.latitude,

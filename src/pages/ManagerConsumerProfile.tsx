@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, Camera, Navigation, Loader2, X, Edit2, Trash2, CheckCircle, Plus, FileText } from 'lucide-react';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
@@ -30,17 +30,12 @@ export const ManagerConsumerProfile = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
-  const [gpsError, setGpsError] = useState<string | null>(null);
   const [pendingLocation, setPendingLocation] = useState<GeolocationPosition | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [newNote, setNewNote] = useState('');
   const [isAddingNote, setIsAddingNote] = useState(false);
 
-  useEffect(() => {
-    fetchConsumerData();
-  }, [id]);
-
-  const fetchConsumerData = async () => {
+  const fetchConsumerData = useCallback(async () => {
     if (!id) return;
     setIsLoading(true);
     try {
@@ -86,14 +81,43 @@ export const ManagerConsumerProfile = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchConsumerData();
+  }, [fetchConsumerData]);
 
   const executeDeleteConsumer = async () => {
     if (!id) return;
     try {
       toast.loading('Deleting consumer...', { id: 'delete' });
-      await supabase.from('consumer_photos').delete().eq('consumer_id', id);
-      await supabase.from('consumer_locations').delete().eq('consumer_id', id);
+      
+      // 1. Fetch photo URLs to delete storage blobs
+      const { data: photosToDelete } = await supabase
+        .from('consumer_photos')
+        .select('photo_url')
+        .eq('consumer_id', id);
+
+      if (photosToDelete && photosToDelete.length > 0) {
+        const filesToRemove = photosToDelete
+          .map(p => {
+            const urlParts = p.photo_url.split('/consumer-photos/');
+            return urlParts.length > 1 ? urlParts[1] : null;
+          })
+          .filter(Boolean) as string[];
+
+        if (filesToRemove.length > 0) {
+          await supabase.storage.from('consumer-photos').remove(filesToRemove);
+        }
+      }
+
+      // 2. Perform deletions
+      await Promise.all([
+        supabase.from('consumer_photos').delete().eq('consumer_id', id),
+        supabase.from('consumer_locations').delete().eq('consumer_id', id),
+        supabase.from('delivery_notes').delete().eq('consumer_id', id)
+      ]);
+
       await supabase.from('consumers').delete().eq('id', id);
       
       toast.success('Consumer completely deleted!', { id: 'delete' });
@@ -132,12 +156,11 @@ export const ManagerConsumerProfile = () => {
 
   const handleCaptureGPS = () => {
     if (!navigator.geolocation) {
-      setGpsError('Geolocation is not supported by your browser.');
+      toast.error('Geolocation is not supported by your browser.');
       return;
     }
 
     setIsCapturingGPS(true);
-    setGpsError(null);
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -145,7 +168,7 @@ export const ManagerConsumerProfile = () => {
         setIsCapturingGPS(false);
       },
       (error) => {
-        setGpsError(`Error capturing GPS: ${error.message}`);
+        toast.error(`Error capturing GPS: ${error.message}`);
         setIsCapturingGPS(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -158,6 +181,10 @@ export const ManagerConsumerProfile = () => {
     setIsCapturingGPS(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      
+      // Delete any existing locations to prevent duplicates
+      await supabase.from('consumer_locations').delete().eq('consumer_id', id);
+
       const { error } = await supabase.from('consumer_locations').insert({
         consumer_id: id,
         latitude: pendingLocation.coords.latitude,
@@ -174,7 +201,7 @@ export const ManagerConsumerProfile = () => {
       fetchConsumerData(); // Refresh data
     } catch (error) {
       console.error('Failed to save location', error);
-      setGpsError('Failed to save location to server.');
+      toast.error('Failed to save location to server.');
     } finally {
       setIsCapturingGPS(false);
     }
@@ -299,6 +326,13 @@ export const ManagerConsumerProfile = () => {
 
   const executeDeletePhoto = async (photoId: string) => {
     try {
+      const photoToDelete = photos.find(p => p.id === photoId);
+      if (photoToDelete && photoToDelete.photo_url) {
+        const urlParts = photoToDelete.photo_url.split('/consumer-photos/');
+        if (urlParts.length > 1) {
+          await supabase.storage.from('consumer-photos').remove([urlParts[1]]);
+        }
+      }
       await supabase.from('consumer_photos').delete().eq('id', photoId);
       toast.success('Photo deleted', { duration: 3000 });
       fetchConsumerData();

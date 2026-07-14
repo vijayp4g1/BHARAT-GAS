@@ -21,6 +21,7 @@ export const ManagerAgents = () => {
       const { data, error } = await supabase
         .from('agents')
         .select('*')
+        .neq('status', 'DELETED')
         .order('created_at', { ascending: false });
         
       if (error) throw error;

@@ -66,19 +66,20 @@ export const ManagerDashboard = () => {
     // Initial fetch
     fetchDashboardData();
 
+    const fetchTimeoutRef = { current: null as any };
+    const triggerFetch = () => {
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+      fetchTimeoutRef.current = setTimeout(() => {
+        fetchDashboardData();
+      }, 1000);
+    };
+
     // Set up realtime subscriptions for live updates
     const locationsChannel = supabase
       .channel('public:consumer_locations')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consumer_locations' }, (payload) => {
         if (isMounted) {
-          setStats((prev: any) => {
-            if (!prev) return prev;
-            // Note: In realtime updates without fetching full state, it's hard to know if this is the FIRST gps for this consumer.
-            // We'll increment optimisticially, but a full refresh fixes discrepancies.
-            // For a perfect count, we could just trigger fetchDashboardData() again, but that's a network call.
-            // We will just do a simple increment. It might be slightly off until refresh if the same user uploaded twice.
-            return { ...prev, withGps: prev.withGps + 1 };
-          });
+          triggerFetch();
           toast.success('New GPS location captured!', { position: 'bottom-right', duration: 3000, icon: '📍' });
         }
       })
@@ -88,10 +89,7 @@ export const ManagerDashboard = () => {
       .channel('public:consumer_photos')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consumer_photos' }, (payload) => {
         if (isMounted) {
-          setStats((prev: any) => {
-            if (!prev) return prev;
-            return { ...prev, withPhotos: prev.withPhotos + 1 };
-          });
+          triggerFetch();
           toast.success('New photo uploaded!', { position: 'bottom-right', duration: 3000, icon: '📸' });
         }
       })
@@ -99,6 +97,7 @@ export const ManagerDashboard = () => {
 
     return () => {
       isMounted = false;
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
       supabase.removeChannel(locationsChannel);
       supabase.removeChannel(photosChannel);
     };

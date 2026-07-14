@@ -127,3 +127,10 @@ body {
 .premium-popup .leaflet-popup-content {
   margin: 12px 14px;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .marker-pulse {
+    animation: none;
+    display: none;
+  }
+}

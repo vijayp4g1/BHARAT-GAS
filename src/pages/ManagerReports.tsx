@@ -16,7 +16,10 @@ export const ManagerReports = () => {
 
     try {
       // 1. Fetch Consumers based on filter
-      let query = supabase.from('manager_consumer_summary').select('*');
+      let query = supabase
+        .from('manager_consumer_summary')
+        .select('*')
+        .order('created_at', { ascending: false });
       
       if (exportFilter === 'Completed') {
         query = query.eq('has_location', true).eq('has_photos', true);

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Loader2, ArrowLeft, Filter, MapPin, Camera, User, Phone, CheckCircle, XCircle } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Search, Loader2, ArrowLeft, Filter, MapPin, Camera, User, Phone } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 export const ManagerConsumers = () => {
@@ -9,17 +9,23 @@ export const ManagerConsumers = () => {
   const [consumers, setConsumers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   
   const ITEMS_PER_PAGE = 20;
 
+  // Search Debouncing — 500ms delay to avoid firing on every keystroke
   useEffect(() => {
-    fetchConsumers();
-  }, [page, filter, searchQuery]);
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  const fetchConsumers = async () => {
+
+  const fetchConsumers = useCallback(async () => {
     setIsLoading(true);
     try {
       // Query the optimized view we created in Supabase!
@@ -27,9 +33,10 @@ export const ManagerConsumers = () => {
         .from('manager_consumer_summary')
         .select('*', { count: 'exact' });
 
-      // Apply Search
-      if (searchQuery) {
-        query = query.or(`consumer_name.ilike.%${searchQuery}%,consumer_number.ilike.%${searchQuery}%,mobile.ilike.%${searchQuery}%`);
+      // Apply Search with wildcard escaping to prevent injection
+      if (debouncedSearchQuery) {
+        const escaped = debouncedSearchQuery.replace(/[%_]/g, '\\$&');
+        query = query.or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%`);
       }
 
       // Apply Filter
@@ -59,7 +66,11 @@ export const ManagerConsumers = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [page, filter, debouncedSearchQuery]);
+
+  useEffect(() => {
+    fetchConsumers();
+  }, [fetchConsumers]);
 
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
@@ -151,8 +162,15 @@ export const ManagerConsumers = () => {
                   consumers.map((c) => (
                     <tr 
                       key={c.id} 
+                      tabIndex={0}
                       onClick={() => navigate(`/manager/consumer/${c.id}`)}
-                      className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/manager/consumer/${c.id}`);
+                        }
+                      }}
+                      className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors cursor-pointer group focus:outline-none focus:bg-slate-100/80"
                     >
                       <td className="p-4 pl-6 group-hover:bg-blue-50/30 transition-colors">
                         <div className="flex items-center gap-3">

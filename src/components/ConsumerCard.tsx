@@ -10,22 +10,8 @@ interface ConsumerCardProps {
 }
 
 export const ConsumerCard: React.FC<ConsumerCardProps> = ({ consumer, onClick }) => {
-  // Check if we have offline data for this consumer
-  const hasLocalLocation = useLiveQuery(
-    async () => {
-      const loc = await db.consumer_locations.where({ consumer_id: consumer.id }).first();
-      return !!loc;
-    },
-    [consumer.id]
-  );
-
-  const hasLocalPhoto = useLiveQuery(
-    async () => {
-      const photo = await db.consumer_photos.where({ consumer_id: consumer.id }).first();
-      return !!photo;
-    },
-    [consumer.id]
-  );
+  const hasLocalLocation = consumer.has_location;
+  const hasLocalPhoto = consumer.has_photos;
 
   return (
     <div 
