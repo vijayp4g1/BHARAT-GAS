@@ -212,16 +212,60 @@ export const AgentSearch = () => {
     };
   }, [consumers?.length, totalCount]);
 
-  const handleClearCache = async () => {
-    toast.loading('Checking for updates...');
-    if ('serviceWorker' in navigator) {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      for (const registration of registrations) {
-        await registration.unregister();
-      }
+  // Realtime listeners for portal updates
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const locSub = supabase.channel('locations_channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consumer_locations' }, payload => {
+         db.consumers.update(payload.new.consumer_id, { has_location: true }).catch(() => {});
+      }).subscribe();
+
+    const photoSub = supabase.channel('photos_channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consumer_photos' }, payload => {
+         db.consumers.update(payload.new.consumer_id, { has_photos: true }).catch(() => {});
+      }).subscribe();
+
+    return () => {
+      supabase.removeChannel(locSub);
+      supabase.removeChannel(photoSub);
+    };
+  }, [isOnline]);
+
+  const handleSyncData = async () => {
+    if (!isOnline) {
+      toast.error("You are offline. Cannot sync data.");
+      return;
     }
-    // Force a hard reload to the root to prevent Vercel 404s before SPA rules load
-    window.location.href = '/';
+    
+    toast.loading('Syncing latest updates...', { id: 'sync' });
+    try {
+      // Fetch only the statuses to save bandwidth
+      const { data, error } = await supabase
+        .from('manager_consumer_summary')
+        .select('id, has_location, has_photos');
+        
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        // Bulk update is tricky in Dexie without overwriting, so we iterate
+        // but using a transaction is faster
+        await db.transaction('rw', db.consumers, async () => {
+          for (const remote of data) {
+             await db.consumers.update(remote.id, { 
+                has_location: remote.has_location, 
+                has_photos: remote.has_photos 
+             });
+          }
+        });
+        toast.success('Data synced successfully!', { id: 'sync' });
+      } else {
+        toast.success('Already up to date!', { id: 'sync' });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to sync data', { id: 'sync' });
+    }
   };
 
   return (
@@ -254,7 +298,11 @@ export const AgentSearch = () => {
             <h1 className="text-lg sm:text-xl font-bold tracking-wide truncate">Siddhartha Gas</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            <button onClick={handleClearCache} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-all border border-white/10 shadow-sm active:scale-95" title="Force App Update">
+            <button 
+              onClick={handleSyncData}
+              title="Sync latest updates"
+              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all active:scale-95 border border-white/20 shadow-sm"
+            >
               <RefreshCw size={16} className="text-white" />
             </button>
             <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 shadow-sm backdrop-blur-sm">
