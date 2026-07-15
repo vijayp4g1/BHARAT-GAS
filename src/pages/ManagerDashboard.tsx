@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
 import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
@@ -34,6 +35,7 @@ export const ManagerDashboard = () => {
   const [agentStats, setAgentStats] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [selectedAgentForModal, setSelectedAgentForModal] = useState<{id: string, name: string} | null>(null);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -376,7 +378,11 @@ export const ManagerDashboard = () => {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {agentStats.map((agent) => (
-                <div key={agent.id} className="flex flex-col p-5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-100 hover:border-blue-100 transition-all shadow-sm hover:shadow-md group">
+                <div 
+                  key={agent.id} 
+                  onClick={() => setSelectedAgentForModal({ id: agent.id, name: agent.name })}
+                  className="flex flex-col p-5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-100 hover:border-blue-100 transition-all shadow-sm hover:shadow-md group cursor-pointer"
+                >
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
                       {agent.name.charAt(0).toUpperCase()}
@@ -409,6 +415,12 @@ export const ManagerDashboard = () => {
             </div>
           )}
         </section>
+        
+        <AgentPerformanceModal 
+          isOpen={!!selectedAgentForModal} 
+          onClose={() => setSelectedAgentForModal(null)} 
+          agent={selectedAgentForModal} 
+        />
 
       </main>
     </div>
