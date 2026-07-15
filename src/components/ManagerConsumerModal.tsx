@@ -54,7 +54,7 @@ export const ManagerConsumerModal = ({ isOpen, onClose, initialData, onUpdate }:
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/50">
           <h2 className="text-xl font-bold text-slate-800">Edit Consumer</h2>

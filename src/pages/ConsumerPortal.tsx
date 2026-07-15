@@ -175,7 +175,7 @@ export const ConsumerPortal = () => {
                 type="text"
                 value={consumerNumber}
                 onChange={(e) => setConsumerNumber(e.target.value)}
-                placeholder="Enter your 6-digit number"
+                placeholder="Enter your consumer number"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
                 required
               />

@@ -260,7 +260,7 @@ export const ManagerConsumers = () => {
 
                           {/* WhatsApp Link Generator */}
                           <a 
-                            href={`https://wa.me/91${c.mobile.replace(/\D/g, '')}?text=${encodeURIComponent(`*SIDDHARTHA BHARAT GAS* ⛽\n_Official Notice_\n\nDear *${c.consumer_name}*,\nTo ensure fast and accurate delivery of your gas cylinder, please verify your GPS location and house photo through our secure portal.\n\n🔗 *Click here to verify:*\n${window.location.origin}/portal\n\nLogin securely using:\n📱 Your Registered Mobile\n🔢 Your 6-Digit Consumer Number\n\nThank you,\nSiddhartha Bharat Gas Agency`)}`}
+                            href={`https://wa.me/91${c.mobile.replace(/\D/g, '')}?text=${encodeURIComponent(`*SIDDHARTHA BHARAT GAS* 🧯\n_Official Notice_\n\nDear *${c.consumer_name}*,\nTo ensure fast and accurate delivery of your gas cylinder, please verify your GPS location and house photo through our secure portal.\n\n🔗 *Click here to verify:*\n${window.location.origin}/portal\n\nLogin securely using:\n📱 Your Registered Mobile\n🔢 Your Consumer Number\n\nThank you,\nSiddhartha Bharat Gas Agency`)}`}
                             target="_blank" rel="noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 flex items-center justify-center border border-green-200 shadow-sm transition-colors" 
@@ -271,7 +271,7 @@ export const ManagerConsumers = () => {
 
                           {/* Standard SMS Fallback Link Generator */}
                           <a 
-                            href={`sms:${c.mobile.replace(/\D/g, '')}?body=${encodeURIComponent(`SIDDHARTHA BHARAT GAS ⛽\nOfficial Notice\n\nDear ${c.consumer_name},\nTo ensure fast delivery of your gas cylinder, please verify your GPS location and house photo.\n\n🔗 Click here to verify:\n${window.location.origin}/portal\n\nLogin with:\n📱 Registered Mobile\n🔢 Consumer Number\n\nThank you,\nSiddhartha Bharat Gas`)}`}
+                            href={`sms:${c.mobile.replace(/\D/g, '')}?body=${encodeURIComponent(`SIDDHARTHA BHARAT GAS 🧯\nOfficial Notice\n\nDear ${c.consumer_name},\nTo ensure fast delivery of your gas cylinder, please verify your GPS location and house photo.\n\n🔗 Click here to verify:\n${window.location.origin}/portal\n\nLogin with:\n📱 Registered Mobile\n🔢 Consumer Number\n\nThank you,\nSiddhartha Bharat Gas`)}`}
                             onClick={(e) => e.stopPropagation()}
                             className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 flex items-center justify-center border border-blue-200 shadow-sm transition-colors" 
                             title="Send Portal Link via Standard SMS"
