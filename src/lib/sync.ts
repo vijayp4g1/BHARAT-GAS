@@ -38,10 +38,10 @@ export async function syncOfflineData() {
             p_consumer_name: consumer.consumer_name,
             p_mobile: consumer.mobile,
             p_address: consumer.address,
-            p_verification_status: consumer.verification_status,
-            p_assigned_agent_id: user.id,
-            p_area_code: consumer.area_code,
-            p_created_at: consumer.created_at,
+            p_verification_status: consumer.verification_status || 'Not Collected',
+            p_assigned_agent_id: user.id || null,
+            p_area_code: consumer.area_code || null,
+            p_created_at: consumer.created_at || new Date().toISOString(),
             p_updated_at: consumer.updated_at || new Date().toISOString()
           });
 
