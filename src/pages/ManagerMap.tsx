@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import 'leaflet.heat';
 import { ArrowLeft, Loader2, MapPin, Layers, Flame, Navigation, Truck } from 'lucide-react';
+import { ManagerBottomNav } from '../components/ManagerBottomNav';
 
 // Fix for default marker icons in React-Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -77,7 +77,7 @@ const SpatialFetcher = ({ setLocations, setIsFetching }: { setLocations: any, se
 export const ManagerMap = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [isFetching, setIsFetching] = useState(false);
-  const [viewMode, setViewMode] = useState<'cluster' | 'heatmap'>('cluster');
+  const [viewMode, setViewMode] = useState<'markers' | 'heatmap'>('markers');
   
   const [showAgents, setShowAgents] = useState(false);
   const [agentLocations, setAgentLocations] = useState<Record<string, any>>({});
@@ -133,53 +133,55 @@ export const ManagerMap = () => {
   const zoom = 11;
 
   return (
-    <div className="min-h-screen bg-premium-gradient flex flex-col relative">
-      <header className="glass-header text-white p-5 sticky top-0 z-20 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <div className="h-[100dvh] flex flex-col relative overflow-hidden bg-premium-gradient">
+      <header className="glass-header text-white p-3 sm:p-5 sticky top-0 z-20 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <Link to="/manager/dashboard" className="p-2 hover:bg-white/10 rounded-full transition-colors backdrop-blur-sm border border-white/10 bg-white/5">
             <ArrowLeft size={20} />
           </Link>
-          <h1 className="text-xl font-bold tracking-tight">Live Coverage Map</h1>
+          <h1 className="text-lg sm:text-xl font-bold tracking-tight hidden sm:block">Live Coverage Map</h1>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="bg-white/10 p-1 rounded-xl backdrop-blur-md flex items-center border border-white/20">
+        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
+          <div className="bg-white/10 p-1 rounded-xl backdrop-blur-md flex items-center border border-white/20 shrink-0">
             <button 
-              onClick={() => setViewMode('cluster')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'cluster' ? 'bg-white text-blue-900 shadow-sm' : 'text-white/80 hover:text-white'}`}
+              onClick={() => setViewMode('markers')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'markers' ? 'bg-white text-blue-900 shadow-sm' : 'text-white/80 hover:text-white'}`}
             >
-              <Layers size={16} /> Clusters
+              <MapPin size={16} /> <span className="hidden sm:inline">Markers</span>
             </button>
             <button 
               onClick={() => setViewMode('heatmap')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'heatmap' ? 'bg-white text-orange-600 shadow-sm' : 'text-white/80 hover:text-white'}`}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'heatmap' ? 'bg-white text-orange-600 shadow-sm' : 'text-white/80 hover:text-white'}`}
             >
-              <Flame size={16} /> Heatmap
+              <Flame size={16} /> <span className="hidden sm:inline">Heatmap</span>
             </button>
             <div className="w-px h-6 bg-white/20 mx-1"></div>
             <button 
               onClick={() => setShowAgents(!showAgents)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${showAgents ? 'bg-indigo-600 text-white shadow-sm' : 'text-white/80 hover:text-white'}`}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${showAgents ? 'bg-indigo-600 text-white shadow-sm' : 'text-white/80 hover:text-white'}`}
             >
-              <Truck size={16} /> Agents
+              <Truck size={16} /> <span className="hidden sm:inline">Agents</span>
             </button>
           </div>
           
           {isFetching && (
-            <div className="hidden md:flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-md">
+            <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-md shrink-0">
               <Loader2 size={14} className="animate-spin text-white" />
-              <span className="text-xs font-semibold text-white/90 uppercase tracking-wider">Syncing</span>
+              <span className="hidden sm:inline text-xs font-semibold text-white/90 uppercase tracking-wider">Syncing</span>
             </div>
           )}
         </div>
       </header>
+      
+      <ManagerBottomNav />
 
       <main className="flex-1 relative z-0">
         <MapContainer 
           center={center} 
           zoom={zoom} 
           scrollWheelZoom={true}
-          style={{ height: '100%', width: '100%', minHeight: 'calc(100vh - 73px)' }}
+          style={{ height: '100%', width: '100%' }}
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -190,11 +192,7 @@ export const ManagerMap = () => {
           {viewMode === 'heatmap' ? (
             <HeatmapLayer points={locations} />
           ) : (
-            <MarkerClusterGroup 
-              chunkedLoading 
-              maxClusterRadius={40}
-              spiderfyOnMaxZoom={true}
-            >
+            <>
               {locations.map(loc => {
                 const customIcon = L.divIcon({
                   className: 'custom-map-marker',
@@ -233,7 +231,7 @@ export const ManagerMap = () => {
                   </Marker>
                 );
               })}
-            </MarkerClusterGroup>
+            </>
           )}
 
           {/* Render Agents */}
@@ -274,10 +272,10 @@ export const ManagerMap = () => {
           })}
         </MapContainer>
         
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none">
-          <div className="bg-white/90 backdrop-blur-md border border-white/50 shadow-lg px-4 py-2 rounded-full flex items-center gap-2 pointer-events-auto">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-sm font-bold text-slate-700">Showing {locations.length} consumers {showAgents ? `and ${Object.values(agentLocations).filter((agent: any) => Date.now() - new Date(agent.updated_at).getTime() < 15 * 60 * 1000).length} agents` : ''} in view</span>
+        <div className="absolute bottom-24 sm:bottom-6 left-1/2 -translate-x-1/2 z-[1000] pointer-events-none w-max max-w-[90vw]">
+          <div className="bg-white/90 backdrop-blur-md border border-white/50 shadow-lg px-3 sm:px-4 py-2 rounded-full flex items-center gap-2 pointer-events-auto">
+            <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+            <span className="text-xs sm:text-sm font-bold text-slate-700 truncate">Showing {locations.length} consumers {showAgents ? `and ${Object.values(agentLocations).filter((agent: any) => Date.now() - new Date(agent.updated_at).getTime() < 15 * 60 * 1000).length} agents` : ''}</span>
           </div>
         </div>
       </main>

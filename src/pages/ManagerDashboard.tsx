@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
@@ -31,6 +31,7 @@ const CountUp = ({ end, duration = 1500 }: { end: number, duration?: number }) =
 
 export const ManagerDashboard = () => {
   const [stats, setStats] = useState<any>(null);
+  const [agentStats, setAgentStats] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -78,6 +79,29 @@ export const ManagerDashboard = () => {
       if (lError) throw lError;
       if (pError) throw pError;
       if (compError) throw compError;
+
+      const { data: agentsData, error: agentsError } = await supabase
+        .from('agents')
+        .select(`
+          id,
+          name,
+          role,
+          consumer_locations(count),
+          consumer_photos(count)
+        `)
+        .neq('status', 'DELETED')
+        .order('name');
+        
+      if (agentsError) throw agentsError;
+
+      const formattedAgentStats = (agentsData || []).map((agent: any) => ({
+        id: agent.id,
+        name: agent.name,
+        locationsCount: Array.isArray(agent.consumer_locations) ? (agent.consumer_locations[0]?.count ?? 0) : (agent.consumer_locations?.count ?? 0),
+        photosCount: Array.isArray(agent.consumer_photos) ? (agent.consumer_photos[0]?.count ?? 0) : (agent.consumer_photos?.count ?? 0)
+      })).sort((a, b) => (b.locationsCount + b.photosCount) - (a.locationsCount + a.photosCount));
+
+      setAgentStats(formattedAgentStats);
 
       const completionRate = (totalConsumers && totalConsumers > 0) 
         ? Math.round(((completedConsumers || 0) / totalConsumers) * 100) 
@@ -186,7 +210,7 @@ export const ManagerDashboard = () => {
       <main className="max-w-6xl w-full mx-auto p-4 sm:p-5 md:p-8 space-y-6 md:space-y-8 mt-2">
         
         {/* Quick Actions Grid */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+        <section className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
           <Link to="/manager/consumers" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
             <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
               <List size={20} />
@@ -212,6 +236,15 @@ export const ManagerDashboard = () => {
             <div>
               <h3 className="font-bold text-slate-800 text-sm sm:text-base">Live Map</h3>
               <p className="text-xs text-slate-500 mt-0.5">View locations</p>
+            </div>
+          </Link>
+          <Link to="/manager/dispatch" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
+            <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <Navigation size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Dispatch</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Route mapping</p>
             </div>
           </Link>
           <Link to="/manager/reports" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
@@ -330,6 +363,52 @@ export const ManagerDashboard = () => {
             </div>
           </section>
         </div>
+
+        {/* Agent Performance Section */}
+        <section className="glass-card p-6 sm:p-8 rounded-3xl mt-4 sm:mt-6">
+          <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2 mb-6">
+            <Users className="text-indigo-500" size={24} /> Agent Performance
+          </h2>
+          {agentStats.length === 0 ? (
+            <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+              <p className="text-slate-500 font-medium">No active agents found.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {agentStats.map((agent) => (
+                <div key={agent.id} className="flex flex-col p-5 bg-slate-50 hover:bg-white rounded-2xl border border-slate-100 hover:border-blue-100 transition-all shadow-sm hover:shadow-md group">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
+                      {agent.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base group-hover:text-blue-600 transition-colors line-clamp-1">{agent.name}</h3>
+                      <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">
+                        {agent.role === 'MANAGER' ? 'Manager' : 'Delivery Agent'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-auto">
+                    <div className="bg-white rounded-xl p-3 border border-slate-100 flex flex-col items-center justify-center">
+                      <div className="flex items-center gap-1.5 text-emerald-600 mb-1">
+                        <MapPin size={14} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Locations</span>
+                      </div>
+                      <span className="text-lg font-black text-slate-800">{agent.locationsCount}</span>
+                    </div>
+                    <div className="bg-white rounded-xl p-3 border border-slate-100 flex flex-col items-center justify-center">
+                      <div className="flex items-center gap-1.5 text-purple-600 mb-1">
+                        <Camera size={14} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Photos</span>
+                      </div>
+                      <span className="text-lg font-black text-slate-800">{agent.photosCount}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
       </main>
     </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Loader2, ArrowLeft, Filter, MapPin, Camera, User, Phone } from 'lucide-react';
+import { Search, Loader2, ArrowLeft, Filter, MapPin, Camera, Phone, Upload, X, MessageCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
@@ -17,7 +17,7 @@ export const ManagerConsumers = () => {
   
   const ITEMS_PER_PAGE = 20;
 
-  // Search Debouncing — 500ms delay to avoid firing on every keystroke
+  // Search Debouncing
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery);
@@ -29,18 +29,15 @@ export const ManagerConsumers = () => {
   const fetchConsumers = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Query the optimized view we created in Supabase!
       let query = supabase
         .from('manager_consumer_summary')
         .select('*', { count: 'exact' });
 
-      // Apply Search with wildcard escaping to prevent injection
       if (debouncedSearchQuery) {
         const escaped = debouncedSearchQuery.replace(/[%_]/g, '\\$&');
         query = query.or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%`);
       }
 
-      // Apply Filter
       if (filter === 'Completed') {
         query = query.eq('has_location', true).eq('has_photos', true);
       } else if (filter === 'Missing GPS') {
@@ -49,7 +46,6 @@ export const ManagerConsumers = () => {
         query = query.eq('has_photos', false);
       }
 
-      // Pagination
       const from = page * ITEMS_PER_PAGE;
       const to = from + ITEMS_PER_PAGE - 1;
       query = query.range(from, to).order('created_at', { ascending: false });
@@ -83,7 +79,7 @@ export const ManagerConsumers = () => {
             <Link to="/manager/dashboard" className="p-2 hover:bg-white/20 rounded-xl transition-colors active:scale-95 shadow-sm">
               <ArrowLeft size={20} />
             </Link>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">All Consumers</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Consumers</h1>
             <span className="bg-white/10 px-3 py-1 rounded-full text-xs font-bold border border-white/20 shadow-sm backdrop-blur-md hidden sm:inline-block">
               {totalCount} Total
             </span>
@@ -157,7 +153,7 @@ export const ManagerConsumers = () => {
                   // Skeleton Rows
                   Array.from({ length: 5 }).map((_, i) => (
                     <tr key={i} className="border-b border-slate-100 relative overflow-hidden">
-                      <td className="p-4 pl-6 relative z-10">
+                      <td className="p-4 relative z-10">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-slate-200/50 skeleton"></div>
                           <div className="space-y-2">
@@ -166,15 +162,9 @@ export const ManagerConsumers = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="p-4 hidden md:table-cell relative z-10">
-                        <div className="w-24 h-4 bg-slate-200/50 rounded skeleton"></div>
-                      </td>
-                      <td className="p-4 hidden lg:table-cell relative z-10">
-                        <div className="w-48 h-4 bg-slate-200/50 rounded skeleton"></div>
-                      </td>
-                      <td className="p-4 relative z-10">
-                        <div className="w-16 h-6 bg-slate-200/50 rounded-full skeleton"></div>
-                      </td>
+                      <td className="p-4 hidden md:table-cell relative z-10"><div className="w-24 h-4 bg-slate-200/50 rounded skeleton"></div></td>
+                      <td className="p-4 hidden lg:table-cell relative z-10"><div className="w-48 h-4 bg-slate-200/50 rounded skeleton"></div></td>
+                      <td className="p-4 relative z-10"><div className="w-16 h-6 bg-slate-200/50 rounded-full skeleton"></div></td>
                       <td className="p-4 relative z-10">
                         <div className="flex items-center justify-center gap-2">
                           <div className="w-8 h-8 rounded-lg bg-slate-200/50 skeleton"></div>
@@ -207,7 +197,7 @@ export const ManagerConsumers = () => {
                       }}
                       className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors cursor-pointer group focus:outline-none focus:bg-slate-100/80"
                     >
-                      <td className="p-3 sm:p-4 pl-4 sm:pl-6 group-hover:bg-blue-50/30 transition-colors">
+                      <td className="p-3 sm:p-4 group-hover:bg-blue-50/30 transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0 font-bold border border-blue-200">
                             {c.consumer_name.charAt(0).toUpperCase()}
@@ -267,6 +257,17 @@ export const ManagerConsumers = () => {
                               <Camera size={14} className="sm:w-4 sm:h-4" />
                             </div>
                           )}
+
+                          {/* WhatsApp Link Generator */}
+                          <a 
+                            href={`https://wa.me/91${c.mobile.replace(/\D/g, '')}?text=${encodeURIComponent(`Dear ${c.consumer_name}, please verify your Bharat Gas delivery location. Click here: ${window.location.origin}/portal and login with your Mobile Number and Consumer Number.`)}`}
+                            target="_blank" rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 flex items-center justify-center border border-green-200 shadow-sm transition-colors" 
+                            title="Send Portal Link via WhatsApp"
+                          >
+                            <MessageCircle size={14} className="sm:w-4 sm:h-4" />
+                          </a>
                         </div>
                       </td>
                     </tr>

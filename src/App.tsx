@@ -5,8 +5,11 @@ import { seedDatabase } from './lib/seed';
 import { setupSyncListeners, syncOfflineData } from './lib/sync';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
+import { AgentRoute } from './pages/AgentRoute';
 import { ConsumerProfile } from './pages/ConsumerProfile';
+import { ConsumerPortal } from './pages/ConsumerPortal';
 import { ManagerDashboard } from './pages/ManagerDashboard';
+import { ManagerDispatch } from './pages/ManagerDispatch';
 import { ManagerMap } from './pages/ManagerMap';
 import { ManagerAgents } from './pages/ManagerAgents';
 import { ManagerReports } from './pages/ManagerReports';
@@ -32,10 +35,14 @@ function App() {
       />
       <Routes>
         <Route path="/" element={<Login />} />
+        <Route path="/portal" element={<ConsumerPortal />} />
         
         {/* Agent Routes */}
         <Route path="/agent/search" element={
           <ProtectedRoute allowedRole="AGENT"><AgentSearch /></ProtectedRoute>
+        } />
+        <Route path="/agent/route" element={
+          <ProtectedRoute allowedRole="AGENT"><AgentRoute /></ProtectedRoute>
         } />
         <Route path="/agent/consumer/:id" element={
           <ProtectedRoute allowedRole="AGENT"><ConsumerProfile /></ProtectedRoute>
@@ -44,6 +51,9 @@ function App() {
         {/* Manager Routes */}
         <Route path="/manager/dashboard" element={
           <ProtectedRoute allowedRole="MANAGER"><ManagerDashboard /></ProtectedRoute>
+        } />
+        <Route path="/manager/dispatch" element={
+          <ProtectedRoute allowedRole="MANAGER"><ManagerDispatch /></ProtectedRoute>
         } />
         <Route path="/manager/map" element={
           <ProtectedRoute allowedRole="MANAGER"><ManagerMap /></ProtectedRoute>

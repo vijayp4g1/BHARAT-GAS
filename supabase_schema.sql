@@ -237,3 +237,28 @@ USING (
 -- Enable Realtime for agent_locations
 -- Supabase requires this to push changes over WebSockets
 ALTER PUBLICATION supabase_realtime ADD TABLE agent_locations;
+
+-- 7. Route Optimization (Daily Dispatch)
+CREATE TABLE daily_dispatch (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID REFERENCES agents(id) NOT NULL,
+    dispatch_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')),
+    created_by UUID REFERENCES agents(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE dispatch_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dispatch_id UUID REFERENCES daily_dispatch(id) ON DELETE CASCADE,
+    consumer_id UUID REFERENCES consumers(id) NOT NULL,
+    sequence_order INTEGER,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'COMPLETED', 'SKIPPED')),
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+ALTER TABLE daily_dispatch ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow authenticated read/write on daily_dispatch" ON daily_dispatch FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Allow authenticated read/write on dispatch_items" ON dispatch_items FOR ALL USING (auth.role() = 'authenticated');

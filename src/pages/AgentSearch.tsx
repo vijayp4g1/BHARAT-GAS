@@ -8,6 +8,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
+import { AgentBottomNav } from '../components/AgentBottomNav';
 
 export const AgentSearch = () => {
   useAgentLocationTracking();
@@ -413,6 +414,7 @@ export const AgentSearch = () => {
           )}
         </div>
       </main>
+      <AgentBottomNav />
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { ArrowLeft, MapPin, Camera, Navigation, CheckCircle, Loader2, Trash2, X, Edit2, FileText, Plus, Phone } from 'lucide-react';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
@@ -24,8 +24,11 @@ L.Icon.Default.mergeOptions({
 export const ConsumerProfile = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const routeLocation = useLocation();
+  const dispatchItemId = routeLocation.state?.dispatchItemId;
   
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
+  const [isCompletingDelivery, setIsCompletingDelivery] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<GeolocationPosition | null>(null);
@@ -105,6 +108,31 @@ export const ConsumerProfile = () => {
       db.consumers.update(id, { last_interacted_at: new Date().toISOString() }).catch(console.error);
     }
   }, [id, consumer]);
+
+  const handleCompleteDelivery = async () => {
+    if (!dispatchItemId) {
+      toast.error('No active dispatch found for this consumer.');
+      return;
+    }
+    
+    setIsCompletingDelivery(true);
+    try {
+      const { error } = await supabase
+        .from('dispatch_items')
+        .update({ status: 'COMPLETED' })
+        .eq('id', dispatchItemId);
+        
+      if (error) throw error;
+      
+      toast.success('Delivery marked as complete!');
+      navigate(-1); // go back to the route
+    } catch (error) {
+      console.error('Error completing delivery:', error);
+      toast.error('Failed to complete delivery.');
+    } finally {
+      setIsCompletingDelivery(false);
+    }
+  };
 
   if (consumer === undefined) {
     return (
@@ -362,7 +390,7 @@ export const ConsumerProfile = () => {
         </div>
       </header>
 
-      <ConsumerModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} consumerToEdit={consumer} />
+      <ConsumerModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} initialData={consumer} />
 
       <ConfirmationModal
         isOpen={photoToDelete !== null}
@@ -446,6 +474,25 @@ export const ConsumerProfile = () => {
             </div>
           </div>
         </section>
+
+        {/* --- DELIVERY ACTION --- */}
+        {dispatchItemId && (
+          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 mb-2 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-bl-full -mr-10 -mt-10 blur-2xl"></div>
+            
+            <h3 className="font-black text-slate-800 text-lg mb-2">Delivery Status</h3>
+            <p className="text-sm text-slate-500 mb-5">Mark this consumer's delivery as completed for today's route.</p>
+            
+            <button 
+              onClick={handleCompleteDelivery}
+              disabled={isCompletingDelivery}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 active:scale-95 transition-all"
+            >
+              {isCompletingDelivery ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle size={24} />}
+              Complete Delivery
+            </button>
+          </div>
+        )}
 
         {/* Location & Photos Task Board */}
         <section className="space-y-4">
