@@ -114,38 +114,25 @@ export const AgentSearch = () => {
     const searchWords = term.split(/\s+/).filter(w => w.length > 0);
     
     if (searchWords.length === 0) {
-      // Fetch consumers with last_interacted_at
-      let recent = await db.consumers
-        .orderBy('last_interacted_at')
-        .reverse()
-        .filter(c => {
-          if (c.isDeleted) return false;
-          if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
-          if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
-          return true;
-        })
-        .limit(limit)
-        .toArray();
-
-      if (recent.length < limit) {
-        const remainingLimit = limit - recent.length;
-        
-        // Fetch older consumers without last_interacted_at to fill the gap
-        let older = await db.consumers
-          .filter(c => {
-            if (c.isDeleted) return false;
-            if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
-            if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
-            if (c.last_interacted_at) return false; // Already included in recent
-            return true;
-          })
-          .limit(remainingLimit)
-          .toArray();
-          
-        return [...recent, ...older];
-      }
+      // Fetch all consumers (bulk read is much faster than indexed cursor for full scans)
+      let allConsumers = await db.consumers.toArray();
       
-      return recent;
+      // Filter in-memory (V8 engine is much faster than Dexie cursor iteration)
+      let filtered = allConsumers.filter(c => {
+        if (c.isDeleted) return false;
+        if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
+        if (filterStatus === 'pending' && (c.has_location && c.has_photos)) return false;
+        return true;
+      });
+
+      // Sort by last_interacted_at descending
+      filtered.sort((a, b) => {
+        const tA = a.last_interacted_at ? new Date(a.last_interacted_at).getTime() : 0;
+        const tB = b.last_interacted_at ? new Date(b.last_interacted_at).getTime() : 0;
+        return tB - tA;
+      });
+
+      return filtered.slice(0, limit);
     }
     
     // Has search term: Use ultra-fast index
