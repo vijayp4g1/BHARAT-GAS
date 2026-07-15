@@ -107,12 +107,15 @@ export const ConsumerPortal = () => {
 
     setIsCompressing(true);
     try {
-      const compressedBlob = await compressImage(file);
-      const fileName = `${consumer.id}-${Date.now()}.jpg`;
+      const compressedBase64 = await compressImage(file);
+      const response = await fetch(compressedBase64);
+      const blob = await response.blob();
+      
+      const fileName = `${consumer.id}/${Date.now()}-house.jpg`;
       
       const { error: uploadError } = await supabase.storage
         .from('consumer-photos')
-        .upload(fileName, compressedBlob, { contentType: 'image/jpeg' });
+        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
 
       if (uploadError) throw uploadError;
 
