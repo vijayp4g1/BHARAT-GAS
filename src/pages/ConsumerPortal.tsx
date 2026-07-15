@@ -65,6 +65,14 @@ export const ConsumerPortal = () => {
       return;
     }
 
+    const confirmLocation = window.confirm(
+      "IMPORTANT: Please ensure you are standing exactly at your house/delivery location right now before capturing GPS.\n\nAre you currently at your house?"
+    );
+
+    if (!confirmLocation) {
+      return;
+    }
+
     setIsCapturingGPS(true);
     navigator.geolocation.getCurrentPosition(
       async (position) => {
