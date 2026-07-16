@@ -112,20 +112,79 @@ export const AgentRoute = () => {
         })
         .filter((item: any) => !item.isCompleted); // Hide completed ones
 
-      // Sort: items with location by distance, then items without location
-      processedItems.sort((a, b) => {
-        if (a.hasLocation && !b.hasLocation) return -1;
-        if (!a.hasLocation && b.hasLocation) return 1;
-        return a.distance - b.distance;
-      });
+      // Smart Routing: Nearest Neighbor TSP Algorithm
+      const itemsWithLocation = processedItems.filter((i: any) => i.hasLocation && i.latitude && i.longitude);
+      const itemsWithoutLocation = processedItems.filter((i: any) => !(i.hasLocation && i.latitude && i.longitude));
 
-      setRouteItems(processedItems);
+      const optimizedRoute = [];
+      let currentLat = location?.latitude;
+      let currentLng = location?.longitude;
+
+      if (currentLat && currentLng && itemsWithLocation.length > 0) {
+        let unvisited = [...itemsWithLocation];
+        
+        while (unvisited.length > 0) {
+          let nearestIdx = 0;
+          let minDistance = Infinity;
+
+          for (let i = 0; i < unvisited.length; i++) {
+            const dist = getDistance(currentLat, currentLng, unvisited[i].latitude, unvisited[i].longitude);
+            if (dist < minDistance) {
+              minDistance = dist;
+              nearestIdx = i;
+            }
+          }
+
+          const nextStop = unvisited.splice(nearestIdx, 1)[0];
+          
+          // For UI purposes, we'll still store the distance from the agent's actual location
+          if (location) {
+             nextStop.distance = getDistance(location.latitude, location.longitude, nextStop.latitude, nextStop.longitude);
+          }
+          
+          optimizedRoute.push(nextStop);
+          
+          // Move current location to this stop for the next iteration
+          currentLat = nextStop.latitude;
+          currentLng = nextStop.longitude;
+        }
+      } else {
+        // Fallback if no agent location is available
+        optimizedRoute.push(...itemsWithLocation);
+      }
+
+      const finalRoute = [...optimizedRoute, ...itemsWithoutLocation];
+
+      setRouteItems(finalRoute);
     } catch (error) {
       console.error('Error fetching route:', error);
       toast.error('Failed to load route');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleNavigateFullRoute = () => {
+    if (!location) return;
+
+    const stops = routeItems.filter(i => i.hasLocation && i.latitude && i.longitude);
+    if (stops.length === 0) return;
+
+    // Google Maps dir URL limits waypoints, usually 9 is safe
+    const maxStops = 10;
+    const routeStops = stops.slice(0, maxStops);
+
+    const origin = `${location.latitude},${location.longitude}`;
+    const destination = `${routeStops[routeStops.length - 1].latitude},${routeStops[routeStops.length - 1].longitude}`;
+    
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+    
+    if (routeStops.length > 1) {
+      const waypoints = routeStops.slice(0, -1).map(s => `${s.latitude},${s.longitude}`).join('|');
+      url += `&waypoints=${waypoints}`;
+    }
+
+    window.open(url, '_blank');
   };
 
   const center = location ? [location.latitude, location.longitude] as [number, number] : [17.3850, 78.4867] as [number, number];
@@ -173,6 +232,18 @@ export const AgentRoute = () => {
               </div>
               {locationError && <span className="text-red-200 text-xs bg-red-900/30 px-2 py-1 rounded">GPS Issue</span>}
             </div>
+
+            {/* Navigate Full Route Button */}
+            {location && routeItems.filter(i => i.hasLocation && i.latitude && i.longitude).length > 0 && (
+              <div className="p-3 pb-0 z-10 relative bg-slate-50">
+                <button 
+                  onClick={handleNavigateFullRoute}
+                  className="w-full bg-gradient-to-r from-emerald-500 to-emerald-400 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm hover:from-emerald-600 hover:to-emerald-500 active:scale-95 transition-all"
+                >
+                  <Navigation size={20} /> Navigate Full Route
+                </button>
+              </div>
+            )}
 
             {viewMode === 'map' ? (
               <div className="flex-1 relative z-0">
