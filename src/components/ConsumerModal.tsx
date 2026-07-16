@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { X, Save, Loader2, UserPlus, Edit3 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import toast from 'react-hot-toast';
+import { syncOfflineData } from '../lib/sync';
 
 export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolean, onClose: () => void, initialData?: Consumer }) => {
   const [loading, setLoading] = useState(false);
@@ -80,6 +81,9 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
         });
         toast.success('Consumer updated successfully!');
       }
+
+      // Trigger sync immediately to push to live database
+      syncOfflineData().catch(console.error);
 
       onClose();
     } catch (error) {

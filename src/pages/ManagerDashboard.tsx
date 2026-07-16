@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, ArrowRight } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, ArrowRight, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
+import { BulkImportModal } from '../components/BulkImportModal';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 
 const CountUp = ({ end, duration = 1500 }: { end: number, duration?: number }) => {
@@ -35,6 +36,7 @@ export const ManagerDashboard = () => {
   const [agentStats, setAgentStats] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [selectedAgentForModal, setSelectedAgentForModal] = useState<{id: string, name: string} | null>(null);
   const navigate = useNavigate();
 
@@ -192,6 +194,9 @@ export const ManagerDashboard = () => {
           </span>
         </h1>
         <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setIsImportModalOpen(true)} className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3 sm:px-4 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-black/10 active:scale-95 text-sm">
+            <Upload size={18} /> <span className="hidden sm:inline">Import</span>
+          </button>
           <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-1.5 bg-white text-blue-900 hover:bg-blue-50 px-3 sm:px-4 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-black/10 active:scale-95 text-sm">
             <Plus size={18} /> <span className="hidden sm:inline">Add Consumer</span>
           </button>
@@ -208,6 +213,15 @@ export const ManagerDashboard = () => {
         setIsAddModalOpen(false);
         fetchDashboardData();
       }} />
+
+      <BulkImportModal 
+        isOpen={isImportModalOpen} 
+        onClose={() => setIsImportModalOpen(false)} 
+        onSuccess={() => {
+          setIsImportModalOpen(false);
+          fetchDashboardData();
+        }} 
+      />
 
       <main className="max-w-6xl w-full mx-auto p-4 sm:p-5 md:p-8 space-y-6 md:space-y-8 mt-2">
         
