@@ -253,7 +253,7 @@ export const ManagerMap = () => {
             });
 
             return (
-              <Marker key={agent.agent_id} position={[agent.latitude, agent.longitude]} icon={agentIcon}>
+              <Marker key={agent.agent_id} position={[agent.latitude, agent.longitude]} icon={agentIcon} zIndexOffset={1000}>
                 <Popup className="premium-popup">
                   <div className="flex flex-col gap-2 p-1 min-w-[140px]">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-2">

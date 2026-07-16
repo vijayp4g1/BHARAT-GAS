@@ -47,7 +47,7 @@ serve(async (req) => {
     // If real email → they are the owner, allow through
 
     // Process request
-    const { name, username, password, role } = await req.json()
+    const { name, username, password, phone, role } = await req.json()
 
     if (!name || !username || !password) {
       throw new Error('Missing required fields')
@@ -72,6 +72,7 @@ serve(async (req) => {
         id: authData.user.id,
         name,
         username: safeUsername,
+        phone: phone || null,
         role: role || 'AGENT',
         status: 'ACTIVE'
       })
