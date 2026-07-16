@@ -128,7 +128,7 @@ export const AgentRoute = () => {
           let minDistance = Infinity;
 
           for (let i = 0; i < unvisited.length; i++) {
-            const dist = getDistance(currentLat, currentLng, unvisited[i].latitude, unvisited[i].longitude);
+            const dist = getDistance(currentLat!, currentLng!, unvisited[i].latitude, unvisited[i].longitude);
             if (dist < minDistance) {
               minDistance = dist;
               nearestIdx = i;
