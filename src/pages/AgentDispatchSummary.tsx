@@ -43,7 +43,23 @@ export const AgentDispatchSummary: React.FC = () => {
   const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [rawInput, setRawInput] = useState<string>('');
   const [singleInput, setSingleInput] = useState<string>('');
-  const [entries, setEntries] = useState<ItemEntry[]>([]);
+  const [entries, setEntries] = useState<ItemEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('bgcls_day_end_entries');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Auto-save entries to localStorage on changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('bgcls_day_end_entries', JSON.stringify(entries));
+    } catch (err) {
+      console.error('Failed to save entries to localStorage:', err);
+    }
+  }, [entries]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [copiedReport, setCopiedReport] = useState<boolean>(false);
   const [copiedCsv, setCopiedCsv] = useState<boolean>(false);
@@ -552,6 +568,7 @@ export const AgentDispatchSummary: React.FC = () => {
     if (entries.length === 0) return;
     if (confirm('Are you sure you want to clear all added consumer numbers?')) {
       setEntries([]);
+      localStorage.removeItem('bgcls_day_end_entries');
       toast.success('List cleared');
     }
   };
