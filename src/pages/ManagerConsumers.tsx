@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Loader2, ArrowLeft, Filter, MapPin, Camera, Phone, Upload, X, MessageCircle, MessageSquare } from 'lucide-react';
+import { Search, ArrowLeft, Filter, MapPin, Camera, Phone, MessageCircle, MessageSquare } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';

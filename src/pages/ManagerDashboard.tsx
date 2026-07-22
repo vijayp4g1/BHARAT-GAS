@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, ArrowRight, Upload } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { BulkImportModal } from '../components/BulkImportModal';

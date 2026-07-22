@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Search, Wifi, WifiOff, Loader2, RefreshCw, Database, Users } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Loader2, RefreshCw, Database, Users } from 'lucide-react';
 import db from '../lib/db';
 import { ConsumerCard } from '../components/ConsumerCard';
 import { ConsumerModal } from '../components/ConsumerModal';
