@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Search, Map } from 'lucide-react';
+import { Search, Map, ClipboardCheck } from 'lucide-react';
 
 export const AgentBottomNav = () => {
   return (
@@ -36,6 +36,23 @@ export const AgentBottomNav = () => {
             <>
               <Map size={22} className={`mb-1 transition-transform ${isActive ? 'scale-110' : ''}`} />
               <span className="text-[10px] uppercase tracking-wider">My Route</span>
+            </>
+          )}
+        </NavLink>
+
+        <NavLink 
+          to="/agent/dispatch" 
+          className={({ isActive }) => `
+            flex flex-col items-center p-2 rounded-xl min-w-[80px] transition-all
+            ${isActive 
+              ? 'text-blue-600 bg-blue-50 font-bold' 
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium'}
+          `}
+        >
+          {({ isActive }) => (
+            <>
+              <ClipboardCheck size={22} className={`mb-1 transition-transform ${isActive ? 'scale-110' : ''}`} />
+              <span className="text-[10px] uppercase tracking-wider">Day End</span>
             </>
           )}
         </NavLink>

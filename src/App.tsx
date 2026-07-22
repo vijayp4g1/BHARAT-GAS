@@ -6,6 +6,7 @@ import { setupSyncListeners, syncOfflineData } from './lib/sync';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
+import { AgentDispatchSummary } from './pages/AgentDispatchSummary';
 import { ConsumerProfile } from './pages/ConsumerProfile';
 import { ConsumerPortal } from './pages/ConsumerPortal';
 import { ManagerDashboard } from './pages/ManagerDashboard';
@@ -43,6 +44,9 @@ function App() {
         } />
         <Route path="/agent/route" element={
           <ProtectedRoute allowedRole="AGENT"><AgentRoute /></ProtectedRoute>
+        } />
+        <Route path="/agent/dispatch" element={
+          <ProtectedRoute allowedRole="AGENT"><AgentDispatchSummary /></ProtectedRoute>
         } />
         <Route path="/agent/consumer/:id" element={
           <ProtectedRoute allowedRole="AGENT"><ConsumerProfile /></ProtectedRoute>
