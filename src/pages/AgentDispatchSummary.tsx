@@ -244,15 +244,26 @@ export const AgentDispatchSummary: React.FC = () => {
       try {
         let combinedMap = new Map<string, Consumer>();
 
-        // 1. Local IndexedDB search strictly on consumer_number field
+        // 1. IndexedDB fast prefix match using consumer_number index
         const localMatches = await db.consumers
-          .filter((c) => !!(c.consumer_number && c.consumer_number.toLowerCase().includes(query)))
+          .where('consumer_number')
+          .startsWith(query)
           .limit(30)
           .toArray();
 
+        // Fallback to substring match if prefix search returns few results
+        if (localMatches.length < 15) {
+          const substringMatches = await db.consumers
+            .filter((c) => !!(c.consumer_number && c.consumer_number.toLowerCase().includes(query)))
+            .limit(30)
+            .toArray();
+          
+          substringMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
+        }
+
         localMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
 
-        // 2. Remote Supabase search fallback on consumer_number if online
+        // 2. Remote Supabase search fallback on consumer_number if online and results low
         if (navigator.onLine && combinedMap.size < 10) {
           const { data: remoteData } = await supabase
             .from('consumers')
