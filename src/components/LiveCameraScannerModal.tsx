@@ -61,18 +61,56 @@ function playSuccessBeep() {
   }
 }
 
-function normalizeThermalDigits(rawText: string): string {
-  return rawText
-    .replace(/c0ns/gi, 'cons')
-    .replace(/n0/gi, 'no')
-    .replace(/;/g, ':')
-    .replace(/I|l|i|\|/g, '1')
-    .replace(/O|o|Q/g, '0')
+function cleanAndNormalizeDigits(raw: string): string {
+  return raw
+    .toUpperCase()
+    .replace(/I|L|\|/g, '1')
+    .replace(/O|Q/g, '0')
     .replace(/B/g, '8')
-    .replace(/Z|z/g, '2')
-    .replace(/S|s/g, '5')
-    .replace(/G|g/g, '6')
-    .replace(/T|t/g, '7');
+    .replace(/Z/g, '2')
+    .replace(/S/g, '5')
+    .replace(/G/g, '6')
+    .replace(/T/g, '7')
+    .replace(/[^0-9]/g, '');
+}
+
+function getLevenshteinDistance(a: string, b: string): number {
+  const tmp: number[][] = [];
+  let i, j;
+  for (i = 0; i <= a.length; i++) {
+    tmp[i] = [i];
+  }
+  for (j = 0; j <= b.length; j++) {
+    tmp[0][j] = j;
+  }
+  for (i = 1; i <= a.length; i++) {
+    for (j = 1; j <= b.length; j++) {
+      tmp[i][j] = Math.min(
+        tmp[i - 1][j] + 1,
+        tmp[i][j - 1] + 1,
+        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return tmp[a.length][b.length];
+}
+
+function areNamesSimilar(scanned: string, dbName: string): boolean {
+  const s = scanned.toLowerCase().replace(/[^a-z]/g, '');
+  const d = dbName.toLowerCase().replace(/[^a-z]/g, '');
+  
+  if (s.length === 0 || d.length === 0) return false;
+  
+  if (s.length <= 3 || d.length <= 3) {
+    return d.includes(s) || s.includes(d);
+  }
+  
+  if (d.includes(s) || s.includes(d)) return true;
+  
+  const dist = getLevenshteinDistance(s, d.substring(0, s.length));
+  const maxLen = Math.max(s.length, Math.min(d.length, s.length));
+  const similarity = 1 - dist / maxLen;
+  return similarity >= 0.5;
 }
 
 export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
@@ -183,7 +221,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
-  // Process Frame with Dual Pass (Full Frame + Center Crop) & Dual Signal (Number + Name)
+  // Process Frame with Focused Line-Pair Matching (Cons No + Name directly below)
   const processFrame = async () => {
     if (isProcessingFrameRef.current || !workerRef.current || !videoRef.current || !canvasRef.current) {
       return;
@@ -224,115 +262,109 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       // Run OCR on canvas
       const { data: { text } } = await workerRef.current.recognize(canvas);
 
-      const rawNormalized = text.replace(/c0ns/gi, 'cons').replace(/n0/gi, 'no').replace(/;/g, ':');
-      const thermalNormalized = normalizeThermalDigits(text);
+      // Normalize line breaks and colons to facilitate line matching
+      const normalizedText = (text as string)
+        .replace(/;/g, ':')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
 
-      const combinedTexts = [rawNormalized, thermalNormalized];
-      let candidates: string[] = [];
+      const lines = normalizedText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
 
-      for (const t of combinedTexts) {
-        const patterns = [
-          /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9]{5,12})/i,
-          /Cons\s*No\s*[:.\s]*([0-9]{5,12})/i,
-          /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9]{5,12})/i,
-        ];
+      // Regex patterns allowing digit-lookalike letters (e.g. B->8, l->1, O->0)
+      const numberPatterns = [
+        /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
+        /Cons\s*No\s*[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
+        /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9I|liOoQBZzSsGgTt]{5,12})/i,
+      ];
+      const standalonePattern = /\b([0-9I|liOoQBZzSsGgTt]{6,10})\b/;
 
-        for (const pat of patterns) {
-          const match = t.match(pat);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        let candidateNum = '';
+
+        // 1. Try matching explicit consumer number patterns
+        for (const pat of numberPatterns) {
+          const match = line.match(pat);
           if (match && match[1]) {
-            const num = match[1].trim();
-            if (!DISTRIBUTOR_BLACKLIST.has(num) && !candidates.includes(num)) {
-              candidates.push(num);
+            candidateNum = match[1].trim();
+            break;
+          }
+        }
+
+        // 2. If no pattern matches, try matching standalone numeric words
+        if (!candidateNum) {
+          const match = line.match(standalonePattern);
+          if (match && match[1]) {
+            candidateNum = match[1].trim();
+          }
+        }
+
+        if (!candidateNum) continue;
+
+        const cleanNum = cleanAndNormalizeDigits(candidateNum);
+        if (cleanNum.length < 5 || cleanNum.length > 12 || DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+          continue;
+        }
+
+        // 3. Locate the candidate name line (the first non-empty text line directly below)
+        let candidateName = '';
+        for (let offset = 1; offset <= 2; offset++) {
+          const nextLine = lines[i + offset];
+          if (nextLine) {
+            // Clean up the line to ignore purely numeric or symbol lines
+            const cleanedLine = nextLine.replace(/[^a-zA-Z\s]/g, '').trim();
+            if (cleanedLine.length >= 3) {
+              const uppercaseWords = cleanedLine.match(/\b[A-Z]{3,15}\b/g) || [];
+              const filteredWords = uppercaseWords.filter(
+                (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
+              );
+              if (filteredWords.length > 0) {
+                candidateName = cleanedLine;
+                break;
+              }
             }
           }
         }
 
-        const allDigits = t.match(/\b([0-9]{6,10})\b/g) || [];
-        allDigits.forEach((num: string) => {
-          if (!DISTRIBUTOR_BLACKLIST.has(num) && !candidates.includes(num)) {
-            candidates.push(num);
-          }
-        });
-      }
-
-      // 1. Database lookup by Consumer Number
-      for (const candidate of candidates) {
+        // 4. Verify against Database
         const localMatch = await db.consumers
           .where('consumer_number')
-          .equalsIgnoreCase(candidate)
+          .equalsIgnoreCase(cleanNum)
           .first();
 
         if (localMatch) {
           const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
-
           if (isAlreadyAdded) {
             setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
             setTimeout(() => setAlreadyAddedNotice(null), 3000);
             return;
           }
 
-          // NEW UNADDED CONSUMER FOUND!
-          scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
-          setAlreadyAddedNotice(null);
+          // Verify the name below the number matches the database record
+          if (candidateName) {
+            const isNameVerified = areNamesSimilar(candidateName, localMatch.consumer_name);
 
-          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-          playSuccessBeep();
+            if (isNameVerified) {
+              scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
+              setAlreadyAddedNotice(null);
 
-          setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
-          setScannedCount((prev) => prev + 1);
+              if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+              playSuccessBeep();
 
-          onConsumerScanned({
-            consumer_number: localMatch.consumer_number,
-            consumer_name: localMatch.consumer_name,
-            address: localMatch.address,
-            mobile: localMatch.mobile,
-            found: true,
-          });
+              setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
+              setScannedCount((prev) => prev + 1);
 
-          return;
-        }
-      }
+              onConsumerScanned({
+                consumer_number: localMatch.consumer_number,
+                consumer_name: localMatch.consumer_name,
+                address: localMatch.address,
+                mobile: localMatch.mobile,
+                found: true,
+              });
 
-      // 2. Secondary AI Search: Database lookup by Consumer Name (e.g. PRAKASH)
-      const uppercaseWords = rawNormalized.match(/\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g) || [];
-      const filteredWords = uppercaseWords.filter(
-        (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
-      );
-
-      if (filteredWords.length > 0) {
-        const nameCandidate = filteredWords[0];
-        const nameMatches = await db.consumers
-          .filter((c) => !!(c.consumer_name && c.consumer_name.toLowerCase().includes(nameCandidate.toLowerCase())))
-          .limit(3)
-          .toArray();
-
-        if (nameMatches.length > 0) {
-          const topMatch = nameMatches[0];
-          const isAlreadyAdded = scannedSetRef.current.has(topMatch.consumer_number.toLowerCase());
-
-          if (isAlreadyAdded) {
-            setAlreadyAddedNotice(`Consumer #${topMatch.consumer_number} (${topMatch.consumer_name}) is ALREADY in your delivery list!`);
-            setTimeout(() => setAlreadyAddedNotice(null), 3000);
-            return;
+              return;
+            }
           }
-
-          // NEW UNADDED CONSUMER FOUND BY NAME!
-          scannedSetRef.current.add(topMatch.consumer_number.toLowerCase());
-          setAlreadyAddedNotice(null);
-
-          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-          playSuccessBeep();
-
-          setLastScanned(`${topMatch.consumer_number} - ${topMatch.consumer_name}`);
-          setScannedCount((prev) => prev + 1);
-
-          onConsumerScanned({
-            consumer_number: topMatch.consumer_number,
-            consumer_name: topMatch.consumer_name,
-            address: topMatch.address,
-            mobile: topMatch.mobile,
-            found: true,
-          });
         }
       }
     } catch (err) {

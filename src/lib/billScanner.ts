@@ -87,6 +87,58 @@ export async function preprocessImage(imageSource: File | Blob | string): Promis
   });
 }
 
+function cleanAndNormalizeDigits(raw: string): string {
+  return raw
+    .toUpperCase()
+    .replace(/I|L|\|/g, '1')
+    .replace(/O|Q/g, '0')
+    .replace(/B/g, '8')
+    .replace(/Z/g, '2')
+    .replace(/S/g, '5')
+    .replace(/G/g, '6')
+    .replace(/T/g, '7')
+    .replace(/[^0-9]/g, '');
+}
+
+function getLevenshteinDistance(a: string, b: string): number {
+  const tmp: number[][] = [];
+  let i, j;
+  for (i = 0; i <= a.length; i++) {
+    tmp[i] = [i];
+  }
+  for (j = 0; j <= b.length; j++) {
+    tmp[0][j] = j;
+  }
+  for (i = 1; i <= a.length; i++) {
+    for (j = 1; j <= b.length; j++) {
+      tmp[i][j] = Math.min(
+        tmp[i - 1][j] + 1,
+        tmp[i][j - 1] + 1,
+        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return tmp[a.length][b.length];
+}
+
+function areNamesSimilar(scanned: string, dbName: string): boolean {
+  const s = scanned.toLowerCase().replace(/[^a-z]/g, '');
+  const d = dbName.toLowerCase().replace(/[^a-z]/g, '');
+  
+  if (s.length === 0 || d.length === 0) return false;
+  
+  if (s.length <= 3 || d.length <= 3) {
+    return d.includes(s) || s.includes(d);
+  }
+  
+  if (d.includes(s) || s.includes(d)) return true;
+  
+  const dist = getLevenshteinDistance(s, d.substring(0, s.length));
+  const maxLen = Math.max(s.length, Math.min(d.length, s.length));
+  const similarity = 1 - dist / maxLen;
+  return similarity >= 0.5;
+}
+
 /**
  * Extracts Consumer Number & Consumer Name from Siddhartha Bharatgas Bill Receipt photo
  */
@@ -103,128 +155,131 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
   console.log('--- OCR Extracted Text ---');
   console.log(text);
 
-  // Clean OCR text for thermal print noise (e.g. c0ns -> cons, n0 -> no)
+  // Normalize line breaks and colons to facilitate line matching
   const normalizedText = text
-    .replace(/c0ns/gi, 'cons')
-    .replace(/n0/gi, 'no')
-    .replace(/;/g, ':');
+    .replace(/;/g, ':')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
 
-  // 1. Target Regex Patterns for Consumer Number (e.g. Cons No:28721381)
+  const lines = normalizedText.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+
+  // Regex patterns allowing digit-lookalike letters (e.g. B->8, l->1, O->0)
   const numberPatterns = [
-    /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9]{5,12})/i,
-    /Cons\s*No\s*[:.\s]*([0-9]{5,12})/i,
-    /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9]{5,12})/i,
+    /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
+    /Cons\s*No\s*[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
+    /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9I|liOoQBZzSsGgTt]{5,12})/i,
   ];
+  const standalonePattern = /\b([0-9I|liOoQBZzSsGgTt]{6,10})\b/;
 
-  let candidateNumbers: string[] = [];
+  let firstDetectedNum = '';
 
-  for (const pat of numberPatterns) {
-    const match = normalizedText.match(pat);
-    if (match && match[1]) {
-      const num = match[1].trim();
-      if (!DISTRIBUTOR_BLACKLIST.has(num)) {
-        candidateNumbers.push(num);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let candidateNum = '';
+
+    // 1. Try matching explicit consumer number patterns
+    for (const pat of numberPatterns) {
+      const match = line.match(pat);
+      if (match && match[1]) {
+        candidateNum = match[1].trim();
+        break;
       }
     }
-  }
 
-  // Secondary candidate digit sequences
-  const allDigitMatches = normalizedText.match(/\b([0-9]{6,10})\b/g) || [];
-  allDigitMatches.forEach((num) => {
-    if (!DISTRIBUTOR_BLACKLIST.has(num) && !candidateNumbers.includes(num)) {
-      candidateNumbers.push(num);
+    // 2. If no pattern matches, try matching standalone numeric words
+    if (!candidateNum) {
+      const match = line.match(standalonePattern);
+      if (match && match[1]) {
+        candidateNum = match[1].trim();
+      }
     }
-  });
 
-  // 2. Target Regex Patterns for Consumer Name (e.g. PRAKASH, PRAKASH BANDIKA)
-  const namePatterns = [
-    /(?:Cons\s*No|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,30})/i,
-    /(?:Details\s*of\s*Receiver)[^\n]*\n[^\n]*\n\s*([A-Z\s]{3,30})/i,
-    /\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g,
-  ];
+    if (!candidateNum) continue;
 
-  let candidateNames: string[] = [];
-
-  const nameMatch1 = normalizedText.match(/(?:Cons\s*No|ConsNo|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,25})/i);
-  if (nameMatch1 && nameMatch1[1]) {
-    const nameStr = nameMatch1[1].trim();
-    if (nameStr.length >= 3 && !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS'].includes(nameStr)) {
-      candidateNames.push(nameStr);
+    const cleanNum = cleanAndNormalizeDigits(candidateNum);
+    if (cleanNum.length < 5 || cleanNum.length > 12 || DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+      continue;
     }
-  }
 
-  console.log('Candidate numbers:', candidateNumbers);
-  console.log('Candidate names:', candidateNames);
+    if (!firstDetectedNum) {
+      firstDetectedNum = cleanNum;
+    }
 
-  // 3. Primary AI Search: Match Consumer Number in 31k IndexedDB
-  for (const candidate of candidateNumbers) {
+    // 3. Locate the candidate name line (the first non-empty text line directly below)
+    let candidateName = '';
+    for (let offset = 1; offset <= 2; offset++) {
+      const nextLine = lines[i + offset];
+      if (nextLine) {
+        // Clean up the line to ignore purely numeric or symbol lines
+        const cleanedLine = nextLine.replace(/[^a-zA-Z\s]/g, '').trim();
+        if (cleanedLine.length >= 3) {
+          const uppercaseWords = cleanedLine.match(/\b[A-Z]{3,15}\b/g) || [];
+          const filteredWords = uppercaseWords.filter(
+            (w) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
+          );
+          if (filteredWords.length > 0) {
+            candidateName = cleanedLine;
+            break;
+          }
+        }
+      }
+    }
+
+    // 4. Verify against local Database
     const localMatch = await db.consumers
       .where('consumer_number')
-      .equalsIgnoreCase(candidate)
+      .equalsIgnoreCase(cleanNum)
       .first();
 
     if (localMatch) {
-      console.log(`Found database match by Number #${candidate}:`, localMatch);
-      return {
-        consumerNumber: localMatch.consumer_number,
-        consumerName: localMatch.consumer_name,
-        address: localMatch.address,
-        mobile: localMatch.mobile,
-        found: true,
-        rawText: text,
-      };
+      // Verify the name below the number matches the database record
+      if (candidateName) {
+        const isNameVerified = areNamesSimilar(candidateName, localMatch.consumer_name);
+
+        if (isNameVerified) {
+          console.log(`Found database match by Number #${cleanNum}:`, localMatch);
+          return {
+            consumerNumber: localMatch.consumer_number,
+            consumerName: localMatch.consumer_name,
+            address: localMatch.address,
+            mobile: localMatch.mobile,
+            found: true,
+            rawText: text,
+          };
+        }
+      }
     }
-  }
 
-  // 4. Secondary AI Search: Match Consumer Name in 31k IndexedDB
-  for (const nameCandidate of candidateNames) {
-    const cleanName = nameCandidate.split('\n')[0].trim();
-    if (cleanName.length < 3) continue;
-
-    // Search IndexedDB for consumer_name
-    const nameMatches = await db.consumers
-      .filter((c) => !!(c.consumer_name && c.consumer_name.toLowerCase().includes(cleanName.toLowerCase())))
-      .limit(5)
-      .toArray();
-
-    if (nameMatches.length > 0) {
-      const topMatch = nameMatches[0];
-      console.log(`Found database match by Name "${cleanName}":`, topMatch);
-      return {
-        consumerNumber: topMatch.consumer_number,
-        consumerName: topMatch.consumer_name,
-        address: topMatch.address,
-        mobile: topMatch.mobile,
-        found: true,
-        rawText: text,
-      };
-    }
-  }
-
-  // 5. Remote Supabase Validation Fallback
-  if (navigator.onLine) {
-    for (const candidate of candidateNumbers) {
+    // 5. Remote Supabase Validation Fallback (verified with name check)
+    if (navigator.onLine) {
       const { data: remoteData } = await supabase
         .from('consumers')
         .select('consumer_number, consumer_name, address, mobile')
-        .eq('consumer_number', candidate)
+        .eq('consumer_number', cleanNum)
         .maybeSingle();
 
       if (remoteData) {
-        return {
-          consumerNumber: remoteData.consumer_number,
-          consumerName: remoteData.consumer_name,
-          address: remoteData.address,
-          mobile: remoteData.mobile,
-          found: true,
-          rawText: text,
-        };
+        if (candidateName) {
+          const isNameVerified = areNamesSimilar(candidateName, remoteData.consumer_name as string);
+
+          if (isNameVerified) {
+            console.log(`Found remote database match by Number #${cleanNum}:`, remoteData);
+            return {
+              consumerNumber: remoteData.consumer_number,
+              consumerName: remoteData.consumer_name,
+              address: remoteData.address,
+              mobile: remoteData.mobile,
+              found: true,
+              rawText: text,
+            };
+          }
+        }
       }
     }
   }
 
   return {
-    consumerNumber: candidateNumbers.length > 0 ? candidateNumbers[0] : '',
+    consumerNumber: firstDetectedNum,
     found: false,
     rawText: text,
   };
