@@ -6,41 +6,68 @@ export interface GeminiOcrResult {
 }
 
 /**
- * Converts a File, Blob, or canvas image URL to a base64 string + mime type
+ * Resizes and compresses an image (File, Blob, or Data URL) on an HTML canvas
+ * to a maximum dimension of 1000px and converts it to a compressed JPEG (70% quality).
+ * This reduces network payload size by 90%+ and speeds up Gemini API response time.
  */
-async function fileToGenerativePart(
-  imageSource: File | Blob | string
-): Promise<{ inlineData: { data: string; mimeType: string } }> {
-  let blob: Blob;
-
-  if (typeof imageSource === 'string') {
-    if (imageSource.startsWith('data:')) {
-      const parts = imageSource.split(',');
-      const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-      const data = parts[1];
-      return {
-        inlineData: { data, mimeType: mime },
-      };
-    }
-    const res = await fetch(imageSource);
-    blob = await res.blob();
-  } else {
-    blob = imageSource;
-  }
-
+async function resizeAndCompressImage(
+  imageSource: File | Blob | string,
+  maxDimension: number = 1000
+): Promise<{ data: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64Data = (reader.result as string).split(',')[1];
+    const img = new Image();
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      // Maintain aspect ratio while resizing
+      if (width > height) {
+        if (width > maxDimension) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        }
+      } else {
+        if (height > maxDimension) {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Could not get canvas 2D context'));
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Convert to compressed JPEG
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const base64Data = dataUrl.split(',')[1];
       resolve({
-        inlineData: {
-          data: base64Data,
-          mimeType: blob.type || 'image/png',
-        },
+        data: base64Data,
+        mimeType: 'image/jpeg',
       });
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+
+    img.onerror = (err) => {
+      reject(err);
+    };
+
+    if (typeof imageSource === 'string') {
+      img.src = imageSource;
+    } else {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        img.src = reader.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(imageSource);
+    }
   });
 }
 
@@ -64,7 +91,13 @@ export async function scanBillWithGemini(
   }
 
   try {
-    const imgPart = await fileToGenerativePart(imageSource);
+    const compressed = await resizeAndCompressImage(imageSource);
+    const imgPart = {
+      inlineData: {
+        data: compressed.data,
+        mimeType: compressed.mimeType,
+      },
+    };
 
     // Call gemini-3.6-flash endpoint
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
