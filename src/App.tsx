@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
-import { setupSyncListeners, syncOfflineData } from './lib/sync';
+import { setupSyncListeners, syncOfflineData, pullLatestCloudData } from './lib/sync';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
@@ -22,6 +22,16 @@ function App() {
   useEffect(() => {
     setupSyncListeners();
     syncOfflineData().catch(console.error);
+    pullLatestCloudData().catch(console.error);
+
+    // Periodically pull latest data from cloud every 60 seconds when online
+    const intervalId = setInterval(() => {
+      if (navigator.onLine) {
+        pullLatestCloudData().catch(console.error);
+      }
+    }, 60000);
+
+    return () => clearInterval(intervalId);
   }, []);
 
   return (

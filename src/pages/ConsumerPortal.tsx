@@ -1,8 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { MapPin, Camera, CheckCircle, Loader2, Navigation, LogOut, ShieldCheck, Lock } from 'lucide-react';
+import { MapPin, Camera, CheckCircle, Loader2, Navigation, LogOut, ShieldCheck, Lock, HelpCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { compressImage } from '../lib/imageUtils';
+import { LocationPermissionModal } from '../components/LocationPermissionModal';
+import { getAccurateLocation } from '../lib/geolocation';
 
 export const ConsumerPortal = () => {
   const [mobile, setMobile] = useState('');
@@ -12,6 +14,8 @@ export const ConsumerPortal = () => {
 
   // Task states
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
   const [hasLocation, setHasLocation] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [hasPhoto, setHasPhoto] = useState(false);
@@ -59,14 +63,9 @@ export const ConsumerPortal = () => {
     setHasPhoto(false);
   };
 
-  const captureGPS = () => {
-    if (!navigator.geolocation) {
-      toast.error('GPS is not supported by your browser.');
-      return;
-    }
-
+  const captureGPS = async () => {
     const confirmLocation = window.confirm(
-      "IMPORTANT: Please ensure you are standing exactly at your house/delivery location right now before capturing GPS.\n\nAre you currently at your house?"
+      "IMPORTANT: Please ensure you are standing location right now before capturing GPS.\n\nAre you currently at your house?"
     );
 
     if (!confirmLocation) {
@@ -74,39 +73,48 @@ export const ConsumerPortal = () => {
     }
 
     setIsCapturingGPS(true);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        if (position.coords.accuracy > 2000) {
-          toast.error(`GPS signal is too weak (Accuracy: ${Math.round(position.coords.accuracy)}m). Please step outside or use a mobile phone for better GPS.`, { duration: 5000 });
-          setIsCapturingGPS(false);
-          return;
-        }
+    setGpsError(null);
 
-        try {
-          const { error } = await supabase.rpc('portal_upload_location', {
-            p_consumer_id: consumer.id,
-            p_lat: position.coords.latitude,
-            p_lng: position.coords.longitude,
-            p_acc: position.coords.accuracy
-          });
+    const result = await getAccurateLocation();
+    
+    if (result.error) {
+      setIsCapturingGPS(false);
+      setGpsError(result.error.message);
+      toast.error(result.error.message);
+      if (result.error.code === 'PERMISSION_DENIED') {
+        setIsPermissionModalOpen(true);
+      }
+      return;
+    }
 
-          if (error) throw error;
-          
-          setHasLocation(true);
-          toast.success('Location saved securely!');
-        } catch (err) {
-          console.error(err);
-          toast.error('Failed to save location.');
-        } finally {
-          setIsCapturingGPS(false);
-        }
-      },
-      (err) => {
-        toast.error(`GPS Error: ${err.message}`);
+    if (result.position) {
+      const position = result.position;
+      if (position.coords.accuracy > 2000) {
+        toast.error(`GPS signal is too weak (Accuracy: ${Math.round(position.coords.accuracy)}m). Please step outside or use a mobile phone for better GPS.`, { duration: 5000 });
         setIsCapturingGPS(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+        return;
+      }
+
+      try {
+        const { error } = await supabase.rpc('portal_upload_location', {
+          p_consumer_id: consumer.id,
+          p_lat: position.coords.latitude,
+          p_lng: position.coords.longitude,
+          p_acc: position.coords.accuracy
+        });
+
+        if (error) throw error;
+        
+        setHasLocation(true);
+        setGpsError(null);
+        toast.success('Location saved securely!');
+      } catch (err) {
+        console.error(err);
+        toast.error('Failed to save location.');
+      } finally {
+        setIsCapturingGPS(false);
+      }
+    }
   };
 
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -296,6 +304,18 @@ export const ConsumerPortal = () => {
                 {isCapturingGPS ? <Loader2 className="animate-spin" /> : <Navigation size={18} />}
                 {hasLocation ? 'Update Location' : 'Share Current Location'}
               </button>
+
+              {gpsError && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl space-y-2">
+                  <p className="text-xs text-red-600 font-semibold leading-tight">{gpsError}</p>
+                  <button
+                    onClick={() => setIsPermissionModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 hover:text-red-800 underline bg-white/60 px-2.5 py-1 rounded-md border border-red-200 shadow-2xs"
+                  >
+                    <HelpCircle size={13} /> How to fix location permissions
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Photo Task */}
@@ -342,6 +362,13 @@ export const ConsumerPortal = () => {
           <p className="text-[10px] text-slate-400">© 2026 Siddhartha Bharat Gas</p>
         </div>
       </main>
+
+      <LocationPermissionModal
+        isOpen={isPermissionModalOpen}
+        onClose={() => setIsPermissionModalOpen(false)}
+        onRetry={captureGPS}
+        errorMessage={gpsError}
+      />
     </div>
   );
 };

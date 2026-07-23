@@ -9,6 +9,9 @@ import toast from 'react-hot-toast';
 import { compressImage } from '../lib/imageUtils';
 import { ManagerConsumerModal } from '../components/ManagerConsumerModal';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { LocationPermissionModal } from '../components/LocationPermissionModal';
+import { getAccurateLocation } from '../lib/geolocation';
+import { HelpCircle } from 'lucide-react';
 
 // Fix Leaflet default marker
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -31,6 +34,8 @@ export const ManagerConsumerProfile = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<GeolocationPosition | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [newNote, setNewNote] = useState('');
@@ -44,42 +49,18 @@ export const ManagerConsumerProfile = () => {
     if (!id) return;
     setIsLoading(true);
     try {
-      const { data: cData, error: cError } = await supabase
-        .from('consumers')
-        .select('*')
-        .eq('id', id)
-        .single();
-        
-      if (cError) throw cError;
-      setConsumer(cData);
+      const [cRes, lRes, pRes, nRes] = await Promise.all([
+        supabase.from('consumers').select('*').eq('id', id).single(),
+        supabase.from('consumer_locations').select('*').eq('consumer_id', id).maybeSingle(),
+        supabase.from('consumer_photos').select('*').eq('consumer_id', id),
+        supabase.from('delivery_notes').select('*').eq('consumer_id', id).order('created_at', { ascending: false }),
+      ]);
 
-      const { data: lData } = await supabase
-        .from('consumer_locations')
-        .select('*')
-        .eq('consumer_id', id)
-        .limit(1)
-        .single();
-        
-      if (lData) setLocation(lData);
-      else setLocation(null);
-
-      const { data: pData } = await supabase
-        .from('consumer_photos')
-        .select('*')
-        .eq('consumer_id', id);
-        
-      if (pData) setPhotos(pData);
-      else setPhotos([]);
-      
-      const { data: nData } = await supabase
-        .from('delivery_notes')
-        .select('*')
-        .eq('consumer_id', id)
-        .order('created_at', { ascending: false });
-        
-      if (nData) setNotes(nData);
-      else setNotes([]);
-      
+      if (cRes.error) throw cRes.error;
+      setConsumer(cRes.data);
+      setLocation(lRes.data || null);
+      setPhotos(pRes.data || []);
+      setNotes(nRes.data || []);
     } catch (error) {
       console.error('Error fetching consumer data:', error);
       toast.error('Failed to load consumer data');
@@ -137,25 +118,22 @@ export const ManagerConsumerProfile = () => {
     setConsumerToDelete(true);
   };
 
-  const handleCaptureGPS = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser.');
-      return;
-    }
-
+  const handleCaptureGPS = async () => {
     setIsCapturingGPS(true);
+    setGpsError(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setPendingLocation(position);
-        setIsCapturingGPS(false);
-      },
-      (error) => {
-        toast.error(`Error capturing GPS: ${error.message}`);
-        setIsCapturingGPS(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+    const result = await getAccurateLocation();
+    setIsCapturingGPS(false);
+
+    if (result.position) {
+      setPendingLocation(result.position);
+    } else if (result.error) {
+      setGpsError(result.error.message);
+      toast.error(result.error.message);
+      if (result.error.code === 'PERMISSION_DENIED') {
+        setIsPermissionModalOpen(true);
+      }
+    }
   };
 
   const confirmAndSaveLocation = async () => {
@@ -401,6 +379,13 @@ export const ManagerConsumerProfile = () => {
         cancelText="Cancel"
       />
 
+      <LocationPermissionModal
+        isOpen={isPermissionModalOpen}
+        onClose={() => setIsPermissionModalOpen(false)}
+        onRetry={handleCaptureGPS}
+        errorMessage={gpsError}
+      />
+
       <main className="max-w-2xl w-full mx-auto p-5 space-y-5">
         <section className="glass-card rounded-2xl p-6 bg-white shadow-sm border border-slate-200/60">
           <div className="mb-5">
@@ -488,6 +473,18 @@ export const ManagerConsumerProfile = () => {
                       {isCapturingGPS ? <Loader2 size={18} className="animate-spin" /> : hasLocation ? 'Update' : 'Capture'}
                     </button>
                   </div>
+                </div>
+              )}
+              
+              {gpsError && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl space-y-2">
+                  <p className="text-xs text-red-600 font-semibold leading-tight">{gpsError}</p>
+                  <button
+                    onClick={() => setIsPermissionModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 hover:text-red-800 underline bg-white/60 px-2.5 py-1 rounded-md border border-red-200 shadow-2xs"
+                  >
+                    <HelpCircle size={13} /> How to fix location permissions
+                  </button>
                 </div>
               )}
               

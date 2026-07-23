@@ -12,6 +12,9 @@ import { ConsumerModal } from '../components/ConsumerModal';
 import { syncOfflineData } from '../lib/sync';
 import { supabase } from '../lib/supabase';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { LocationPermissionModal } from '../components/LocationPermissionModal';
+import { getAccurateLocation } from '../lib/geolocation';
+import { HelpCircle } from 'lucide-react';
 
 // Fix Leaflet default marker
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -30,6 +33,7 @@ export const ConsumerProfile = () => {
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
   const [isCompletingDelivery, setIsCompletingDelivery] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<GeolocationPosition | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
@@ -62,8 +66,17 @@ export const ConsumerProfile = () => {
       if (!id || !navigator.onLine) return;
       
       try {
-        // Fetch locations - only overwrite if there are no unsynced local changes
-        const { data: locations } = await supabase.from('consumer_locations').select('*').eq('consumer_id', id);
+        // Fetch locations, photos, and notes simultaneously in parallel
+        const [locationsRes, photosRes, notesRes] = await Promise.all([
+          supabase.from('consumer_locations').select('*').eq('consumer_id', id),
+          supabase.from('consumer_photos').select('*').eq('consumer_id', id),
+          supabase.from('delivery_notes').select('*').eq('consumer_id', id),
+        ]);
+
+        const locations = locationsRes.data;
+        const photosData = photosRes.data;
+        const notesData = notesRes.data;
+
         if (locations && locations.length > 0) {
           const unsyncedLoc = await db.consumer_locations.where({ consumer_id: id }).filter(l => l.synced === false).first();
           if (!unsyncedLoc) {
@@ -73,19 +86,19 @@ export const ConsumerProfile = () => {
           }
         }
 
-        // Fetch photos - only overwrite if there are no unsynced local changes
-        const { data: photosData } = await supabase.from('consumer_photos').select('*').eq('consumer_id', id);
         if (photosData && photosData.length > 0) {
           const unsyncedPhotos = await db.consumer_photos.where({ consumer_id: id }).filter(p => p.synced === false).toArray();
           if (unsyncedPhotos.length === 0) {
-            const formattedPhotos = photosData.map(p => ({ ...p, synced: true }));
+            const formattedPhotos = photosData.map(p => ({
+              ...p,
+              photo_data_url: p.photo_url,
+              synced: true
+            }));
             await db.consumer_photos.bulkPut(formattedPhotos);
             await db.consumers.update(id, { has_photos: true });
           }
         }
 
-        // Fetch notes - only overwrite if there are no unsynced local changes
-        const { data: notesData } = await supabase.from('delivery_notes').select('*').eq('consumer_id', id);
         if (notesData && notesData.length > 0) {
           const unsyncedNotes = await db.delivery_notes.where({ consumer_id: id }).filter(n => n.synced === false).toArray();
           if (unsyncedNotes.length === 0) {
@@ -157,26 +170,21 @@ export const ConsumerProfile = () => {
     );
   }
 
-  const handleCaptureGPS = () => {
-    if (!navigator.geolocation) {
-      setGpsError('Geolocation is not supported by your browser.');
-      return;
-    }
-
+  const handleCaptureGPS = async () => {
     setIsCapturingGPS(true);
     setGpsError(null);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setPendingLocation(position);
-        setIsCapturingGPS(false);
-      },
-      (error) => {
-        setGpsError(`Error capturing GPS: ${error.message}`);
-        setIsCapturingGPS(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+    const result = await getAccurateLocation();
+    setIsCapturingGPS(false);
+
+    if (result.position) {
+      setPendingLocation(result.position);
+    } else if (result.error) {
+      setGpsError(result.error.message);
+      if (result.error.code === 'PERMISSION_DENIED') {
+        setIsPermissionModalOpen(true);
+      }
+    }
   };
 
   const confirmAndSaveLocation = async () => {
@@ -426,6 +434,13 @@ export const ConsumerProfile = () => {
         cancelText="Cancel"
       />
 
+      <LocationPermissionModal
+        isOpen={isPermissionModalOpen}
+        onClose={() => setIsPermissionModalOpen(false)}
+        onRetry={handleCaptureGPS}
+        errorMessage={gpsError}
+      />
+
       <main className="p-4 sm:p-6 space-y-6 max-w-4xl mx-auto w-full relative z-10">
         
         {/* Profile Card with Avatar */}
@@ -560,7 +575,17 @@ export const ConsumerProfile = () => {
                 </button>
               )}
               
-              {gpsError && <p className="text-xs text-red-500 mt-3 font-medium bg-red-50 p-2 rounded-lg border border-red-100">{gpsError}</p>}
+              {gpsError && (
+                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl space-y-2">
+                  <p className="text-xs text-red-600 font-semibold leading-tight">{gpsError}</p>
+                  <button
+                    onClick={() => setIsPermissionModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 hover:text-red-800 underline bg-white/60 px-2.5 py-1 rounded-md border border-red-200 shadow-2xs"
+                  >
+                    <HelpCircle size={13} /> How to fix location permissions
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Photos Card */}
