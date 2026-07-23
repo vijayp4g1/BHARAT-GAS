@@ -58,7 +58,7 @@ export async function preprocessImage(imageSource: File | Blob | string): Promis
       const data = imgData.data;
 
       // Contrast boost for thermal print receipts
-      const contrast = 50;
+      const contrast = 55;
       const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
 
       for (let i = 0; i < data.length; i += 4) {
@@ -88,7 +88,7 @@ export async function preprocessImage(imageSource: File | Blob | string): Promis
 }
 
 /**
- * Extracts Consumer Number from Siddhartha Bharatgas Bill Receipt photo
+ * Extracts Consumer Number & Consumer Name from Siddhartha Bharatgas Bill Receipt photo
  */
 export async function scanBillReceipt(imageFile: File | Blob | string): Promise<BillScanResult> {
   const processedImg = await preprocessImage(imageFile);
@@ -109,8 +109,8 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     .replace(/n0/gi, 'no')
     .replace(/;/g, ':');
 
-  // 1. High-priority targeted regex patterns for "Cons No:28721381"
-  const patterns = [
+  // 1. Target Regex Patterns for Consumer Number (e.g. Cons No:28721381)
+  const numberPatterns = [
     /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9]{5,12})/i,
     /Cons\s*No\s*[:.\s]*([0-9]{5,12})/i,
     /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9]{5,12})/i,
@@ -118,7 +118,7 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
 
   let candidateNumbers: string[] = [];
 
-  for (const pat of patterns) {
+  for (const pat of numberPatterns) {
     const match = normalizedText.match(pat);
     if (match && match[1]) {
       const num = match[1].trim();
@@ -128,7 +128,7 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     }
   }
 
-  // 2. Extract all 6-10 digit numbers from OCR text as secondary candidates
+  // Secondary candidate digit sequences
   const allDigitMatches = normalizedText.match(/\b([0-9]{6,10})\b/g) || [];
   allDigitMatches.forEach((num) => {
     if (!DISTRIBUTOR_BLACKLIST.has(num) && !candidateNumbers.includes(num)) {
@@ -136,9 +136,27 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     }
   });
 
-  console.log('Candidate numbers extracted:', candidateNumbers);
+  // 2. Target Regex Patterns for Consumer Name (e.g. PRAKASH, PRAKASH BANDIKA)
+  const namePatterns = [
+    /(?:Cons\s*No|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,30})/i,
+    /(?:Details\s*of\s*Receiver)[^\n]*\n[^\n]*\n\s*([A-Z\s]{3,30})/i,
+    /\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g,
+  ];
 
-  // 3. Database Validation: Check candidates against 31k master IndexedDB
+  let candidateNames: string[] = [];
+
+  const nameMatch1 = normalizedText.match(/(?:Cons\s*No|ConsNo|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,25})/i);
+  if (nameMatch1 && nameMatch1[1]) {
+    const nameStr = nameMatch1[1].trim();
+    if (nameStr.length >= 3 && !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS'].includes(nameStr)) {
+      candidateNames.push(nameStr);
+    }
+  }
+
+  console.log('Candidate numbers:', candidateNumbers);
+  console.log('Candidate names:', candidateNames);
+
+  // 3. Primary AI Search: Match Consumer Number in 31k IndexedDB
   for (const candidate of candidateNumbers) {
     const localMatch = await db.consumers
       .where('consumer_number')
@@ -146,7 +164,7 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
       .first();
 
     if (localMatch) {
-      console.log(`Found database match for candidate #${candidate}:`, localMatch);
+      console.log(`Found database match by Number #${candidate}:`, localMatch);
       return {
         consumerNumber: localMatch.consumer_number,
         consumerName: localMatch.consumer_name,
@@ -158,7 +176,32 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     }
   }
 
-  // 4. Remote Supabase Validation Fallback
+  // 4. Secondary AI Search: Match Consumer Name in 31k IndexedDB
+  for (const nameCandidate of candidateNames) {
+    const cleanName = nameCandidate.split('\n')[0].trim();
+    if (cleanName.length < 3) continue;
+
+    // Search IndexedDB for consumer_name
+    const nameMatches = await db.consumers
+      .filter((c) => !!(c.consumer_name && c.consumer_name.toLowerCase().includes(cleanName.toLowerCase())))
+      .limit(5)
+      .toArray();
+
+    if (nameMatches.length > 0) {
+      const topMatch = nameMatches[0];
+      console.log(`Found database match by Name "${cleanName}":`, topMatch);
+      return {
+        consumerNumber: topMatch.consumer_number,
+        consumerName: topMatch.consumer_name,
+        address: topMatch.address,
+        mobile: topMatch.mobile,
+        found: true,
+        rawText: text,
+      };
+    }
+  }
+
+  // 5. Remote Supabase Validation Fallback
   if (navigator.onLine) {
     for (const candidate of candidateNumbers) {
       const { data: remoteData } = await supabase
@@ -180,7 +223,6 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     }
   }
 
-  // If no candidate matched the 31k database, return found: false (never add random numbers)
   return {
     consumerNumber: candidateNumbers.length > 0 ? candidateNumbers[0] : '',
     found: false,

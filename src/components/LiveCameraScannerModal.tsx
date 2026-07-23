@@ -269,7 +269,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         });
       }
 
-      // Database lookup against 31k IndexedDB master consumers
+      // Database lookup by Consumer Number against 31k IndexedDB master consumers
       for (const candidate of candidates) {
         if (scannedSetRef.current.has(candidate.toLowerCase())) {
           continue; // Skip already added numbers
@@ -281,10 +281,9 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           .first();
 
         if (localMatch) {
-          // MATCH FOUND!
-          scannedSetRef.current.add(candidate.toLowerCase());
+          // MATCH FOUND BY NUMBER!
+          scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
 
-          // Vibration + Audio Beep Feedback
           if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
           playSuccessBeep();
 
@@ -299,7 +298,48 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             found: true,
           });
 
-          break;
+          return;
+        }
+      }
+
+      // Secondary AI Search: Database lookup by Consumer Name (e.g. PRAKASH)
+      const nameMatch = rawNormalized.match(/(?:Cons\s*No|ConsNo|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,25})/i);
+      let nameCandidate = nameMatch && nameMatch[1] ? nameMatch[1].trim() : '';
+
+      if (!nameCandidate) {
+        const uppercaseWords = rawNormalized.match(/\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g) || [];
+        const filteredWords = uppercaseWords.filter(
+          (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
+        );
+        if (filteredWords.length > 0) nameCandidate = filteredWords[0];
+      }
+
+      if (nameCandidate && nameCandidate.length >= 3) {
+        const nameMatches = await db.consumers
+          .filter((c) => !!(c.consumer_name && c.consumer_name.toLowerCase().includes(nameCandidate.toLowerCase())))
+          .limit(3)
+          .toArray();
+
+        if (nameMatches.length > 0) {
+          const topMatch = nameMatches[0];
+          if (!scannedSetRef.current.has(topMatch.consumer_number.toLowerCase())) {
+            // MATCH FOUND BY NAME!
+            scannedSetRef.current.add(topMatch.consumer_number.toLowerCase());
+
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            playSuccessBeep();
+
+            setLastScanned(`${topMatch.consumer_number} - ${topMatch.consumer_name}`);
+            setScannedCount((prev) => prev + 1);
+
+            onConsumerScanned({
+              consumer_number: topMatch.consumer_number,
+              consumer_name: topMatch.consumer_name,
+              address: topMatch.address,
+              mobile: topMatch.mobile,
+              found: true,
+            });
+          }
         }
       }
     } catch (err) {
