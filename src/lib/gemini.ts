@@ -66,8 +66,8 @@ export async function scanBillWithGemini(
   try {
     const imgPart = await fileToGenerativePart(imageSource);
 
-    // Call gemini-1.5-flash endpoint
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Call gemini-3.6-flash endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     const requestBody = {
       contents: [
