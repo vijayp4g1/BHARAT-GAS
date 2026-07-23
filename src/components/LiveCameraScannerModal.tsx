@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2 } from 'lucide-react';
-import { createWorker } from 'tesseract.js';
 import db from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { scanBillWithGemini } from '../lib/gemini';
 
 interface LiveCameraScannerModalProps {
   isOpen: boolean;
@@ -132,27 +132,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   const scannedSetRef = useRef<Set<string>>(new Set(existingNumbers.map((n) => n.toLowerCase())));
   const isProcessingFrameRef = useRef<boolean>(false);
-  const workerRef = useRef<any>(null);
-
-  // Initialize Tesseract worker
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const worker = await createWorker('eng');
-        if (active) workerRef.current = worker;
-      } catch (err) {
-        console.error('Failed to init worker:', err);
-      }
-    })();
-
-    return () => {
-      active = false;
-      if (workerRef.current) {
-        workerRef.current.terminate();
-      }
-    };
-  }, []);
 
   // Sync existing numbers
   useEffect(() => {
@@ -221,9 +200,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
-  // Process Frame with Focused Line-Pair Matching (Cons No + Name directly below)
+  // Process Frame with Gemini Multimodal AI
   const processFrame = async () => {
-    if (isProcessingFrameRef.current || !workerRef.current || !videoRef.current || !canvasRef.current) {
+    if (isProcessingFrameRef.current || !videoRef.current || !canvasRef.current) {
+      return;
+    }
+
+    // Check if Gemini API key is configured
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('VITE_GEMINI_API_KEY');
+    if (!apiKey) {
+      setStatusText('API Key Missing! Set VITE_GEMINI_API_KEY');
       return;
     }
 
@@ -233,118 +219,144 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
     isProcessingFrameRef.current = true;
+    setStatusText('AI Vision Scanning receipt...');
 
     try {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // FULL FRAME OCR PASS FOR MAXIMUM COVERAGE
+      // Draw active frame to canvas at slightly downscaled resolution for fast network transmission
       canvas.width = video.videoWidth / 1.5;
       canvas.height = video.videoHeight / 1.5;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Contrast boost
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      const contrast = 50;
-      const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+      const imgDataUrl = canvas.toDataURL('image/png');
 
-      for (let i = 0; i < data.length; i += 4) {
-        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const color = factor * (avg - 128) + 128;
-        const finalColor = color < 120 ? 0 : 255;
-        data[i] = finalColor;
-        data[i + 1] = finalColor;
-        data[i + 2] = finalColor;
-      }
-      ctx.putImageData(imgData, 0, 0);
+      const geminiRes = await scanBillWithGemini(imgDataUrl);
+      if (geminiRes.found && geminiRes.consumerNumber) {
+        const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
 
-      // Run OCR on canvas
-      const { data: { text } } = await workerRef.current.recognize(canvas);
-
-      // Normalize line breaks and colons to facilitate line matching
-      const normalizedText = (text as string)
-        .replace(/;/g, ':')
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n');
-
-      const lines = normalizedText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
-
-      // Regex patterns allowing digit-lookalike letters (e.g. B->8, l->1, O->0)
-      const numberPatterns = [
-        /(?:Cons\s*No|Consumer\s*No|ConsNo|Cons\s*No\s*:)[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
-        /Cons\s*No\s*[:.\s]*([0-9I|liOoQBZzSsGgTt]{5,12})/i,
-        /(?:Cons|Consumer|Refill)[:.\s]*#?([0-9I|liOoQBZzSsGgTt]{5,12})/i,
-      ];
-      const standalonePattern = /\b([0-9I|liOoQBZzSsGgTt]{6,10})\b/;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        let candidateNum = '';
-
-        // 1. Try matching explicit consumer number patterns
-        for (const pat of numberPatterns) {
-          const match = line.match(pat);
-          if (match && match[1]) {
-            candidateNum = match[1].trim();
-            break;
-          }
-        }
-
-        // 2. If no pattern matches, try matching standalone numeric words
-        if (!candidateNum) {
-          const match = line.match(standalonePattern);
-          if (match && match[1]) {
-            candidateNum = match[1].trim();
-          }
-        }
-
-        if (!candidateNum) continue;
-
-        const cleanNum = cleanAndNormalizeDigits(candidateNum);
-        if (cleanNum.length < 5 || cleanNum.length > 12 || DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
-          continue;
-        }
-
-        // 3. Locate the candidate name line (the first non-empty text line directly below)
-        let candidateName = '';
-        for (let offset = 1; offset <= 2; offset++) {
-          const nextLine = lines[i + offset];
-          if (nextLine) {
-            // Clean up the line to ignore purely numeric or symbol lines
-            const cleanedLine = nextLine.replace(/[^a-zA-Z\s]/g, '').trim();
-            if (cleanedLine.length >= 3) {
-              const uppercaseWords = cleanedLine.match(/\b[A-Z]{3,15}\b/g) || [];
-              const filteredWords = uppercaseWords.filter(
-                (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
-              );
-              if (filteredWords.length > 0) {
-                candidateName = cleanedLine;
-                break;
-              }
-            }
-          }
-        }
-
-        // 4. Verify against Database
+        // Look up locally
         const localMatch = await db.consumers
           .where('consumer_number')
           .equalsIgnoreCase(cleanNum)
           .first();
 
         if (localMatch) {
-          const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
-          if (isAlreadyAdded) {
-            setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
-            setTimeout(() => setAlreadyAddedNotice(null), 3000);
-            return;
-          }
+          const isNameVerified = geminiRes.consumerName
+            ? areNamesSimilar(geminiRes.consumerName, localMatch.consumer_name)
+            : true;
 
-          // Verify the name below the number matches the database record
-          if (candidateName) {
-            const isNameVerified = areNamesSimilar(candidateName, localMatch.consumer_name);
+          if (isNameVerified) {
+            const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
+            if (isAlreadyAdded) {
+              setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
+              setTimeout(() => setAlreadyAddedNotice(null), 3000);
+              setStatusText('Already in list');
+              return;
+            }
+
+            // Success! Verified number & name
+            scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
+            setAlreadyAddedNotice(null);
+
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            playSuccessBeep();
+
+            setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
+            setScannedCount((prev) => prev + 1);
+
+            onConsumerScanned({
+              consumer_number: localMatch.consumer_number,
+              consumer_name: localMatch.consumer_name,
+              address: localMatch.address,
+              mobile: localMatch.mobile,
+              found: true,
+            });
+            setStatusText('Add success!');
+          } else {
+            console.warn(`Gemini matched number #${cleanNum}, but name check failed.`);
+            setStatusText('Name mismatch');
+          }
+        } else {
+          console.warn(`Consumer #${cleanNum} not found in database.`);
+          setStatusText(`Cons #${cleanNum} not in DB`);
+        }
+      } else {
+        setStatusText('Align Cons No: inside box...');
+      }
+    } catch (err) {
+      console.error('Frame Gemini OCR error:', err);
+      setStatusText('Scan failed, retrying...');
+    } finally {
+      isProcessingFrameRef.current = false;
+    }
+  };
+
+  // Continuous loop running every 3 seconds
+  useEffect(() => {
+    if (!isOpen || !isScanning) return;
+    const interval = setInterval(processFrame, 3000);
+    return () => clearInterval(interval);
+  }, [isOpen, isScanning, onConsumerScanned]);
+
+  // Instant 1-Tap AI Snap Trigger using Gemini Multimodal AI
+  const handleAiSnap = async () => {
+    let apiKey = import.meta.env.VITE_GEMINI_API_KEY || localStorage.getItem('VITE_GEMINI_API_KEY');
+    if (!apiKey) {
+      const enteredKey = prompt('Please enter your Google Gemini API Key to enable 1-Tap AI Vision:');
+      if (enteredKey && enteredKey.trim().length > 0) {
+        localStorage.setItem('VITE_GEMINI_API_KEY', enteredKey.trim());
+        apiKey = enteredKey.trim();
+      } else {
+        toast.error('Gemini API key is required for 1-Tap AI Vision.');
+        return;
+      }
+    }
+
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    setIsAiProcessing(true);
+    toast.loading('AI Gemini vision parsing receipt...', { id: 'ai-snap' });
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
+      // Draw the current frame at full resolution for high AI accuracy
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+
+      const imgDataUrl = canvas.toDataURL('image/png');
+
+      try {
+        const geminiRes = await scanBillWithGemini(imgDataUrl);
+        if (geminiRes.found && geminiRes.consumerNumber) {
+          const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
+
+          const localMatch = await db.consumers
+            .where('consumer_number')
+            .equalsIgnoreCase(cleanNum)
+            .first();
+
+          if (localMatch) {
+            const isNameVerified = geminiRes.consumerName
+              ? areNamesSimilar(geminiRes.consumerName, localMatch.consumer_name)
+              : true;
 
             if (isNameVerified) {
+              const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
+              if (isAlreadyAdded) {
+                setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
+                setTimeout(() => setAlreadyAddedNotice(null), 3000);
+                toast.success('Found but already added.', { id: 'ai-snap' });
+                setIsAiProcessing(false);
+                return;
+              }
+
+              // Success! Both number and name verified
               scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
               setAlreadyAddedNotice(null);
 
@@ -362,34 +374,27 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 found: true,
               });
 
+              toast.success(`Gemini Scanned: #${localMatch.consumer_number}!`, { id: 'ai-snap' });
+              setIsAiProcessing(false);
               return;
+            } else {
+              toast.error(`Gemini read name "${geminiRes.consumerName}" but it didn't match database for #${cleanNum}`, { id: 'ai-snap', duration: 4000 });
             }
+          } else {
+            toast.error(`Consumer number #${cleanNum} (${geminiRes.consumerName}) not found in database`, { id: 'ai-snap', duration: 4000 });
           }
+        } else {
+          toast.error('Gemini could not detect a valid Consumer Number in this frame', { id: 'ai-snap' });
         }
+      } catch (err: any) {
+        console.error('Gemini snap OCR failed:', err);
+        toast.error(`AI snap failed: ${err.message || 'unknown error'}`, { id: 'ai-snap' });
       }
-    } catch (err) {
-      console.error('Frame OCR error:', err);
-    } finally {
-      isProcessingFrameRef.current = false;
+    } else {
+      toast.error('Camera feed is not ready yet', { id: 'ai-snap' });
     }
-  };
-
-  // Continuous loop
-  useEffect(() => {
-    if (!isOpen || !isScanning) return;
-    const interval = setInterval(processFrame, 400);
-    return () => clearInterval(interval);
-  }, [isOpen, isScanning, onConsumerScanned]);
-
-  // Instant 1-Tap AI Snap Trigger
-  const handleAiSnap = async () => {
-    setIsAiProcessing(true);
-    toast.loading('AI Vision scanning receipt...', { id: 'ai-snap' });
-    await processFrame();
-    setTimeout(() => {
-      setIsAiProcessing(false);
-      toast.dismiss('ai-snap');
-    }, 500);
+    
+    setIsAiProcessing(false);
   };
 
   if (!isOpen) return null;
