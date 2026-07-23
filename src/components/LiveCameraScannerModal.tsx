@@ -231,7 +231,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         }
 
         const allDigits = normalizedText.match(/\b([0-9]{6,10})\b/g) || [];
-        allDigits.forEach((num) => {
+        allDigits.forEach((num: string) => {
           if (!DISTRIBUTOR_BLACKLIST.has(num) && !candidates.includes(num)) {
             candidates.push(num);
           }
