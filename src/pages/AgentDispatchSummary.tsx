@@ -28,10 +28,12 @@ import {
   Clock,
   Camera,
   Mic,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { scanBillReceipt } from '../lib/billScanner';
+import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 
 interface ItemEntry {
   consumer_number: string;
@@ -663,6 +665,34 @@ export const AgentDispatchSummary: React.FC = () => {
   const [isScanningBill, setIsScanningBill] = useState<boolean>(false);
   const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
   const [isListeningVoice, setIsListeningVoice] = useState<boolean>(false);
+  const [isLiveScannerOpen, setIsLiveScannerOpen] = useState<boolean>(false);
+
+  // Handle continuous auto-scanner result from Live Camera
+  const handleConsumerAutoScanned = (scannedItem: {
+    consumer_number: string;
+    consumer_name: string;
+    address?: string;
+    mobile?: string;
+    found: boolean;
+  }) => {
+    setEntries((prev) => {
+      if (prev.some((e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase())) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          consumer_number: scannedItem.consumer_number,
+          consumer_name: scannedItem.consumer_name,
+          address: scannedItem.address,
+          mobile: scannedItem.mobile,
+          found: true,
+          source: 'local',
+        },
+      ];
+    });
+    toast.success(`Auto-Scanned #${scannedItem.consumer_number} (${scannedItem.consumer_name})`);
+  };
 
   // Handle Bill Receipt Photo Upload & OCR Extraction (e.g. Cons No:28721381)
   const handleBillPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -909,6 +939,26 @@ export const AgentDispatchSummary: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Super-Fast Live Continuous Auto-Scanner Launch Banner */}
+      <button
+        type="button"
+        onClick={() => setIsLiveScannerOpen(true)}
+        className="w-full mb-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-bold p-3.5 rounded-2xl shadow-lg shadow-orange-500/20 active:scale-98 transition-all flex items-center justify-between border border-amber-300/40"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-slate-950/20 flex items-center justify-center text-slate-950 shrink-0">
+            <Zap className="w-5 h-5 animate-pulse text-slate-950" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-xs font-black tracking-tight uppercase text-slate-950">🎥 Live Continuous Auto-Scanner</h3>
+            <p className="text-[11px] font-bold text-slate-900/90">Hands-free scan stack of bills (Zero clicking)</p>
+          </div>
+        </div>
+        <span className="bg-slate-950 text-amber-400 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider shrink-0 shadow-sm">
+          START SCAN
+        </span>
+      </button>
 
       {/* Segmented Action Control (4 Non-Typing / Fast Entry Modes) */}
       <div className="bg-slate-200/80 p-1 rounded-2xl grid grid-cols-4 gap-1 mb-3">
@@ -1269,6 +1319,14 @@ export const AgentDispatchSummary: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Live Camera Continuous Scanner Modal */}
+      <LiveCameraScannerModal
+        isOpen={isLiveScannerOpen}
+        onClose={() => setIsLiveScannerOpen(false)}
+        onConsumerScanned={handleConsumerAutoScanned}
+        existingNumbers={entries.map((e) => e.consumer_number)}
+      />
 
       <AgentBottomNav />
     </div>
