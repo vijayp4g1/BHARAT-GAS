@@ -25,9 +25,13 @@ import {
   X,
   ArrowUp,
   ArrowDown,
-  Clock
+  Clock,
+  Camera,
+  Mic,
+  Image as ImageIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { scanBillReceipt } from '../lib/billScanner';
 
 interface ItemEntry {
   consumer_number: string;
@@ -655,7 +659,109 @@ export const AgentDispatchSummary: React.FC = () => {
     return entries.map((item) => item.consumer_number).join(',');
   }, [entries]);
 
-  const [inputMode, setInputMode] = useState<'single' | 'bulk'>('single');
+  const [inputMode, setInputMode] = useState<'single' | 'scan' | 'voice' | 'bulk'>('single');
+  const [isScanningBill, setIsScanningBill] = useState<boolean>(false);
+  const [scanPreviewUrl, setScanPreviewUrl] = useState<string | null>(null);
+  const [isListeningVoice, setIsListeningVoice] = useState<boolean>(false);
+
+  // Handle Bill Receipt Photo Upload & OCR Extraction (e.g. Cons No:28721381)
+  const handleBillPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanningBill(true);
+    const previewUrl = URL.createObjectURL(file);
+    setScanPreviewUrl(previewUrl);
+    toast.loading('Scanning Siddhartha Bharatgas bill receipt...', { id: 'ocr' });
+
+    try {
+      const res = await scanBillReceipt(file);
+      if (res.found && res.consumerNumber) {
+        if (entries.some((e) => e.consumer_number.toLowerCase() === res.consumerNumber.toLowerCase())) {
+          toast.error(`Consumer #${res.consumerNumber} (${res.consumerName}) is already added`, { id: 'ocr' });
+        } else {
+          setEntries((prev) => [
+            ...prev,
+            {
+              consumer_number: res.consumerNumber,
+              consumer_name: res.consumerName || 'Consumer Record Found',
+              address: res.address,
+              mobile: res.mobile,
+              found: true,
+              source: 'local',
+            },
+          ]);
+          toast.success(`Scanned #${res.consumerNumber} - ${res.consumerName || 'Verified'}!`, { id: 'ocr' });
+        }
+      } else if (res.consumerNumber) {
+        if (entries.some((e) => e.consumer_number.toLowerCase() === res.consumerNumber.toLowerCase())) {
+          toast.error(`Consumer #${res.consumerNumber} is already added`, { id: 'ocr' });
+        } else {
+          setEntries((prev) => [
+            ...prev,
+            {
+              consumer_number: res.consumerNumber,
+              consumer_name: 'Consumer Record Not Found',
+              found: false,
+              source: 'manual',
+            },
+          ]);
+          toast.success(`Extracted Cons No: #${res.consumerNumber}`, { id: 'ocr' });
+        }
+      } else {
+        toast.error('Could not find "Cons No:" on bill. Please take a clearer photo.', { id: 'ocr' });
+      }
+    } catch (err) {
+      console.error('Bill OCR scan failed:', err);
+      toast.error('Failed to scan bill photo', { id: 'ocr' });
+    } finally {
+      setIsScanningBill(false);
+    }
+  };
+
+  // Handle Speech Voice Dictation ("2 8 7 2 1 3 8 1")
+  const handleVoiceDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Voice dictation is not supported in this browser');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    setIsListeningVoice(true);
+    toast.loading('Listening... Speak consumer number aloud', { id: 'voice' });
+
+    recognition.onresult = async (event: any) => {
+      setIsListeningVoice(false);
+      const transcript = event.results[0][0].transcript;
+      const cleanNum = transcript.replace(/[^0-9]/g, '');
+
+      if (!cleanNum) {
+        toast.error(`Could not parse numbers from "${transcript}"`, { id: 'voice' });
+        return;
+      }
+
+      setSingleInput(cleanNum);
+      setInputMode('single');
+      toast.success(`Heard: #${cleanNum}`, { id: 'voice' });
+    };
+
+    recognition.onerror = (err: any) => {
+      console.error('Voice error:', err);
+      setIsListeningVoice(false);
+      toast.error('Voice recognition stopped', { id: 'voice' });
+    };
+
+    recognition.onend = () => {
+      setIsListeningVoice(false);
+    };
+
+    recognition.start();
+  };
 
   // Share via WhatsApp
   const handleShareWhatsApp = () => {
@@ -819,27 +925,47 @@ export const AgentDispatchSummary: React.FC = () => {
         </div>
       </div>
 
-      {/* Segmented Input Switcher (Single Search vs Bulk Paste) */}
-      <div className="bg-slate-200/80 p-1 rounded-2xl flex gap-1 mb-3">
+      {/* Segmented Action Control (4 Non-Typing / Fast Entry Modes) */}
+      <div className="bg-slate-200/80 p-1 rounded-2xl grid grid-cols-4 gap-1 mb-3">
         <button
           onClick={() => setInputMode('single')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+          className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
             inputMode === 'single'
               ? 'bg-white text-blue-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <Search className="w-3.5 h-3.5" /> Quick Search
+          <Search className="w-3.5 h-3.5" /> Search
         </button>
         <button
-          onClick={() => setInputMode('bulk')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-            inputMode === 'bulk'
+          onClick={() => setInputMode('scan')}
+          className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
+            inputMode === 'scan'
               ? 'bg-white text-indigo-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <FileText className="w-3.5 h-3.5" /> Bulk Paste
+          <Camera className="w-3.5 h-3.5 text-amber-600" /> Scan Bill
+        </button>
+        <button
+          onClick={() => setInputMode('voice')}
+          className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
+            inputMode === 'voice'
+              ? 'bg-white text-emerald-900 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Mic className="w-3.5 h-3.5 text-emerald-600" /> Voice
+        </button>
+        <button
+          onClick={() => setInputMode('bulk')}
+          className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1 ${
+            inputMode === 'bulk'
+              ? 'bg-white text-purple-900 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" /> Bulk
         </button>
       </div>
 
@@ -937,6 +1063,74 @@ export const AgentDispatchSummary: React.FC = () => {
                 })}
               </div>
             )}
+          </div>
+        ) : inputMode === 'scan' ? (
+          /* Bill Photo OCR Scanner Mode (Siddhartha Bharatgas Receipt Cons No: 28721381) */
+          <div className="text-center py-2">
+            <p className="text-xs font-bold text-slate-800 mb-1">
+              📷 Scan Siddhartha Bharatgas Bill Receipt
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Takes photo or selects bill image to extract <strong className="text-blue-600 font-semibold">Cons No: 28721381</strong> automatically
+            </p>
+
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleBillPhotoUpload}
+              className="hidden"
+              id="camera-bill-file-input"
+            />
+            <label
+              htmlFor="camera-bill-file-input"
+              className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-700 text-white font-bold px-5 py-3 rounded-2xl shadow-lg shadow-blue-600/30 cursor-pointer active:scale-95 transition-all text-xs sm:text-sm"
+            >
+              {isScanningBill ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-300" /> Scanning Receipt OCR...
+                </>
+              ) : (
+                <>
+                  <Camera className="w-4 h-4 text-amber-300" /> Take Bill Photo / Upload
+                </>
+              )}
+            </label>
+
+            {scanPreviewUrl && (
+              <div className="mt-3 relative max-w-xs mx-auto rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+                <img src={scanPreviewUrl} alt="Bill Receipt Preview" className="w-full h-32 object-cover" />
+                <span className="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[9px] px-2 py-0.5 rounded-md backdrop-blur-sm font-semibold">
+                  Scanned Receipt
+                </span>
+              </div>
+            )}
+          </div>
+        ) : inputMode === 'voice' ? (
+          /* Speech Voice Dictation Mode ("2 8 7 2 1 3 8 1") */
+          <div className="text-center py-3">
+            <p className="text-xs font-bold text-slate-800 mb-1">
+              🎙️ Speak Consumer Number Aloud
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Speak numbers into mic (e.g. "2 8 7 2 1 3 8 1")
+            </p>
+
+            <button
+              type="button"
+              onClick={handleVoiceDictation}
+              disabled={isListeningVoice}
+              className={`w-14 h-14 rounded-full mx-auto flex items-center justify-center text-white shadow-xl transition-all ${
+                isListeningVoice
+                  ? 'bg-rose-500 animate-pulse ring-8 ring-rose-200'
+                  : 'bg-gradient-to-br from-emerald-600 to-teal-600 active:scale-95 hover:scale-105 shadow-emerald-600/30'
+              }`}
+            >
+              {isListeningVoice ? <Mic className="w-6 h-6 animate-bounce" /> : <Mic className="w-6 h-6" />}
+            </button>
+            <p className="text-[11px] font-bold text-slate-600 mt-2">
+              {isListeningVoice ? 'Listening... Speak numbers now' : 'Tap mic to start speaking'}
+            </p>
           </div>
         ) : (
           /* Bulk Paste Mode */
