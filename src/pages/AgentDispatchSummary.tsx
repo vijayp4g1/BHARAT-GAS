@@ -724,7 +724,11 @@ export const AgentDispatchSummary: React.FC = () => {
           toast.success(`Scanned #${res.consumerNumber} - ${res.consumerName || 'Verified'}!`, { id: 'ocr' });
         }
       } else {
-        toast.error('Cons No: not detected in photo. Please include the top "Cons No:" line in your photo.', { id: 'ocr', duration: 4500 });
+        if (res.error) {
+          toast.error(`Gemini AI Error: ${res.error}`, { id: 'ocr', duration: 6000 });
+        } else {
+          toast.error('Cons No: not detected in photo. Please include the top "Cons No:" line in your photo.', { id: 'ocr', duration: 4500 });
+        }
       }
     } catch (err) {
       console.error('Bill OCR scan failed:', err);

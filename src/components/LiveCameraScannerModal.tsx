@@ -235,6 +235,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
       try {
         const geminiRes = await scanBillWithGemini(imgDataUrl);
+        if (geminiRes.error) {
+          toast.error(`Gemini AI Error: ${geminiRes.error}`, { id: 'ai-snap', duration: 6000 });
+          setIsAiProcessing(false);
+          return;
+        }
+
         if (geminiRes.found && geminiRes.consumerNumber) {
           const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
 

@@ -9,6 +9,7 @@ export interface BillScanResult {
   mobile?: string;
   found: boolean;
   rawText: string;
+  error?: string;
 }
 
 function cleanAndNormalizeDigits(raw: string): string {
@@ -79,6 +80,16 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
 
   console.log('Using Gemini Multimodal AI for receipt OCR...');
   const geminiRes = await scanBillWithGemini(imageFile);
+  
+  if (geminiRes.error) {
+    return {
+      consumerNumber: '',
+      found: false,
+      rawText: `Gemini OCR failed: ${geminiRes.error}`,
+      error: geminiRes.error,
+    };
+  }
+
   const rawTextLog = `[Gemini AI OCR]\nConsumer Number: ${geminiRes.consumerNumber || 'Not Found'}\nConsumer Name: ${geminiRes.consumerName || 'Not Found'}${geminiRes.error ? `\nError: ${geminiRes.error}` : ''}`;
 
   if (geminiRes.found && geminiRes.consumerNumber) {
