@@ -107,7 +107,7 @@ export const Login = () => {
                 ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
                 ...(c.mobile ? [c.mobile.toLowerCase()] : [])
               ];
-              return { ...c, searchWords, last_interacted_at: c.created_at || new Date().toISOString() };
+              return { ...c, searchWords };
             });
             await db.consumers.clear(); 
             await db.consumers.bulkAdd(formattedConsumers);

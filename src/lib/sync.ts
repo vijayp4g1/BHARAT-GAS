@@ -92,6 +92,91 @@ export async function pullLatestCloudData() {
       await db.delivery_notes.bulkPut(formattedNotes);
     }
 
+    // 4. Robustly sync ALL completed consumer flags across all 31k+ records using paginated queries
+    let allRemoteLocs: any[] = [];
+    let locFrom = 0;
+    const step = 1000;
+    let fetchMoreLocs = true;
+
+    while (fetchMoreLocs) {
+      const { data, error } = await supabase
+        .from('consumer_locations')
+        .select('consumer_id')
+        .range(locFrom, locFrom + step - 1);
+
+      if (error || !data || data.length === 0) break;
+      allRemoteLocs = [...allRemoteLocs, ...data];
+      locFrom += step;
+      if (data.length < step) fetchMoreLocs = false;
+    }
+
+    let allRemotePhotos: any[] = [];
+    let photoFrom = 0;
+    let fetchMorePhotos = true;
+
+    while (fetchMorePhotos) {
+      const { data, error } = await supabase
+        .from('consumer_photos')
+        .select('consumer_id')
+        .range(photoFrom, photoFrom + step - 1);
+
+      if (error || !data || data.length === 0) break;
+      allRemotePhotos = [...allRemotePhotos, ...data];
+      photoFrom += step;
+      if (data.length < step) fetchMorePhotos = false;
+    }
+
+    const locConsumerSet = new Set(allRemoteLocs.map((l) => l.consumer_id));
+    const photoConsumerSet = new Set(allRemotePhotos.map((p) => p.consumer_id));
+
+    let allSummaryRows: any[] = [];
+    let sumFrom = 0;
+    let fetchMoreSum = true;
+
+    while (fetchMoreSum) {
+      const { data, error } = await supabase
+        .from('manager_consumer_summary')
+        .select('id, has_location, has_photos')
+        .or('has_location.eq.true,has_photos.eq.true')
+        .range(sumFrom, sumFrom + step - 1);
+
+      if (error || !data || data.length === 0) break;
+      allSummaryRows = [...allSummaryRows, ...data];
+      sumFrom += step;
+      if (data.length < step) fetchMoreSum = false;
+    }
+
+    const summaryMap = new Map<string, { has_location: boolean; has_photos: boolean }>();
+    allSummaryRows.forEach((s) => {
+      summaryMap.set(s.id, {
+        has_location: !!s.has_location,
+        has_photos: !!s.has_photos,
+      });
+    });
+
+    const allCompletedConsumerIds = Array.from(
+      new Set([
+        ...locConsumerSet,
+        ...photoConsumerSet,
+        ...allSummaryRows.map((s) => s.id),
+      ])
+    );
+
+    if (allCompletedConsumerIds.length > 0) {
+      await db.transaction('rw', db.consumers, async () => {
+        for (const cId of allCompletedConsumerIds) {
+          const sumInfo = summaryMap.get(cId);
+          const hasLoc = locConsumerSet.has(cId) || (sumInfo ? sumInfo.has_location : false);
+          const hasPhoto = photoConsumerSet.has(cId) || (sumInfo ? sumInfo.has_photos : false);
+
+          await db.consumers.update(cId, {
+            has_location: hasLoc,
+            has_photos: hasPhoto,
+          });
+        }
+      });
+    }
+
     // Update last pull timestamp
     localStorage.setItem(LAST_PULL_KEY, nowIso);
     console.log('Pulled latest cloud data into local database successfully');

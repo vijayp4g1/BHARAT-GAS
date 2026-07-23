@@ -115,10 +115,27 @@ export const ConsumerProfile = () => {
     fetchLatestData();
   }, [id]);
 
-  // Update last_interacted_at when profile is viewed
+  // Update last_interacted_at locally for this device & agent when profile is viewed
   React.useEffect(() => {
     if (id && consumer) {
-      db.consumers.update(id, { last_interacted_at: new Date().toISOString() }).catch(console.error);
+      const now = new Date().toISOString();
+      db.consumers.update(id, { last_interacted_at: now }).catch(console.error);
+
+      try {
+        let devId = localStorage.getItem('bgcls_device_id');
+        if (!devId) {
+          devId = 'dev_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
+          localStorage.setItem('bgcls_device_id', devId);
+        }
+        const agentId = localStorage.getItem('bgcls_agent_id') || 'agent_default';
+        const storageKey = `bgcls_recent_interactions_${devId}_${agentId}`;
+        const existingStr = localStorage.getItem(storageKey);
+        const map: Record<string, string> = existingStr ? JSON.parse(existingStr) : {};
+        map[id] = now;
+        localStorage.setItem(storageKey, JSON.stringify(map));
+      } catch (err) {
+        console.error('Failed to save device recent interaction:', err);
+      }
     }
   }, [id, consumer]);
 

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 import { AgentBottomNav } from '../components/AgentBottomNav';
+import { pullLatestCloudData } from '../lib/sync';
 
 export const AgentSearch = () => {
   useAgentLocationTracking();
@@ -80,7 +81,12 @@ export const AgentSearch = () => {
                 ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
                 ...(c.mobile ? [c.mobile.toLowerCase()] : [])
               ];
-              return { ...c, searchWords, last_interacted_at: c.created_at || new Date().toISOString() };
+              return { 
+                ...c, 
+                has_location: !!c.has_location,
+                has_photos: !!c.has_photos,
+                searchWords
+              };
             });
             await db.consumers.bulkAdd(formattedConsumers);
             console.log(`Hydrated ${allConsumers.length} consumers from background sync`);
@@ -93,6 +99,9 @@ export const AgentSearch = () => {
       }
     };
     hydrateIfNeeded();
+    if (isOnline) {
+      pullLatestCloudData().catch(console.error);
+    }
   }, [isOnline]);
 
   // Debounce search to prevent UI freezing on every keystroke
@@ -117,7 +126,17 @@ export const AgentSearch = () => {
       // Fetch all consumers (bulk read is much faster than indexed cursor for full scans)
       let allConsumers = await db.consumers.toArray();
       
-      // Filter in-memory (V8 engine is much faster than Dexie cursor iteration)
+      // Get device & agent scoped recent interaction timestamps
+      let recentMap: Record<string, string> = {};
+      try {
+        const devId = localStorage.getItem('bgcls_device_id') || 'dev_default';
+        const agentId = localStorage.getItem('bgcls_agent_id') || 'agent_default';
+        const storageKey = `bgcls_recent_interactions_${devId}_${agentId}`;
+        const saved = localStorage.getItem(storageKey);
+        if (saved) recentMap = JSON.parse(saved);
+      } catch (e) {}
+
+      // Filter in-memory
       let filtered = allConsumers.filter(c => {
         if (c.isDeleted) return false;
         if (filterStatus === 'completed' && !(c.has_location && c.has_photos)) return false;
@@ -125,11 +144,14 @@ export const AgentSearch = () => {
         return true;
       });
 
-      // Sort by last_interacted_at descending
+      // Sort strictly by local device interaction timestamp descending
       filtered.sort((a, b) => {
-        const tA = a.last_interacted_at ? new Date(a.last_interacted_at).getTime() : 0;
-        const tB = b.last_interacted_at ? new Date(b.last_interacted_at).getTime() : 0;
-        return tB - tA;
+        const tAStr = recentMap[a.id] || a.last_interacted_at;
+        const tBStr = recentMap[b.id] || b.last_interacted_at;
+        const tA = tAStr ? new Date(tAStr).getTime() : 0;
+        const tB = tBStr ? new Date(tBStr).getTime() : 0;
+        if (tA !== tB) return tB - tA;
+        return (a.consumer_number || '').localeCompare(b.consumer_number || '');
       });
 
       return filtered.slice(0, limit);
@@ -240,28 +262,8 @@ export const AgentSearch = () => {
     
     toast.loading('Syncing latest updates...', { id: 'sync' });
     try {
-      // Fetch only the statuses to save bandwidth
-      const { data, error } = await supabase
-        .from('manager_consumer_summary')
-        .select('id, has_location, has_photos');
-        
-      if (error) throw error;
-      
-      if (data && data.length > 0) {
-        // Bulk update is tricky in Dexie without overwriting, so we iterate
-        // but using a transaction is faster
-        await db.transaction('rw', db.consumers, async () => {
-          for (const remote of data) {
-             await db.consumers.update(remote.id, { 
-                has_location: remote.has_location, 
-                has_photos: remote.has_photos 
-             });
-          }
-        });
-        toast.success('Data synced successfully!', { id: 'sync' });
-      } else {
-        toast.success('Already up to date!', { id: 'sync' });
-      }
+      await pullLatestCloudData();
+      toast.success('Data synced successfully!', { id: 'sync' });
     } catch (err) {
       console.error(err);
       toast.error('Failed to sync data', { id: 'sync' });

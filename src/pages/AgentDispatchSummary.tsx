@@ -38,28 +38,79 @@ interface ItemEntry {
   source?: 'local' | 'remote' | 'manual';
 }
 
+// Device ID helper for device-isolated storage
+const getDeviceId = (): string => {
+  try {
+    let deviceId = localStorage.getItem('bgcls_device_id');
+    if (!deviceId) {
+      deviceId = 'dev_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
+      localStorage.setItem('bgcls_device_id', deviceId);
+    }
+    return deviceId;
+  } catch {
+    return 'dev_default';
+  }
+};
+
+const getDeviceScopedKey = (agentId?: string, dateStr?: string): string => {
+  const devId = getDeviceId();
+  const agent = agentId || localStorage.getItem('bgcls_agent_id') || 'agent_default';
+  const date = dateStr || new Date().toISOString().split('T')[0];
+  return `bgcls_day_end_entries_${devId}_${agent}_${date}`;
+};
+
 export const AgentDispatchSummary: React.FC = () => {
   const [agentName, setAgentName] = useState<string>('Delivery Agent');
+  const [agentId, setAgentId] = useState<string>(() => localStorage.getItem('bgcls_agent_id') || 'agent_default');
   const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [rawInput, setRawInput] = useState<string>('');
   const [singleInput, setSingleInput] = useState<string>('');
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+
   const [entries, setEntries] = useState<ItemEntry[]>(() => {
     try {
-      const saved = localStorage.getItem('bgcls_day_end_entries');
-      return saved ? JSON.parse(saved) : [];
+      const devId = getDeviceId();
+      const currentAgent = localStorage.getItem('bgcls_agent_id') || 'agent_default';
+      const today = new Date().toISOString().split('T')[0];
+      
+      // 1. Try date + device + agent specific key
+      const scopedKey = `bgcls_day_end_entries_${devId}_${currentAgent}_${today}`;
+      const savedScoped = localStorage.getItem(scopedKey);
+      if (savedScoped) return JSON.parse(savedScoped);
+
+      // 2. Try latest device fallback
+      const savedLatest = localStorage.getItem(`bgcls_day_end_latest_${devId}`);
+      if (savedLatest) return JSON.parse(savedLatest);
+
+      // 3. Fallback to legacy global key
+      const legacy = localStorage.getItem('bgcls_day_end_entries');
+      if (legacy) return JSON.parse(legacy);
+
+      return [];
     } catch {
       return [];
     }
   });
 
-  // Auto-save entries to localStorage on changes
+  // Mark initial load as completed after first render
   useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
+  // Auto-save entries to device-scoped localStorage ONLY after initial load
+  useEffect(() => {
+    if (!isLoaded) return;
     try {
-      localStorage.setItem('bgcls_day_end_entries', JSON.stringify(entries));
+      const key = getDeviceScopedKey(agentId, reportDate);
+      const jsonStr = JSON.stringify(entries);
+      localStorage.setItem(key, jsonStr);
+      localStorage.setItem(`bgcls_day_end_latest_${getDeviceId()}`, jsonStr);
+      localStorage.setItem('bgcls_day_end_entries', jsonStr);
     } catch (err) {
-      console.error('Failed to save entries to localStorage:', err);
+      console.error('Failed to save entries to local storage:', err);
     }
-  }, [entries]);
+  }, [entries, agentId, reportDate, isLoaded]);
+
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [copiedReport, setCopiedReport] = useState<boolean>(false);
   const [copiedCsv, setCopiedCsv] = useState<boolean>(false);
@@ -142,11 +193,11 @@ export const AgentDispatchSummary: React.FC = () => {
 
       setSyncStatusText(`Starting download of ${totalToFetch.toLocaleString()} records...`);
 
-      // 2. Fetch all batches in step = 1000
+      // 2. Fetch all batches in step = 1000 from manager_consumer_summary (includes has_location & has_photos)
       while (fetchMore) {
         const { data, error } = await supabase
-          .from('consumers')
-          .select('id, consumer_number, consumer_name, mobile, address, verification_status, area_code, created_at')
+          .from('manager_consumer_summary')
+          .select('id, consumer_number, consumer_name, mobile, address, verification_status, area_code, created_at, has_location, has_photos')
           .range(from, from + step - 1);
 
         if (error) {
@@ -183,8 +234,9 @@ export const AgentDispatchSummary: React.FC = () => {
           ];
           return {
             ...c,
+            has_location: !!c.has_location,
+            has_photos: !!c.has_photos,
             searchWords,
-            last_interacted_at: c.created_at || new Date().toISOString(),
           };
         });
 
@@ -246,7 +298,7 @@ export const AgentDispatchSummary: React.FC = () => {
     });
   };
 
-  // Real-time search suggestions logic (Strictly Consumer Number)
+  // Real-time search suggestions logic (Strictly Consumer Number - Instant local search)
   useEffect(() => {
     const query = singleInput.trim().toLowerCase();
     if (!query || query.length < 2) {
@@ -260,46 +312,37 @@ export const AgentDispatchSummary: React.FC = () => {
       try {
         let combinedMap = new Map<string, Consumer>();
 
-        // 1. IndexedDB fast prefix match using consumer_number index
+        // 1. IndexedDB fast prefix match using consumer_number index (0ms)
         const localMatches = await db.consumers
           .where('consumer_number')
           .startsWith(query)
           .limit(30)
           .toArray();
 
-        // Fallback to substring match if prefix search returns few results
-        if (localMatches.length < 15) {
-          const substringMatches = await db.consumers
-            .filter((c) => !!(c.consumer_number && c.consumer_number.toLowerCase().includes(query)))
-            .limit(30)
-            .toArray();
-          
-          substringMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
-        }
-
         localMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
 
-        // 2. Remote Supabase search fallback on consumer_number if online and results low
-        if (navigator.onLine && combinedMap.size < 10) {
-          const { data: remoteData } = await supabase
-            .from('consumers')
-            .select('id, consumer_number, consumer_name, mobile, address, verification_status, created_at')
-            .or(`consumer_number.ilike.${query}%,consumer_number.ilike.%${query}%`)
-            .limit(20);
+        // 2. Fast indexed sub-prefix search if prefix matches are few (scans index candidate pool in <5ms)
+        if (combinedMap.size < 15) {
+          const prefixQuery = query.length >= 3 ? query.slice(0, 3) : query.slice(0, 2);
+          const candidates = await db.consumers
+            .where('consumer_number')
+            .startsWith(prefixQuery)
+            .limit(150)
+            .toArray();
 
-          if (remoteData && remoteData.length > 0) {
-            remoteData.forEach((item: any) => {
-              if (!combinedMap.has(item.consumer_number)) {
-                combinedMap.set(item.consumer_number, {
-                  ...item,
-                  searchWords: [
-                    ...(item.consumer_name ? item.consumer_name.toLowerCase().split(/\s+/) : []),
-                    ...(item.consumer_number ? [item.consumer_number.toLowerCase()] : []),
-                    ...(item.mobile ? [item.mobile.toLowerCase()] : []),
-                  ],
-                });
-              }
-            });
+          candidates.forEach((c) => {
+            if (c.consumer_number && c.consumer_number.toLowerCase().includes(query)) {
+              combinedMap.set(c.consumer_number, c);
+            }
+          });
+
+          // Fallback scan across local DB if candidate pool returned few items
+          if (combinedMap.size < 5) {
+            const allLocal = await db.consumers
+              .filter((c) => !!(c.consumer_number && c.consumer_number.toLowerCase().includes(query)))
+              .limit(30)
+              .toArray();
+            allLocal.forEach((item) => combinedMap.set(item.consumer_number, item));
           }
         }
 
@@ -311,7 +354,7 @@ export const AgentDispatchSummary: React.FC = () => {
       } finally {
         setIsSearching(false);
       }
-    }, 180);
+    }, 40);
 
     return () => clearTimeout(timer);
   }, [singleInput]);
@@ -568,7 +611,14 @@ export const AgentDispatchSummary: React.FC = () => {
     if (entries.length === 0) return;
     if (confirm('Are you sure you want to clear all added consumer numbers?')) {
       setEntries([]);
-      localStorage.removeItem('bgcls_day_end_entries');
+      try {
+        const key = getDeviceScopedKey(agentId, reportDate);
+        localStorage.removeItem(key);
+        localStorage.removeItem(`bgcls_day_end_latest_${getDeviceId()}`);
+        localStorage.removeItem('bgcls_day_end_entries');
+      } catch (err) {
+        console.error('Failed to clear local storage keys:', err);
+      }
       toast.success('List cleared');
     }
   };
@@ -604,6 +654,8 @@ export const AgentDispatchSummary: React.FC = () => {
   const rawCsvString = useMemo(() => {
     return entries.map((item) => item.consumer_number).join(',');
   }, [entries]);
+
+  const [inputMode, setInputMode] = useState<'single' | 'bulk'>('single');
 
   // Share via WhatsApp
   const handleShareWhatsApp = () => {
@@ -676,239 +728,261 @@ export const AgentDispatchSummary: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-28 pt-4 px-4 max-w-xl mx-auto">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 text-white rounded-2xl p-5 shadow-lg mb-4">
+    <div className="min-h-screen bg-slate-100 pb-36 pt-3 px-3 max-w-xl mx-auto font-sans">
+      {/* Sleek Mobile Compact Header */}
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-amber-400" />
-            <h1 className="text-xl font-bold">Day End Dispatch Report</h1>
+            <div className="w-8 h-8 rounded-xl bg-amber-400/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
+              <ClipboardList className="w-4 h-4" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold tracking-tight leading-tight">Day End Report</h1>
+              <p className="text-[10px] text-blue-200">Supervisor: +91 7337487571</p>
+            </div>
           </div>
-          <span className="bg-amber-400/20 text-amber-300 text-xs font-semibold px-2.5 py-1 rounded-full border border-amber-400/30">
+          <span className="bg-amber-400 text-slate-950 text-xs font-black px-2.5 py-1 rounded-full shadow-sm">
             {entries.length} Deliveries
           </span>
         </div>
-        <p className="text-xs text-blue-100 mb-4">
-          Compile completed deliveries and share report directly to WhatsApp (+91 7337487571).
-        </p>
 
-        {/* Database Status & Sync Banner */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3.5 mb-4 border border-white/10 shadow-inner">
-          <div className="flex items-center justify-between text-xs mb-2">
-            <div className="flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div>
-                <span className="font-semibold text-white text-sm block">
-                  {dbCount > 0 ? `${dbCount.toLocaleString()} Master Consumers` : 'Database Unsynced'}
-                </span>
-                <span className="text-blue-200 text-[10px] flex items-center gap-1">
-                  {lastSyncedTime ? (
-                    <>
-                      <Clock className="w-3 h-3 text-blue-300" /> Last synced: {lastSyncedTime}
-                    </>
-                  ) : (
-                    'Click Re-Sync to refresh master records'
-                  )}
-                </span>
-              </div>
+        {/* Database Status Strip */}
+        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 mb-3 border border-white/10 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="font-semibold text-white text-xs block truncate">
+                {dbCount > 0 ? `${dbCount.toLocaleString()} Master Consumers` : 'Unsynced'}
+              </span>
+              <span className="text-blue-200 text-[10px] flex items-center gap-1">
+                {lastSyncedTime ? (
+                  <>
+                    <Clock className="w-3 h-3 text-blue-300" /> Synced: {lastSyncedTime}
+                  </>
+                ) : (
+                  'Tap Re-Sync to refresh'
+                )}
+              </span>
             </div>
-            <button
-              onClick={syncFullMasterDatabase}
-              disabled={isSyncingDb}
-              className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1.5 transition-all active:scale-95 text-xs disabled:opacity-50 shrink-0"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-spin' : ''}`} />
-              {isSyncingDb ? 'Syncing...' : 'Re-Sync 31k Data'}
-            </button>
           </div>
-
-          {/* Animated Sync Progress Bar */}
-          {isSyncingDb && (
-            <div className="mt-2 pt-2 border-t border-white/10">
-              <div className="flex items-center justify-between text-[11px] text-amber-200 mb-1 font-medium">
-                <span className="truncate">{syncStatusText}</span>
-                <span className="font-bold">{syncProgress}%</span>
-              </div>
-              <div className="w-full bg-black/30 rounded-full h-2 overflow-hidden p-0.5 border border-white/10">
-                <div
-                  className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full rounded-full transition-all duration-300 shadow-sm"
-                  style={{ width: `${syncProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <button
+            onClick={syncFullMasterDatabase}
+            disabled={isSyncingDb}
+            className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold px-2.5 py-1.5 rounded-xl shadow-sm flex items-center gap-1 transition-all active:scale-95 text-[11px] disabled:opacity-50 shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-spin' : ''}`} />
+            {isSyncingDb ? 'Syncing' : 'Re-Sync'}
+          </button>
         </div>
 
+        {/* Sync Progress Bar */}
+        {isSyncingDb && (
+          <div className="mb-3 pt-1">
+            <div className="flex items-center justify-between text-[10px] text-amber-200 mb-1 font-medium">
+              <span className="truncate">{syncStatusText}</span>
+              <span className="font-bold">{syncProgress}%</span>
+            </div>
+            <div className="w-full bg-black/30 rounded-full h-1.5 overflow-hidden border border-white/10">
+              <div
+                className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full rounded-full transition-all duration-300"
+                style={{ width: `${syncProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Agent Metadata Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-white/10">
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
           <div>
-            <label className="text-[11px] font-medium text-blue-200 flex items-center gap-1 mb-1">
-              <User className="w-3.5 h-3.5" /> Agent Name
+            <label className="text-[10px] font-semibold text-blue-200 flex items-center gap-1 mb-1 uppercase tracking-wider">
+              <User className="w-3 h-3 text-amber-400" /> Agent Name
             </label>
             <input
               type="text"
               value={agentName}
               onChange={(e) => setAgentName(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-amber-400"
-              placeholder="Enter your name"
+              className="w-full bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-amber-400"
+              placeholder="Your name"
             />
           </div>
           <div>
-            <label className="text-[11px] font-medium text-blue-200 flex items-center gap-1 mb-1">
-              <Calendar className="w-3.5 h-3.5" /> Report Date
+            <label className="text-[10px] font-semibold text-blue-200 flex items-center gap-1 mb-1 uppercase tracking-wider">
+              <Calendar className="w-3 h-3 text-amber-400" /> Date
             </label>
             <input
               type="date"
               value={reportDate}
               onChange={(e) => setReportDate(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+              className="w-full bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
             />
           </div>
         </div>
       </div>
 
-      {/* Input Section */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 mb-4">
-        <h2 className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
-          <FileText className="w-4 h-4 text-blue-600" /> Search & Add Consumer
-        </h2>
+      {/* Segmented Input Switcher (Single Search vs Bulk Paste) */}
+      <div className="bg-slate-200/80 p-1 rounded-2xl flex gap-1 mb-3">
+        <button
+          onClick={() => setInputMode('single')}
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            inputMode === 'single'
+              ? 'bg-white text-blue-900 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Search className="w-3.5 h-3.5" /> Quick Search
+        </button>
+        <button
+          onClick={() => setInputMode('bulk')}
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            inputMode === 'bulk'
+              ? 'bg-white text-indigo-900 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" /> Bulk Paste
+        </button>
+      </div>
 
-        {/* Interactive Search Input with Auto-Complete */}
-        <div className="relative mb-3" ref={searchContainerRef}>
-          <form onSubmit={handleAddSingle} className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={singleInput}
-                onChange={(e) => setSingleInput(e.target.value)}
-                onFocus={() => {
-                  if (suggestions.length > 0) setShowSuggestions(true);
-                }}
-                placeholder="Search by consumer number (31k+ records)..."
-                className="w-full pl-9 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {singleInput && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSingleInput('');
-                    setSuggestions([]);
-                    setShowSuggestions(false);
+      {/* Input Section Card */}
+      <div className="bg-white rounded-3xl p-3.5 shadow-sm border border-slate-200 mb-3">
+        {inputMode === 'single' ? (
+          /* Single Search Mode */
+          <div className="relative" ref={searchContainerRef}>
+            <form onSubmit={handleAddSingle} className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={singleInput}
+                  onChange={(e) => setSingleInput(e.target.value)}
+                  onFocus={() => {
+                    if (suggestions.length > 0) setShowSuggestions(true);
                   }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-              {isSearching && (
-                <Loader2 className="w-4 h-4 text-blue-600 animate-spin absolute right-8 top-1/2 -translate-y-1/2" />
-              )}
-            </div>
-            <button
-              type="submit"
-              className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-1 shrink-0"
-            >
-              <Plus className="w-4 h-4" /> Add
-            </button>
-          </form>
-
-          {/* Auto-Complete Suggestion Dropdown */}
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-blue-100 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto divide-y divide-slate-100 ring-1 ring-slate-900/5">
-              <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex items-center justify-between sticky top-0 border-b border-slate-100">
-                <span>Matching Consumer Numbers ({suggestions.length})</span>
-                <span className="text-[10px] text-blue-600 font-normal">Tap to add</span>
-              </div>
-              {suggestions.map((item) => {
-                const isExact = item.consumer_number.toLowerCase() === singleInput.trim().toLowerCase();
-
-                return (
-                  <div
-                    key={item.consumer_number}
-                    onClick={() => handleSelectSuggestion(item)}
-                    className={`p-3 hover:bg-blue-50/80 cursor-pointer transition-colors flex items-center justify-between group ${
-                      isExact ? 'bg-amber-50/70 border-l-4 border-l-amber-500' : ''
-                    }`}
+                  placeholder="Search consumer number (31k+)..."
+                  className="w-full pl-9 pr-8 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium text-slate-800"
+                />
+                {singleInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSingleInput('');
+                      setSuggestions([]);
+                      setShowSuggestions(false);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                   >
-                    <div className="min-w-0 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-blue-900 font-mono">
-                          #{highlightMatch(item.consumer_number, singleInput)}
-                        </span>
-                        <span className="font-medium text-xs text-slate-800">
-                          {highlightMatch(item.consumer_name, singleInput)}
-                        </span>
-                        {isExact && (
-                          <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded-full uppercase">
-                            Exact Match
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                {isSearching && (
+                  <Loader2 className="w-4 h-4 text-blue-600 animate-spin absolute right-8 top-1/2 -translate-y-1/2" />
+                )}
+              </div>
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-4 py-2.5 rounded-2xl text-sm font-bold hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-1 shrink-0 shadow-md shadow-blue-600/20"
+              >
+                <Plus className="w-4 h-4" /> Add
+              </button>
+            </form>
+
+            {/* Auto-Complete Suggestion Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-blue-100 rounded-2xl shadow-2xl z-50 max-h-72 overflow-y-auto divide-y divide-slate-100 ring-1 ring-slate-900/5">
+                <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex items-center justify-between sticky top-0 border-b border-slate-100">
+                  <span>Matches ({suggestions.length})</span>
+                  <span className="text-[10px] text-blue-600 font-semibold">Tap to add</span>
+                </div>
+                {suggestions.map((item) => {
+                  const isExact = item.consumer_number.toLowerCase() === singleInput.trim().toLowerCase();
+
+                  return (
+                    <div
+                      key={item.consumer_number}
+                      onClick={() => handleSelectSuggestion(item)}
+                      className={`p-3 hover:bg-blue-50/80 cursor-pointer transition-colors flex items-center justify-between group ${
+                        isExact ? 'bg-amber-50/70 border-l-4 border-l-amber-500' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-blue-900 font-mono">
+                            #{highlightMatch(item.consumer_number, singleInput)}
                           </span>
+                          <span className="font-semibold text-xs text-slate-800">
+                            {highlightMatch(item.consumer_name, singleInput)}
+                          </span>
+                          {isExact && (
+                            <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded-full uppercase">
+                              Exact Match
+                            </span>
+                          )}
+                        </div>
+                        {item.mobile && item.mobile.includes(singleInput.trim()) && (
+                          <p className="text-[11px] text-indigo-600 flex items-center gap-1 mt-0.5">
+                            <Phone className="w-3 h-3 text-indigo-400 shrink-0" />
+                            {highlightMatch(item.mobile, singleInput)}
+                          </p>
+                        )}
+                        {item.address && (
+                          <p className="text-[11px] text-slate-500 truncate max-w-xs flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                            {item.address}
+                          </p>
                         )}
                       </div>
-                      {item.mobile && item.mobile.includes(singleInput.trim()) && (
-                        <p className="text-[11px] text-indigo-600 flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3 text-indigo-400 shrink-0" />
-                          {highlightMatch(item.mobile, singleInput)}
-                        </p>
-                      )}
-                      {item.address && (
-                        <p className="text-[11px] text-slate-500 truncate max-w-xs flex items-center gap-1 mt-0.5">
-                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                          {item.address}
-                        </p>
-                      )}
+                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors shrink-0" />
                     </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors shrink-0" />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Bulk Paste Area */}
-        <div className="border-t border-slate-100 pt-3">
-          <label className="text-xs text-slate-500 font-medium block mb-1">
-            Paste Multiple Consumer Numbers (e.g. 35 to 50 numbers):
-          </label>
-          <textarea
-            value={rawInput}
-            onChange={(e) => setRawInput(e.target.value)}
-            rows={3}
-            placeholder="Paste consumer numbers separated by spaces, commas, or newlines (e.g. 10293, 10294, 10295)..."
-            className="w-full p-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-slate-700"
-          />
-          <button
-            type="button"
-            onClick={handleProcessBulkInput}
-            disabled={isProcessing || !rawInput.trim()}
-            className="w-full mt-2 bg-indigo-600 text-white py-2 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 active:scale-98 transition-all flex items-center justify-center gap-2"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Verifying against 31k Database...
-              </>
-            ) : (
-              'Process Bulk Numbers'
+                  );
+                })}
+              </div>
             )}
-          </button>
-        </div>
+          </div>
+        ) : (
+          /* Bulk Paste Mode */
+          <div>
+            <label className="text-xs text-slate-600 font-medium block mb-1">
+              Paste Consumer Numbers (comma/space/newline separated):
+            </label>
+            <textarea
+              value={rawInput}
+              onChange={(e) => setRawInput(e.target.value)}
+              rows={3}
+              placeholder="Paste numbers e.g. 10293, 10294, 10295..."
+              className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-slate-800"
+            />
+            <button
+              type="button"
+              onClick={handleProcessBulkInput}
+              disabled={isProcessing || !rawInput.trim()}
+              className="w-full mt-2 bg-indigo-600 text-white py-2.5 rounded-2xl text-xs font-bold hover:bg-indigo-700 disabled:opacity-50 active:scale-98 transition-all flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying against 31k Data...
+                </>
+              ) : (
+                'Process Bulk Numbers'
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Deliveries List */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 mb-4">
-        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-          <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+      <div className="bg-white rounded-3xl p-3.5 shadow-sm border border-slate-200 mb-3">
+        <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-100">
+          <h2 className="text-xs font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
             <span>Completed Deliveries</span>
-            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">
+            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-black">
               {entries.length}
             </span>
           </h2>
           {entries.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={handleCopyCsvNumbers}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                className="text-[11px] text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
                 title="Copy comma-separated numbers"
               >
                 {copiedCsv ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -916,60 +990,60 @@ export const AgentDispatchSummary: React.FC = () => {
               </button>
               <button
                 onClick={handleClearAll}
-                className="text-xs text-rose-600 hover:text-rose-700 font-medium flex items-center gap-1 hover:bg-rose-50 px-2 py-1 rounded-lg transition-colors"
+                className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1 hover:bg-rose-50 px-2 py-1 rounded-lg transition-colors"
               >
-                <Trash2 className="w-3.5 h-3.5" /> Clear All
+                <Trash2 className="w-3.5 h-3.5" /> Clear
               </button>
             </div>
           )}
         </div>
 
         {entries.length === 0 ? (
-          <div className="text-center py-8 text-slate-400">
-            <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-40 text-slate-400" />
-            <p className="text-sm font-medium">No consumers added yet</p>
-            <p className="text-xs text-slate-400 mt-1">
-              Search or paste consumer numbers above to generate report
+          <div className="text-center py-6 text-slate-400">
+            <ClipboardList className="w-8 h-8 mx-auto mb-1 opacity-40 text-slate-400" />
+            <p className="text-xs font-semibold text-slate-500">No deliveries added yet</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Use Quick Search or Bulk Paste above to add completed deliveries
             </p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
             {entries.map((item, index) => (
               <div
                 key={`${item.consumer_number}-${index}`}
-                className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-100/80 transition-colors"
+                className="flex items-center justify-between p-2.5 rounded-2xl border border-slate-100 bg-slate-50/80 hover:bg-slate-100 transition-colors"
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full text-xs font-bold flex items-center justify-center">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full text-[11px] font-black flex items-center justify-center">
                     {index + 1}
                   </span>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-slate-900 font-mono">
-                        {item.consumer_number}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-xs text-slate-900 font-mono">
+                        #{item.consumer_number}
                       </span>
                       {item.found ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-700 font-medium px-1.5 py-0.5 rounded-md">
-                          <CheckCheck className="w-3 h-3" /> Verified
+                        <span className="inline-flex items-center gap-0.5 text-[9px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-md">
+                          <CheckCheck className="w-2.5 h-2.5" /> Verified
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-700 font-medium px-1.5 py-0.5 rounded-md">
-                          <XCircle className="w-3 h-3" /> Unverified
+                        <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-md">
+                          <XCircle className="w-2.5 h-2.5" /> Unverified
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-600 truncate">{item.consumer_name}</p>
+                    <p className="text-xs text-slate-700 font-medium truncate">{item.consumer_name}</p>
                     {item.address && (
-                      <p className="text-[11px] text-slate-400 truncate max-w-xs">{item.address}</p>
+                      <p className="text-[10px] text-slate-400 truncate max-w-xs">{item.address}</p>
                     )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     onClick={() => handleMoveEntry(index, 'up')}
                     disabled={index === 0}
-                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 rounded"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-800 disabled:opacity-20 rounded-xl"
                     title="Move Up"
                   >
                     <ArrowUp className="w-3.5 h-3.5" />
@@ -977,14 +1051,14 @@ export const AgentDispatchSummary: React.FC = () => {
                   <button
                     onClick={() => handleMoveEntry(index, 'down')}
                     disabled={index === entries.length - 1}
-                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 rounded"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-800 disabled:opacity-20 rounded-xl"
                     title="Move Down"
                   >
                     <ArrowDown className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => handleRemoveEntry(index)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -996,38 +1070,23 @@ export const AgentDispatchSummary: React.FC = () => {
         )}
       </div>
 
-      {/* WhatsApp Sharing Controls */}
-      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 shadow-sm">
-        <div className="flex items-center gap-2 mb-2 text-emerald-900 font-bold text-sm">
-          <Share2 className="w-4 h-4 text-emerald-600" /> Share Report via WhatsApp
-        </div>
-        <p className="text-xs text-emerald-700 mb-3">
-          Sends summary directly to supervisor at <strong className="font-semibold">+91 7337487571</strong> with formatted numbered list and trailing CSV.
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {/* Floating Mobile Bottom Action Dock */}
+      <div className="fixed bottom-[68px] left-3 right-3 z-40 max-w-xl mx-auto">
+        <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/60 p-2 rounded-2xl shadow-2xl flex gap-2 items-center">
           <button
             onClick={handleShareWhatsApp}
             disabled={entries.length === 0}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl font-medium text-sm disabled:opacity-50 active:scale-98 transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20"
+            className="flex-1 bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white py-3 px-4 rounded-xl font-black text-xs sm:text-sm disabled:opacity-40 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30"
           >
             <Send className="w-4 h-4" /> Share on WhatsApp
           </button>
-
           <button
             onClick={handleCopyToClipboard}
             disabled={entries.length === 0}
-            className="w-full bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100/50 py-2.5 px-4 rounded-xl font-medium text-sm disabled:opacity-50 active:scale-98 transition-all flex items-center justify-center gap-2"
+            className="bg-white/10 hover:bg-white/20 active:scale-98 text-white p-3 rounded-xl disabled:opacity-40 transition-all flex items-center justify-center shrink-0 border border-white/10"
+            title="Copy Full Report"
           >
-            {copiedReport ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-600" /> Copied Full Report!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4 text-emerald-600" /> Copy Full Report
-              </>
-            )}
+            {copiedReport ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
       </div>
