@@ -11,7 +11,7 @@ export interface BillScanResult {
   rawText: string;
 }
 
-// Known non-consumer numbers (distributor codes, telephone numbers, pin codes, GST numbers)
+// Known non-consumer numbers (distributor codes, telephone numbers, pin codes, GST numbers, SMS numbers)
 const DISTRIBUTOR_BLACKLIST = new Set([
   '169624',
   '23092200',
@@ -20,9 +20,16 @@ const DISTRIBUTOR_BLACKLIST = new Set([
   '1800224344',
   '7718012345',
   '7715012345',
+  '1718012345',
+  '17718012345',
+  '17715012345',
   '36406262986',
   '500054',
   '271119',
+  '99400',
+  '94666',
+  '2367',
+  '19441220350',
 ]);
 
 /**
@@ -173,11 +180,9 @@ export async function scanBillReceipt(imageFile: File | Blob | string): Promise<
     }
   }
 
-  // If no candidate matched the database, return the top candidate if available
-  const fallbackNum = candidateNumbers.length > 0 ? candidateNumbers[0] : '';
-
+  // If no candidate matched the 31k database, return found: false (never add random numbers)
   return {
-    consumerNumber: fallbackNum,
+    consumerNumber: candidateNumbers.length > 0 ? candidateNumbers[0] : '',
     found: false,
     rawText: text,
   };

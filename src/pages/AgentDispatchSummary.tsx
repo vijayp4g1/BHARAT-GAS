@@ -693,23 +693,8 @@ export const AgentDispatchSummary: React.FC = () => {
           ]);
           toast.success(`Scanned #${res.consumerNumber} - ${res.consumerName || 'Verified'}!`, { id: 'ocr' });
         }
-      } else if (res.consumerNumber) {
-        if (entries.some((e) => e.consumer_number.toLowerCase() === res.consumerNumber.toLowerCase())) {
-          toast.error(`Consumer #${res.consumerNumber} is already added`, { id: 'ocr' });
-        } else {
-          setEntries((prev) => [
-            ...prev,
-            {
-              consumer_number: res.consumerNumber,
-              consumer_name: 'Consumer Record Not Found',
-              found: false,
-              source: 'manual',
-            },
-          ]);
-          toast.success(`Extracted Cons No: #${res.consumerNumber}`, { id: 'ocr' });
-        }
       } else {
-        toast.error('Could not find "Cons No:" on bill. Please take a clearer photo.', { id: 'ocr' });
+        toast.error('Cons No: not detected in photo. Please include the top "Cons No:" line in your photo.', { id: 'ocr', duration: 4500 });
       }
     } catch (err) {
       console.error('Bill OCR scan failed:', err);
