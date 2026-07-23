@@ -38,7 +38,6 @@ const DISTRIBUTOR_BLACKLIST = new Set([
   '19441220350',
 ]);
 
-// Play crisp audio beep feedback
 function playSuccessBeep() {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -62,10 +61,6 @@ function playSuccessBeep() {
   }
 }
 
-/**
- * Normalizes thermal dot-matrix print OCR character misreads
- * e.g. "2872I38I" -> "28721381"
- */
 function normalizeThermalDigits(rawText: string): string {
   return rawText
     .replace(/c0ns/gi, 'cons')
@@ -92,6 +87,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isAiProcessing, setIsAiProcessing] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
+  const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedCount, setScannedCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string>('Align Cons No: inside box...');
@@ -187,7 +183,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
-  // Process frame with Center Crop & Dot-Matrix AI Fuzzy Matching
+  // Process Frame with Dual Pass (Full Frame + Center Crop) & Dual Signal (Number + Name)
   const processFrame = async () => {
     if (isProcessingFrameRef.current || !workerRef.current || !videoRef.current || !canvasRef.current) {
       return;
@@ -204,41 +200,31 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // CROP ONLY THE CENTER BOX AREA (removes 80% background noise like keyboard keys)
-      const cropX = video.videoWidth * 0.15;
-      const cropY = video.videoHeight * 0.20;
-      const cropW = video.videoWidth * 0.70;
-      const cropH = video.videoHeight * 0.55;
+      // FULL FRAME OCR PASS FOR MAXIMUM COVERAGE
+      canvas.width = video.videoWidth / 1.5;
+      canvas.height = video.videoHeight / 1.5;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      canvas.width = cropW;
-      canvas.height = cropH;
-
-      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-      // Contrast boost for thermal dot-matrix print
+      // Contrast boost
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
-      const contrast = 55;
+      const contrast = 50;
       const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
 
       for (let i = 0; i < data.length; i += 4) {
         const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
         const color = factor * (avg - 128) + 128;
-        const finalColor = color < 115 ? 0 : 255;
+        const finalColor = color < 120 ? 0 : 255;
         data[i] = finalColor;
         data[i + 1] = finalColor;
         data[i + 2] = finalColor;
       }
-
       ctx.putImageData(imgData, 0, 0);
 
-      // Run OCR on cropped box area
+      // Run OCR on canvas
       const { data: { text } } = await workerRef.current.recognize(canvas);
 
-      // 1. Raw text candidates
       const rawNormalized = text.replace(/c0ns/gi, 'cons').replace(/n0/gi, 'no').replace(/;/g, ':');
-
-      // 2. Fuzzy normalized thermal digits
       const thermalNormalized = normalizeThermalDigits(text);
 
       const combinedTexts = [rawNormalized, thermalNormalized];
@@ -269,20 +255,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         });
       }
 
-      // Database lookup by Consumer Number against 31k IndexedDB master consumers
+      // 1. Database lookup by Consumer Number
       for (const candidate of candidates) {
-        if (scannedSetRef.current.has(candidate.toLowerCase())) {
-          continue; // Skip already added numbers
-        }
-
         const localMatch = await db.consumers
           .where('consumer_number')
           .equalsIgnoreCase(candidate)
           .first();
 
         if (localMatch) {
-          // MATCH FOUND BY NUMBER!
+          const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
+
+          if (isAlreadyAdded) {
+            setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
+            setTimeout(() => setAlreadyAddedNotice(null), 3000);
+            return;
+          }
+
+          // NEW UNADDED CONSUMER FOUND!
           scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
+          setAlreadyAddedNotice(null);
 
           if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
           playSuccessBeep();
@@ -302,19 +293,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         }
       }
 
-      // Secondary AI Search: Database lookup by Consumer Name (e.g. PRAKASH)
-      const nameMatch = rawNormalized.match(/(?:Cons\s*No|ConsNo|Consumer\s*No)[^\n]*\n\s*([A-Z\s]{3,25})/i);
-      let nameCandidate = nameMatch && nameMatch[1] ? nameMatch[1].trim() : '';
+      // 2. Secondary AI Search: Database lookup by Consumer Name (e.g. PRAKASH)
+      const uppercaseWords = rawNormalized.match(/\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g) || [];
+      const filteredWords = uppercaseWords.filter(
+        (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
+      );
 
-      if (!nameCandidate) {
-        const uppercaseWords = rawNormalized.match(/\b(PRAKASH|BANDIKA|[A-Z]{4,15})\b/g) || [];
-        const filteredWords = uppercaseWords.filter(
-          (w: string) => !['DETAILS', 'RECEIVER', 'INVOICE', 'BHARATGAS', 'BASE', 'RATE', 'CGST', 'SGST', 'SUB', 'CYL', 'AUTH', 'SIGN', 'DUE'].includes(w)
-        );
-        if (filteredWords.length > 0) nameCandidate = filteredWords[0];
-      }
-
-      if (nameCandidate && nameCandidate.length >= 3) {
+      if (filteredWords.length > 0) {
+        const nameCandidate = filteredWords[0];
         const nameMatches = await db.consumers
           .filter((c) => !!(c.consumer_name && c.consumer_name.toLowerCase().includes(nameCandidate.toLowerCase())))
           .limit(3)
@@ -322,24 +308,31 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
         if (nameMatches.length > 0) {
           const topMatch = nameMatches[0];
-          if (!scannedSetRef.current.has(topMatch.consumer_number.toLowerCase())) {
-            // MATCH FOUND BY NAME!
-            scannedSetRef.current.add(topMatch.consumer_number.toLowerCase());
+          const isAlreadyAdded = scannedSetRef.current.has(topMatch.consumer_number.toLowerCase());
 
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            playSuccessBeep();
-
-            setLastScanned(`${topMatch.consumer_number} - ${topMatch.consumer_name}`);
-            setScannedCount((prev) => prev + 1);
-
-            onConsumerScanned({
-              consumer_number: topMatch.consumer_number,
-              consumer_name: topMatch.consumer_name,
-              address: topMatch.address,
-              mobile: topMatch.mobile,
-              found: true,
-            });
+          if (isAlreadyAdded) {
+            setAlreadyAddedNotice(`Consumer #${topMatch.consumer_number} (${topMatch.consumer_name}) is ALREADY in your delivery list!`);
+            setTimeout(() => setAlreadyAddedNotice(null), 3000);
+            return;
           }
+
+          // NEW UNADDED CONSUMER FOUND BY NAME!
+          scannedSetRef.current.add(topMatch.consumer_number.toLowerCase());
+          setAlreadyAddedNotice(null);
+
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+          playSuccessBeep();
+
+          setLastScanned(`${topMatch.consumer_number} - ${topMatch.consumer_name}`);
+          setScannedCount((prev) => prev + 1);
+
+          onConsumerScanned({
+            consumer_number: topMatch.consumer_number,
+            consumer_name: topMatch.consumer_name,
+            address: topMatch.address,
+            mobile: topMatch.mobile,
+            found: true,
+          });
         }
       }
     } catch (err) {
@@ -359,12 +352,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // Instant 1-Tap AI Snap Trigger
   const handleAiSnap = async () => {
     setIsAiProcessing(true);
-    toast.loading('AI Vision analyzing receipt...', { id: 'ai-snap' });
+    toast.loading('AI Vision scanning receipt...', { id: 'ai-snap' });
     await processFrame();
     setTimeout(() => {
       setIsAiProcessing(false);
       toast.dismiss('ai-snap');
-    }, 600);
+    }, 500);
   };
 
   if (!isOpen) return null;
@@ -379,7 +372,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
           <div>
             <h2 className="text-sm font-bold tracking-tight">Real-Time AI Vision Scanner</h2>
-            <p className="text-[11px] text-slate-400">Center-cropped dot-matrix receipt reader</p>
+            <p className="text-[11px] text-slate-400">Full-frame & crop 31k master database reader</p>
           </div>
         </div>
 
@@ -407,7 +400,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Target Box: Center Cropped Area */}
+        {/* Target Box */}
         <div className="absolute inset-x-6 top-1/5 bottom-1/4 border-2 border-dashed border-amber-400 rounded-3xl pointer-events-none flex flex-col justify-between p-3 shadow-[0_0_60px_rgba(245,158,11,0.3)]">
           <div className="flex justify-between">
             <div className="w-5 h-5 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
@@ -415,7 +408,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
 
           <div className="text-center bg-slate-950/80 backdrop-blur-md text-amber-300 font-extrabold text-xs py-1.5 px-4 rounded-full mx-auto border border-amber-400/40 shadow-lg">
-            Position Cons No: inside yellow box
+            Position Cons No: inside box
           </div>
 
           <div className="flex justify-between">
@@ -424,8 +417,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         </div>
 
+        {/* Already Added Alert Badge */}
+        {alreadyAddedNotice && (
+          <div className="absolute top-4 left-4 right-4 bg-amber-500 text-slate-950 p-3 rounded-2xl shadow-xl flex items-center gap-2 border border-amber-300 font-bold text-xs z-30 animate-pulse">
+            <AlertCircle className="w-5 h-5 shrink-0 text-slate-950" />
+            <span className="truncate">{alreadyAddedNotice}</span>
+          </div>
+        )}
+
         {/* Live Detected Badge Alert */}
-        {lastScanned && (
+        {lastScanned && !alreadyAddedNotice && (
           <div className="absolute top-4 left-4 right-4 bg-emerald-600 text-white p-3.5 rounded-2xl shadow-xl flex items-center gap-2 border border-emerald-400/40 animate-bounce z-20">
             <CheckCircle2 className="w-6 h-6 text-amber-300 shrink-0" />
             <div className="min-w-0 flex-1">
