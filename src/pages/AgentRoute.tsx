@@ -157,7 +157,25 @@ export const AgentRoute = () => {
         }
       });
       const items = Array.from(uniqueMap.values());
+      const consumerIds = items.map(i => i.consumer_id);
       
+      // Direct query to consumer_locations table to guarantee 100% location match
+      let remoteLocationMap = new Map<string, any>();
+      if (consumerIds.length > 0) {
+        const { data: directLocs } = await supabase
+          .from('consumer_locations')
+          .select('consumer_id, latitude, longitude')
+          .in('consumer_id', consumerIds);
+
+        if (directLocs) {
+          directLocs.forEach(l => {
+            if (l.consumer_id && l.latitude && l.longitude) {
+              remoteLocationMap.set(l.consumer_id, l);
+            }
+          });
+        }
+      }
+
       // Merge with local Dexie state
       const localConsumers = await db.consumers.toArray();
       const localLocations = await db.consumer_locations.toArray();
@@ -168,12 +186,13 @@ export const AgentRoute = () => {
       // Process and extract coordinates robustly from Dexie & Supabase
       let processedItems = items
         .map((item: any) => {
+          const directLoc = remoteLocationMap.get(item.consumer_id);
           const localConsumer = localConsumerMap.get(item.consumer_id);
           const localLoc = localLocationMap.get(item.consumer_id);
           const remoteLoc = item.consumers?.consumer_locations?.[0];
 
-          const lat = localLoc?.latitude || (localConsumer as any)?.latitude || remoteLoc?.latitude || (item.consumers as any)?.latitude;
-          const lng = localLoc?.longitude || (localConsumer as any)?.longitude || remoteLoc?.longitude || (item.consumers as any)?.longitude;
+          const lat = directLoc?.latitude || localLoc?.latitude || (localConsumer as any)?.latitude || remoteLoc?.latitude || (item.consumers as any)?.latitude;
+          const lng = directLoc?.longitude || localLoc?.longitude || (localConsumer as any)?.longitude || remoteLoc?.longitude || (item.consumers as any)?.longitude;
 
           const hasLocation = Boolean(lat && lng);
           const isCompleted = item.status === 'COMPLETED';
@@ -326,8 +345,6 @@ export const AgentRoute = () => {
     }
   };
 
-  const center = location ? [location.latitude, location.longitude] as [number, number] : [17.3850, 78.4867] as [number, number];
-
   const filteredRouteItems = routeItems.filter(item => {
     const matchesSearch = 
       !searchQuery ||
@@ -343,15 +360,24 @@ export const AgentRoute = () => {
     return matchesSearch && matchesFilter;
   });
 
+  const deliveryPoints: [number, number][] = [];
   const polylinePoints: [number, number][] = [];
+
   if (location) {
     polylinePoints.push([location.latitude, location.longitude]);
   }
+  
   filteredRouteItems.forEach(item => {
     if (item.hasLocation && item.latitude && item.longitude) {
+      deliveryPoints.push([item.latitude, item.longitude]);
       polylinePoints.push([item.latitude, item.longitude]);
     }
   });
+
+  // Always center on the first delivery stop if available, otherwise live GPS or default
+  const center = deliveryPoints.length > 0
+    ? deliveryPoints[0]
+    : (location ? [location.latitude, location.longitude] as [number, number] : [17.3850, 78.4867] as [number, number]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pb-20">
@@ -530,7 +556,7 @@ export const AgentRoute = () => {
 
                 <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
                   <MapResizer />
-                  <AutoFitBounds points={polylinePoints} />
+                  <AutoFitBounds points={deliveryPoints.length > 0 ? deliveryPoints : polylinePoints} />
                   <RecenterController key={recenterCount} center={center} />
                   
                   <TileLayer 
