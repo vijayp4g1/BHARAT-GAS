@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useLiveLocation } from '../hooks/useLiveLocation';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Loader2, Navigation, MapPin, Search, Camera, CheckCircle2, Map as MapIcon, List, Sparkles, Phone, PhoneCall } from 'lucide-react';
 import db from '../lib/db';
@@ -9,6 +10,18 @@ import { AgentBottomNav } from '../components/AgentBottomNav';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { optimizeRouteWithGemini } from '../lib/gemini';
+
+// Map Resizer component to force recalculation of Leaflet bounds on render/view toggle
+const MapResizer = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+};
 
 // Distance calculation
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -416,8 +429,9 @@ export const AgentRoute = () => {
             )}
 
             {viewMode === 'map' ? (
-              <div className="flex-1 relative z-0 min-h-[400px]">
+              <div className="w-full relative z-0" style={{ height: 'calc(100vh - 270px)', minHeight: '480px' }}>
                 <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
+                  <MapResizer />
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   
                   {/* Route Polyline Path */}
