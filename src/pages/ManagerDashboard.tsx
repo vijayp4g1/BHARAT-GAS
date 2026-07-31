@@ -48,57 +48,44 @@ export const ManagerDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      // 1. Get exact counts efficiently using !inner joins to count distinct consumers
-      const { count: totalConsumers, error: cError } = await supabase
-        .from('consumers')
-        .select('*', { count: 'exact', head: true });
-        
-      const { count: withGps, error: lError } = await supabase
-        .from('consumers')
-        .select('id, consumer_locations!inner(id)', { count: 'exact', head: true });
-        
-      const { count: withPhotos, error: pError } = await supabase
-        .from('consumers')
-        .select('id, consumer_photos!inner(id)', { count: 'exact', head: true });
-
-      const { count: completedConsumers, error: compError } = await supabase
-        .from('consumers')
-        .select('id, consumer_locations!inner(id), consumer_photos!inner(id)', { count: 'exact', head: true });
-
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayIso = today.toISOString();
 
-      const { count: todaysGps } = await supabase
-        .from('consumer_locations')
-        .select('id', { count: 'exact', head: true })
-        .gte('uploaded_at', todayIso);
-
-      const { count: todaysPhotos } = await supabase
-        .from('consumer_photos')
-        .select('id', { count: 'exact', head: true })
-        .gte('uploaded_at', todayIso);
-
-      if (cError) throw cError;
-      if (lError) throw lError;
-      if (pError) throw pError;
-      if (compError) throw compError;
-
-      const { data: agentsData, error: agentsError } = await supabase
-        .from('agents')
-        .select(`
+      // Parallel execution of all dashboard queries simultaneously for ultra-fast load
+      const [
+        totalRes,
+        gpsRes,
+        photosRes,
+        completedRes,
+        todaysGpsRes,
+        todaysPhotosRes,
+        agentsRes
+      ] = await Promise.all([
+        supabase.from('consumers').select('id', { count: 'exact', head: true }),
+        supabase.from('consumers').select('id, consumer_locations!inner(id)', { count: 'exact', head: true }),
+        supabase.from('consumers').select('id, consumer_photos!inner(id)', { count: 'exact', head: true }),
+        supabase.from('consumers').select('id, consumer_locations!inner(id), consumer_photos!inner(id)', { count: 'exact', head: true }),
+        supabase.from('consumer_locations').select('id', { count: 'exact', head: true }).gte('uploaded_at', todayIso),
+        supabase.from('consumer_photos').select('id', { count: 'exact', head: true }).gte('uploaded_at', todayIso),
+        supabase.from('agents').select(`
           id,
           name,
           role,
           consumer_locations(count),
           consumer_photos(count)
-        `)
-        .neq('status', 'DELETED')
-        .order('name');
-        
-      if (agentsError) throw agentsError;
+        `).neq('status', 'DELETED').order('name')
+      ]);
 
-      const formattedAgentStats = (agentsData || []).map((agent: any) => ({
+      const totalConsumers = totalRes.count || 0;
+      const withGps = gpsRes.count || 0;
+      const withPhotos = photosRes.count || 0;
+      const completedConsumers = completedRes.count || 0;
+      const todaysGps = todaysGpsRes.count || 0;
+      const todaysPhotos = todaysPhotosRes.count || 0;
+      const agentsData = agentsRes.data || [];
+
+      const formattedAgentStats = agentsData.map((agent: any) => ({
         id: agent.id,
         name: agent.name,
         locationsCount: Array.isArray(agent.consumer_locations) ? (agent.consumer_locations[0]?.count ?? 0) : (agent.consumer_locations?.count ?? 0),
@@ -107,17 +94,17 @@ export const ManagerDashboard = () => {
 
       setAgentStats(formattedAgentStats);
 
-      const completionRate = (totalConsumers && totalConsumers > 0) 
-        ? Math.round(((completedConsumers || 0) / totalConsumers) * 100) 
+      const completionRate = (totalConsumers > 0) 
+        ? Math.round((completedConsumers / totalConsumers) * 100) 
         : 0;
 
       setStats({
-        totalConsumers: totalConsumers || 0,
-        withGps: withGps || 0,
-        withPhotos: withPhotos || 0,
+        totalConsumers,
+        withGps,
+        withPhotos,
         completionRate,
-        todaysGps: todaysGps || 0,
-        todaysPhotos: todaysPhotos || 0
+        todaysGps,
+        todaysPhotos
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
