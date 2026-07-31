@@ -23,6 +23,18 @@ const MapResizer = () => {
   return null;
 };
 
+// Auto Fit Bounds to bring all delivery markers into view
+const AutoFitBounds = ({ points }: { points: [number, number][] }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (points && points.length > 0) {
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
+    }
+  }, [points, map]);
+  return null;
+};
+
 // Recenter Map Controller
 const RecenterController = ({ center }: { center: [number, number] }) => {
   const map = useMap();
@@ -148,24 +160,27 @@ export const AgentRoute = () => {
       
       // Merge with local Dexie state
       const localConsumers = await db.consumers.toArray();
-      const localMap = new Map(localConsumers.map(c => [c.id, c]));
+      const localLocations = await db.consumer_locations.toArray();
 
-      // Process and sort by distance
+      const localConsumerMap = new Map(localConsumers.map(c => [c.id, c]));
+      const localLocationMap = new Map(localLocations.map(l => [l.consumer_id, l]));
+
+      // Process and extract coordinates robustly from Dexie & Supabase
       let processedItems = items
         .map((item: any) => {
-          const localConsumer = localMap.get(item.consumer_id);
-          // Prefer local status if it exists, otherwise fallback to server data
-          const hasLocation = localConsumer ? localConsumer.has_location : (item.consumers.consumer_locations && item.consumers.consumer_locations.length > 0);
-          const hasPhotos = localConsumer ? localConsumer.has_photos : false; // we didn't fetch photos from supabase here for brevity
-          
-          // If they have both, we consider it completed
+          const localConsumer = localConsumerMap.get(item.consumer_id);
+          const localLoc = localLocationMap.get(item.consumer_id);
+          const remoteLoc = item.consumers?.consumer_locations?.[0];
+
+          const lat = localLoc?.latitude || localConsumer?.latitude || remoteLoc?.latitude || item.consumers?.latitude;
+          const lng = localLoc?.longitude || localConsumer?.longitude || remoteLoc?.longitude || item.consumers?.longitude;
+
+          const hasLocation = Boolean(lat && lng);
           const isCompleted = item.status === 'COMPLETED';
 
-          const loc = hasLocation ? (item.consumers.consumer_locations?.[0] || null) : null;
           let distance = Infinity;
-          
-          if (loc && location) {
-            distance = getDistance(location.latitude, location.longitude, loc.latitude, loc.longitude);
+          if (hasLocation && location && lat && lng) {
+            distance = getDistance(location.latitude, location.longitude, Number(lat), Number(lng));
           }
 
           const cylinderType = localConsumer?.cylinder_type || item.consumers?.cylinder_type || '14.2KG_STD';
@@ -176,8 +191,8 @@ export const AgentRoute = () => {
             isCompleted,
             cylinderType,
             is10kgLite: cylinderType === '10KG_LITE',
-            latitude: loc?.latitude,
-            longitude: loc?.longitude,
+            latitude: lat ? Number(lat) : undefined,
+            longitude: lng ? Number(lng) : undefined,
             distance
           };
         })
@@ -515,6 +530,7 @@ export const AgentRoute = () => {
 
                 <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
                   <MapResizer />
+                  <AutoFitBounds points={polylinePoints} />
                   <RecenterController key={recenterCount} center={center} />
                   
                   <TileLayer 
