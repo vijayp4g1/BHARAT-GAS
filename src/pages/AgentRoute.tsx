@@ -172,8 +172,8 @@ export const AgentRoute = () => {
           const localLoc = localLocationMap.get(item.consumer_id);
           const remoteLoc = item.consumers?.consumer_locations?.[0];
 
-          const lat = localLoc?.latitude || localConsumer?.latitude || remoteLoc?.latitude || item.consumers?.latitude;
-          const lng = localLoc?.longitude || localConsumer?.longitude || remoteLoc?.longitude || item.consumers?.longitude;
+          const lat = localLoc?.latitude || (localConsumer as any)?.latitude || remoteLoc?.latitude || (item.consumers as any)?.latitude;
+          const lng = localLoc?.longitude || (localConsumer as any)?.longitude || remoteLoc?.longitude || (item.consumers as any)?.longitude;
 
           const hasLocation = Boolean(lat && lng);
           const isCompleted = item.status === 'COMPLETED';
