@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 import { SelectConsumersModal } from '../components/SelectConsumersModal';
-import { optimizeDispatchWithGemini } from '../lib/gemini';
+import { optimizeDispatchWithGemini, optimizeRouteWithGemini } from '../lib/gemini';
 import db, { type Consumer } from '../lib/db';
 import * as XLSX from 'xlsx';
 
@@ -219,6 +219,10 @@ export const ManagerDispatch = () => {
         if (itemsError) throw itemsError;
         
         toast.success(`Successfully assigned ${newConsumers.length} new consumers to ${selectedAgent.name}!`);
+        
+        // Auto-trigger Gemini AI Smart Route Optimization to seamlessly position new consumers!
+        await autoOptimizeAgentRouteWithAi(selectedAgent, dispatchId);
+
         // Refresh route
         handleSelectAgent(selectedAgent);
         
@@ -231,6 +235,76 @@ export const ManagerDispatch = () => {
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  const autoOptimizeAgentRouteWithAi = async (agent: any, dispatchId: string) => {
+    try {
+      toast.loading(`🤖 Gemini AI is auto-optimizing ${agent.name}'s route sequence...`, { id: 'ai-auto-route' });
+
+      // Fetch all pending stops for this dispatch
+      const { data: items } = await supabase
+        .from('dispatch_items')
+        .select(`
+          id,
+          dispatch_id,
+          consumer_id,
+          sequence_order,
+          status,
+          consumers (
+            id,
+            consumer_name,
+            consumer_number,
+            address,
+            mobile,
+            cylinder_type,
+            consumer_locations ( latitude, longitude )
+          )
+        `)
+        .eq('dispatch_id', dispatchId)
+        .eq('status', 'PENDING');
+
+      if (!items || items.length === 0) {
+        toast.dismiss('ai-auto-route');
+        return;
+      }
+
+      // Format payload for Gemini AI optimizer
+      const stopsPayload = items.map((item: any) => {
+        const loc = item.consumers?.consumer_locations?.[0];
+        return {
+          id: item.id,
+          consumer_id: item.consumer_id,
+          consumer_name: item.consumers?.consumer_name || '',
+          address: item.consumers?.address || '',
+          cylinder_type: item.consumers?.cylinder_type || '14.2KG_STD',
+          latitude: loc?.latitude,
+          longitude: loc?.longitude
+        };
+      });
+
+      const aiRes = await optimizeRouteWithGemini(null, stopsPayload);
+
+      if (aiRes.optimizedOrder && aiRes.optimizedOrder.length > 0) {
+        // Update sequence_order for each dispatch item according to AI optimal order
+        const orderMap = new Map(aiRes.optimizedOrder.map((cId, idx) => [cId, idx + 1]));
+
+        const updatePromises = items.map((item: any) => {
+          const newSeq = orderMap.get(item.consumer_id) || item.sequence_order;
+          return supabase
+            .from('dispatch_items')
+            .update({ sequence_order: newSeq })
+            .eq('id', item.id);
+        });
+
+        await Promise.all(updatePromises);
+        toast.success(`✨ Gemini AI automatically inserted & optimized ${agent.name}'s route!`, { id: 'ai-auto-route', duration: 4000 });
+      } else {
+        toast.dismiss('ai-auto-route');
+      }
+    } catch (err) {
+      console.error('Auto AI route optimization error:', err);
+      toast.dismiss('ai-auto-route');
+    }
   };
 
   const handleManualAssign = async (selectedIds: string[]) => {
@@ -284,6 +358,9 @@ export const ManagerDispatch = () => {
       toast.success(`Successfully assigned ${newSelectedIds.length} consumers to ${selectedAgent.name}!`);
       setIsManualModalOpen(false);
       
+      // Auto-trigger Gemini AI Smart Route Optimization to seamlessly position new consumers!
+      await autoOptimizeAgentRouteWithAi(selectedAgent, dispatchId);
+
       // Refresh route
       handleSelectAgent(selectedAgent);
     } catch (error) {
