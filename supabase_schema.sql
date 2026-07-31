@@ -20,6 +20,7 @@ CREATE TABLE consumers (
     mobile TEXT NOT NULL,
     address TEXT NOT NULL,
     verification_status TEXT NOT NULL DEFAULT 'Not Collected' CHECK (verification_status IN ('Not Collected', 'Pending', 'Verified', 'Rejected')),
+    cylinder_type TEXT DEFAULT '14.2KG_STD' CHECK (cylinder_type IN ('14.2KG_STD', '10KG_LITE', '5KG_LITE')),
     assigned_agent_id UUID REFERENCES agents(id),
     area_code TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

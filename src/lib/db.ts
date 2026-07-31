@@ -7,6 +7,8 @@ export interface Consumer {
   mobile: string;
   address: string;
   verification_status: 'Pending' | 'Verified' | 'Rejected' | 'Not Collected';
+  cylinder_type?: '14.2KG_STD' | '10KG_LITE' | '5KG_LITE';
+  booking_ref?: string;
   area_code?: string;
   created_at: string;
   updated_at?: string;
@@ -70,6 +72,10 @@ db.version(6).stores({
 
 db.version(7).stores({
   consumers: 'id, consumer_number, consumer_name, mobile, synced, isDeleted, last_interacted_at, *searchWords'
+});
+
+db.version(8).stores({
+  consumers: 'id, consumer_number, consumer_name, mobile, cylinder_type, synced, isDeleted, last_interacted_at, *searchWords'
 });
 
 export default db;

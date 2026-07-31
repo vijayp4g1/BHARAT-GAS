@@ -38,9 +38,16 @@ export const ConsumerCard: React.FC<ConsumerCardProps> = ({ consumer, onClick })
             <span className="font-bold text-lg">{consumer.consumer_name.charAt(0).toUpperCase()}</span>
           </div>
           <div>
-            <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded mb-1.5 uppercase tracking-wider">
-              #{consumer.consumer_number}
-            </span>
+            <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+              <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase tracking-wider">
+                #{consumer.consumer_number}
+              </span>
+              {consumer.cylinder_type === '10KG_LITE' && (
+                <span className="inline-block px-2 py-0.5 bg-purple-600 text-white text-[10px] font-black rounded shadow-xs">
+                  🔥 10kg Composite
+                </span>
+              )}
+            </div>
             <h3 className="font-bold text-slate-800 text-[17px] flex items-center gap-1.5 leading-tight pr-20">
               {consumer.consumer_name}
             </h3>

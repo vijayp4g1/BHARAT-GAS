@@ -32,11 +32,16 @@ export const SelectConsumersModal: React.FC<SelectConsumersModalProps> = ({ isOp
     setIsLoading(true);
     try {
       const escaped = searchQuery.replace(/[%_]/g, '\\$&');
-      const { data, error } = await supabase
+      let query = supabase
         .from('consumers')
-        .select('id, consumer_name, consumer_number, address, mobile')
-        .or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%`)
+        .select('id, consumer_name, consumer_number, address, mobile, cylinder_type')
         .limit(50);
+        
+      if (escaped.length >= 3) {
+        query = query.or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%`);
+      }
+
+      const { data, error } = await query;
         
       if (error) throw error;
       
@@ -45,6 +50,10 @@ export const SelectConsumersModal: React.FC<SelectConsumersModalProps> = ({ isOp
       // Local Relevance Sorting
       const queryLower = searchQuery.toLowerCase().trim();
       results.sort((a, b) => {
+        // Prioritize 10kg Lite Composite
+        if (a.cylinder_type === '10KG_LITE' && b.cylinder_type !== '10KG_LITE') return -1;
+        if (b.cylinder_type === '10KG_LITE' && a.cylinder_type !== '10KG_LITE') return 1;
+
         // 1. Exact match on consumer number
         if (a.consumer_number === queryLower && b.consumer_number !== queryLower) return -1;
         if (b.consumer_number === queryLower && a.consumer_number !== queryLower) return 1;
@@ -90,7 +99,10 @@ export const SelectConsumersModal: React.FC<SelectConsumersModalProps> = ({ isOp
         {/* Header */}
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">Add Consumers</h2>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              Add Consumers for Dispatch
+              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-extrabold border border-purple-200">10kg Composite Supported</span>
+            </h2>
             <p className="text-sm text-slate-500">Manually select consumers for {agentName}</p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors">
@@ -126,28 +138,38 @@ export const SelectConsumersModal: React.FC<SelectConsumersModalProps> = ({ isOp
              <div className="text-center py-12 text-slate-400">No consumers found matching your search.</div>
           ) : (
             <div className="space-y-2">
-              {consumers.map((c) => (
-                <div 
-                  key={c.id} 
-                  onClick={() => toggleSelect(c.id)}
-                  className={`p-3 rounded-xl border cursor-pointer flex items-center gap-3 transition-colors ${selectedIds.has(c.id) ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-white border-slate-200 hover:border-blue-300'}`}
-                >
-                  <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 border ${selectedIds.has(c.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'}`}>
-                    {selectedIds.has(c.id) && <CheckCircle2 size={16} />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start">
-                      <h4 className="font-bold text-slate-800 truncate">{c.consumer_name}</h4>
-                      <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded ml-2 shrink-0">#{c.consumer_number}</span>
+              {consumers.map((c) => {
+                const is10kgLite = c.cylinder_type === '10KG_LITE';
+                return (
+                  <div 
+                    key={c.id} 
+                    onClick={() => toggleSelect(c.id)}
+                    className={`p-3 rounded-xl border cursor-pointer flex items-center gap-3 transition-colors ${selectedIds.has(c.id) ? 'bg-purple-50/80 border-purple-300 shadow-sm' : 'bg-white border-slate-200 hover:border-purple-300'}`}
+                  >
+                    <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 border ${selectedIds.has(c.id) ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300 bg-white'}`}>
+                      {selectedIds.has(c.id) && <CheckCircle2 size={16} />}
                     </div>
-                    <div className="text-xs text-slate-500 font-medium mt-0.5 flex items-center gap-2 truncate">
-                      <span>{c.mobile || 'No Mobile'}</span>
-                      <span className="text-slate-300">•</span>
-                      <span className="truncate">{c.address}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-2 truncate">
+                          <h4 className="font-bold text-slate-800 truncate">{c.consumer_name}</h4>
+                          {is10kgLite && (
+                            <span className="text-[10px] font-black bg-purple-600 text-white px-2 py-0.5 rounded-md shadow-xs shrink-0">
+                              🔥 10kg Composite
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded ml-2 shrink-0">#{c.consumer_number}</span>
+                      </div>
+                      <div className="text-xs text-slate-500 font-medium mt-0.5 flex items-center gap-2 truncate">
+                        <span>{c.mobile || 'No Mobile'}</span>
+                        <span className="text-slate-300">•</span>
+                        <span className="truncate">{c.address}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

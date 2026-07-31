@@ -214,26 +214,19 @@ export async function syncOfflineData() {
           await db.consumers.delete(consumer.id);
         }
       } else {
-        const { data, error } = await supabase.rpc('sync_consumer', {
-          p_id: consumer.id,
-          p_consumer_number: consumer.consumer_number,
-          p_consumer_name: consumer.consumer_name,
-          p_mobile: consumer.mobile,
-          p_address: consumer.address,
-          p_verification_status: consumer.verification_status || 'Not Collected',
-          p_assigned_agent_id: user.id || null,
-          p_area_code: consumer.area_code || null,
-          p_created_at: consumer.created_at || new Date().toISOString(),
-          p_updated_at: consumer.updated_at || new Date().toISOString(),
+        const { error: upsertError } = await supabase.from('consumers').upsert({
+          id: consumer.id,
+          consumer_number: consumer.consumer_number,
+          consumer_name: consumer.consumer_name,
+          mobile: consumer.mobile,
+          address: consumer.address,
+          cylinder_type: consumer.cylinder_type || '14.2KG_STD',
+          verification_status: consumer.verification_status || 'Not Collected',
+          updated_at: consumer.updated_at || new Date().toISOString(),
         });
 
-        if (!error && data === true) {
+        if (!upsertError) {
           await db.consumers.update(consumer.id, { synced: true });
-        } else if (!error && data === false) {
-          const { data: latestData } = await supabase.from('consumers').select('*').eq('id', consumer.id).single();
-          if (latestData) {
-            await db.consumers.put({ ...latestData, synced: true });
-          }
         }
       }
     }

@@ -509,19 +509,58 @@ export const ConsumerProfile = () => {
 
         {/* --- DELIVERY ACTION --- */}
         {dispatchItemId && (
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 mb-2 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-bl-full -mr-10 -mt-10 blur-2xl"></div>
+          <div className={`rounded-3xl p-6 shadow-md border relative overflow-hidden transition-all ${consumer.cylinder_type === '10KG_LITE' ? 'bg-gradient-to-br from-purple-900 to-indigo-900 text-white border-purple-500/50' : 'bg-white text-slate-800 border-slate-100'}`}>
+            <div className="absolute top-0 right-0 w-36 h-36 bg-purple-500/20 rounded-bl-full -mr-10 -mt-10 blur-2xl"></div>
             
-            <h3 className="font-black text-slate-800 text-lg mb-2">Delivery Status</h3>
-            <p className="text-sm text-slate-500 mb-5">Mark this consumer's delivery as completed for today's route.</p>
-            
+            <div className="flex justify-between items-start mb-3 relative z-10">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className={`font-black text-xl ${consumer.cylinder_type === '10KG_LITE' ? 'text-white' : 'text-slate-800'}`}>
+                    Smart Delivery Status
+                  </h3>
+                  {consumer.cylinder_type === '10KG_LITE' && (
+                    <span className="text-xs font-black bg-purple-500 text-white px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-sm animate-pulse">
+                      🔥 10kg Composite
+                    </span>
+                  )}
+                </div>
+                <p className={`text-sm ${consumer.cylinder_type === '10KG_LITE' ? 'text-purple-200' : 'text-slate-500'}`}>
+                  Verify house photos & landmark notes, then complete dispatch for today's route.
+                </p>
+              </div>
+            </div>
+
+            {/* Smart Location Quick Preview */}
+            <div className={`p-4 rounded-2xl mb-5 flex flex-col sm:flex-row gap-4 items-center justify-between border ${consumer.cylinder_type === '10KG_LITE' ? 'bg-white/10 border-white/20 text-white' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex items-center gap-3">
+                {photos && photos.length > 0 ? (
+                  <img src={photos[0].photo_data_url || photos[0].photo_url} alt="House preview" className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md" />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-purple-200/30 text-purple-600 flex items-center justify-center font-bold text-xs">No Photo</div>
+                )}
+                <div>
+                  <h4 className="font-bold text-sm">House & Landmark Preview</h4>
+                  <p className="text-xs opacity-80">{notes.length > 0 ? notes[0].note : 'No landmark notes logged yet'}</p>
+                </div>
+              </div>
+
+              {location && (
+                <button 
+                  onClick={handleNavigate}
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0"
+                >
+                  <Navigation size={14} /> Open Maps
+                </button>
+              )}
+            </div>
+
             <button 
               onClick={handleCompleteDelivery}
               disabled={isCompletingDelivery}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 active:scale-95 transition-all"
+              className={`w-full py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${consumer.cylinder_type === '10KG_LITE' ? 'bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 text-slate-950 shadow-emerald-500/40' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/30'}`}
             >
               {isCompletingDelivery ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle size={24} />}
-              Complete Delivery
+              {consumer.cylinder_type === '10KG_LITE' ? 'Deliver 10kg Composite Cylinder' : 'Complete Delivery'}
             </button>
           </div>
         )}

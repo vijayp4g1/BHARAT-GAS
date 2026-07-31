@@ -11,7 +11,8 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
     consumer_number: '',
     consumer_name: '',
     mobile: '',
-    address: ''
+    address: '',
+    cylinder_type: '14.2KG_STD'
   });
 
   useEffect(() => {
@@ -20,14 +21,16 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
         consumer_number: initialData.consumer_number,
         consumer_name: initialData.consumer_name,
         mobile: initialData.mobile,
-        address: initialData.address
+        address: initialData.address,
+        cylinder_type: initialData.cylinder_type || '14.2KG_STD'
       });
     } else {
       setFormData({
         consumer_number: '',
         consumer_name: '',
         mobile: '',
-        address: ''
+        address: '',
+        cylinder_type: '14.2KG_STD'
       });
     }
   }, [initialData, isOpen]);
@@ -53,6 +56,7 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
           consumer_name: formData.consumer_name,
           mobile: formData.mobile,
           address: formData.address,
+          cylinder_type: formData.cylinder_type as any,
           verification_status: 'Not Collected',
           created_at: new Date().toISOString(),
           synced: false,
@@ -71,6 +75,7 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
           consumer_name: formData.consumer_name,
           mobile: formData.mobile,
           address: formData.address,
+          cylinder_type: formData.cylinder_type as any,
           synced: false,
           searchWords: [
             ...(formData.consumer_name ? formData.consumer_name.toLowerCase().split(/\s+/) : []),
@@ -122,6 +127,18 @@ export const ConsumerModal = ({ isOpen, onClose, initialData }: { isOpen: boolea
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5 ml-1">Mobile Number *</label>
             <input required type="tel" value={formData.mobile} onChange={e => setFormData({...formData, mobile: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all font-medium placeholder:font-normal placeholder:text-slate-400" placeholder="10-digit mobile number" />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5 ml-1">Cylinder Type *</label>
+            <select
+              value={formData.cylinder_type}
+              onChange={e => setFormData({ ...formData, cylinder_type: e.target.value as any })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all font-bold text-slate-800"
+            >
+              <option value="14.2KG_STD">Standard Steel Cylinder (14.2 kg)</option>
+              <option value="10KG_LITE">🔥 10kg Lite Composite Cylinder</option>
+              <option value="5KG_LITE">5kg Lite Composite Cylinder</option>
+            </select>
           </div>
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5 ml-1">Address *</label>
