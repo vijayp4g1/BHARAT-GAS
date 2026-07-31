@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 import { SelectConsumersModal } from '../components/SelectConsumersModal';
 import { optimizeDispatchWithGemini } from '../lib/gemini';
-import db from '../lib/db';
+import db, { type Consumer } from '../lib/db';
 import * as XLSX from 'xlsx';
 
 export const ManagerDispatch = () => {
@@ -311,9 +311,9 @@ export const ManagerDispatch = () => {
       if (consumersForDispatch.length === 0) {
         const { data: remoteConsumers } = await supabase
           .from('consumers')
-          .select('id, consumer_name, consumer_number, address, cylinder_type')
+          .select('*')
           .limit(30);
-        consumersForDispatch = remoteConsumers || [];
+        consumersForDispatch = (remoteConsumers as Consumer[]) || [];
       }
 
       if (consumersForDispatch.length === 0) {
