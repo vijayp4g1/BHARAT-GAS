@@ -4,7 +4,7 @@ import { useLiveLocation } from '../hooks/useLiveLocation';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Loader2, Navigation, MapPin, Search, Camera, CheckCircle2, Map as MapIcon, List, Sparkles, Phone, PhoneCall } from 'lucide-react';
+import { Loader2, Navigation, MapPin, Search, Camera, CheckCircle2, Map as MapIcon, List, Sparkles, Phone, PhoneCall, Layers, Maximize2, Minimize2, Crosshair, ChevronRight } from 'lucide-react';
 import db from '../lib/db';
 import { AgentBottomNav } from '../components/AgentBottomNav';
 import { Link, useNavigate } from 'react-router-dom';
@@ -20,6 +20,17 @@ const MapResizer = () => {
     }, 150);
     return () => clearTimeout(timer);
   }, [map]);
+  return null;
+};
+
+// Recenter Map Controller
+const RecenterController = ({ center }: { center: [number, number] }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] && center[1]) {
+      map.flyTo(center, 14, { animate: true });
+    }
+  }, [center, map]);
   return null;
 };
 
@@ -42,6 +53,9 @@ export const AgentRoute = () => {
   const [routeItems, setRouteItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'map' | 'list'>('list');
+  const [mapTileStyle, setMapTileStyle] = useState<'street' | 'satellite'>('street');
+  const [isFullScreenMap, setIsFullScreenMap] = useState(false);
+  const [recenterCount, setRecenterCount] = useState(0);
   const [isAiRouting, setIsAiRouting] = useState(false);
   const [aiOverview, setAiOverview] = useState<string | null>(null);
   const [aiAdviceMap, setAiAdviceMap] = useState<Map<string, string>>(new Map());
@@ -429,25 +443,102 @@ export const AgentRoute = () => {
             )}
 
             {viewMode === 'map' ? (
-              <div className="w-full relative z-0" style={{ height: 'calc(100vh - 270px)', minHeight: '480px' }}>
+              <div className={`w-full relative transition-all duration-300 ${isFullScreenMap ? 'fixed inset-0 z-50 bg-slate-900' : 'z-0'}`} style={isFullScreenMap ? { height: '100vh' } : { height: 'calc(100vh - 270px)', minHeight: '480px' }}>
+                
+                {/* Floating Map Control Buttons */}
+                <div className="absolute top-4 right-4 z-[999] flex flex-col gap-2">
+                  <button
+                    onClick={() => setMapTileStyle(s => s === 'street' ? 'satellite' : 'street')}
+                    className="bg-white/90 backdrop-blur-md hover:bg-white text-slate-800 p-2.5 rounded-2xl shadow-lg border border-slate-200 flex items-center gap-1.5 font-bold text-xs active:scale-95 transition-all"
+                    title="Toggle Map Style (Street / Satellite)"
+                  >
+                    <Layers size={16} className="text-blue-600" />
+                    <span className="hidden sm:inline">{mapTileStyle === 'street' ? 'Satellite' : 'Street'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setRecenterCount(c => c + 1)}
+                    className="bg-white/90 backdrop-blur-md hover:bg-white text-slate-800 p-2.5 rounded-2xl shadow-lg border border-slate-200 flex items-center justify-center active:scale-95 transition-all"
+                    title="Recenter My Location"
+                  >
+                    <Crosshair size={18} className="text-emerald-600" />
+                  </button>
+
+                  <button
+                    onClick={() => setIsFullScreenMap(!isFullScreenMap)}
+                    className="bg-white/90 backdrop-blur-md hover:bg-white text-slate-800 p-2.5 rounded-2xl shadow-lg border border-slate-200 flex items-center justify-center active:scale-95 transition-all"
+                    title={isFullScreenMap ? 'Exit Full Screen' : 'Full Screen Map'}
+                  >
+                    {isFullScreenMap ? <Minimize2 size={18} className="text-indigo-600" /> : <Maximize2 size={18} className="text-indigo-600" />}
+                  </button>
+                </div>
+
+                {/* Floating Next Stop Action Banner */}
+                {filteredRouteItems.length > 0 && (
+                  <div className="absolute bottom-4 left-4 right-4 z-[999] bg-white/95 backdrop-blur-md p-3.5 rounded-2xl shadow-2xl border border-slate-200/80 flex items-center justify-between gap-3 animate-in slide-in-from-bottom-5">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 shadow-md ${filteredRouteItems[0].is10kgLite ? 'bg-gradient-to-br from-purple-600 to-indigo-600' : 'bg-gradient-to-br from-indigo-500 to-blue-600'}`}>
+                        1
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Next Stop</span>
+                          {filteredRouteItems[0].is10kgLite && (
+                            <span className="text-[9px] font-black bg-purple-600 text-white px-1.5 py-0.2 rounded">🔥 10kg</span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-slate-800 truncate text-sm">{filteredRouteItems[0].consumers.consumer_name}</h4>
+                        <p className="text-xs text-slate-500 truncate">{filteredRouteItems[0].consumers.address}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {filteredRouteItems[0].hasLocation ? (
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${filteredRouteItems[0].latitude},${filteredRouteItems[0].longitude}`}
+                          target="_blank" rel="noreferrer"
+                          className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+                        >
+                          <Navigation size={14} /> Navigate
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/agent/consumer/${filteredRouteItems[0].consumer_id}`, { state: { dispatchItemId: filteredRouteItems[0].id } })}
+                          className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-all"
+                        >
+                          Profile
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
                   <MapResizer />
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <RecenterController key={recenterCount} center={center} />
+                  
+                  <TileLayer 
+                    url={mapTileStyle === 'satellite' 
+                      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                    }
+                    attribution={mapTileStyle === 'satellite' ? 'Esri World Imagery' : 'OpenStreetMap'}
+                  />
                   
                   {/* Route Polyline Path */}
                   {polylinePoints.length > 1 && (
-                    <Polyline positions={polylinePoints} color="#4f46e5" weight={4} opacity={0.7} dashArray="8, 8" />
+                    <Polyline positions={polylinePoints} color="#4f46e5" weight={4} opacity={0.8} dashArray="8, 8" />
                   )}
 
                   {/* Agent Location Marker */}
                   {location && (
                     <Marker position={[location.latitude, location.longitude]} icon={L.divIcon({
                       className: 'custom-map-marker',
-                      html: `<div class="w-5 h-5 bg-emerald-500 rounded-full border-2 border-white shadow-lg shadow-emerald-500/50 relative flex items-center justify-center"><div class="w-2 h-2 bg-white rounded-full"></div><div class="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-40"></div></div>`,
-                      iconSize: [20, 20], iconAnchor: [10, 10]
+                      html: `<div class="w-6 h-6 bg-emerald-500 rounded-full border-2 border-white shadow-xl shadow-emerald-500/50 relative flex items-center justify-center"><div class="w-2.5 h-2.5 bg-white rounded-full"></div><div class="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-40"></div></div>`,
+                      iconSize: [24, 24], iconAnchor: [12, 12]
                     })}>
                       <Popup>
-                        <div className="p-1 font-bold text-xs text-slate-800">Your Current Location</div>
+                        <div className="p-1 font-bold text-xs text-slate-800">Your Live GPS Location</div>
                       </Popup>
                     </Marker>
                   )}
