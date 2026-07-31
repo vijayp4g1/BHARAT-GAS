@@ -48,13 +48,14 @@ export const AgentRoute = () => {
         return;
       }
 
-      // Fetch today's dispatch for this agent
+      // Fetch today's latest dispatch for this agent
       const today = new Date().toISOString().split('T')[0];
       const { data: dispatches, error: dispatchError } = await supabase
         .from('daily_dispatch')
         .select('id')
         .eq('agent_id', agentId)
-        .eq('dispatch_date', today);
+        .eq('dispatch_date', today)
+        .order('created_at', { ascending: false });
 
       if (dispatchError) throw dispatchError;
       
@@ -67,7 +68,7 @@ export const AgentRoute = () => {
       const dispatchIds = dispatches.map(d => d.id);
 
       // Fetch items with consumer details
-      let items: any[] = [];
+      let rawItems: any[] = [];
       const { data: primaryData, error: primaryError } = await supabase
         .from('dispatch_items')
         .select(`
@@ -104,10 +105,19 @@ export const AgentRoute = () => {
           .eq('status', 'PENDING');
           
         if (fallbackError) throw fallbackError;
-        items = fallbackData || [];
+        rawItems = fallbackData || [];
       } else {
-        items = primaryData || [];
+        rawItems = primaryData || [];
       }
+
+      // Deduplicate by consumer_id so each consumer appears only once on the agent route
+      const uniqueMap = new Map<string, any>();
+      rawItems.forEach(item => {
+        if (item && item.consumer_id && !uniqueMap.has(item.consumer_id)) {
+          uniqueMap.set(item.consumer_id, item);
+        }
+      });
+      const items = Array.from(uniqueMap.values());
       
       // Merge with local Dexie state
       const localConsumers = await db.consumers.toArray();
