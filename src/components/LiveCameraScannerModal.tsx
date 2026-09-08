@@ -224,8 +224,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
 
     if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
-      // Capture full video frame scaled down to max 800px for optimal speed & wide detection area
-      const maxDim = 800;
+      // Capture full video frame at high resolution (max 1200px) for crisp receipt text OCR
+      const maxDim = 1200;
       let targetW = video.videoWidth;
       let targetH = video.videoHeight;
       if (targetW > maxDim || targetH > maxDim) {
@@ -242,7 +242,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       canvas.height = targetH;
       ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.70);
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.80);
 
       try {
         const geminiRes = await scanBillWithGemini(imgDataUrl);

@@ -116,7 +116,7 @@ export async function scanBillWithGemini(
         {
           parts: [
             {
-              text: "Extract LPG utility bill Consumer Number (labeled as Cons No, Consumer No, Refill No, usually 8 digits like 28721381) and Customer Name. If missing or not visible, return empty strings.",
+              text: "You are a specialized OCR vision parser for LPG utility bills and receipts (Bharatgas, Siddhartha Bharatgas, Cash Memos, Refill Vouchers). Carefully read the paper receipt in this photo (even if angled, upside-down, thermal printed, or handwritten). Extract the Consumer Number (usually 6 to 10 digits, labeled as Cons No, Consumer No, Refill No, Customer No, or standalone digits like 28721381) and the Customer Name. If not readable or missing, return empty strings.",
             },
             imgPart,
           ],
