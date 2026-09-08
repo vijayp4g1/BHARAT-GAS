@@ -224,26 +224,30 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
 
     if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
-      // Fast target box crop & scale (max 640px)
-      const cropX = Math.round(video.videoWidth * 0.08);
-      const cropY = Math.round(video.videoHeight * 0.15);
-      const cropW = Math.round(video.videoWidth * 0.84);
-      const cropH = Math.round(video.videoHeight * 0.70);
-
-      const targetW = Math.min(640, cropW);
-      const targetH = Math.round((cropH * targetW) / cropW);
+      // Capture full video frame scaled down to max 800px for optimal speed & wide detection area
+      const maxDim = 800;
+      let targetW = video.videoWidth;
+      let targetH = video.videoHeight;
+      if (targetW > maxDim || targetH > maxDim) {
+        if (targetW > targetH) {
+          targetH = Math.round((targetH * maxDim) / targetW);
+          targetW = maxDim;
+        } else {
+          targetW = Math.round((targetW * maxDim) / targetH);
+          targetH = maxDim;
+        }
+      }
 
       canvas.width = targetW;
       canvas.height = targetH;
-      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+      ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-      // Export directly to compressed JPEG data URL (bypasses double re-encoding)
-      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.65);
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.70);
 
       try {
         const geminiRes = await scanBillWithGemini(imgDataUrl);
         if (geminiRes.error) {
-          toast.error(`Gemini AI Error: ${geminiRes.error}`, { id: 'ai-snap', duration: 6000 });
+          toast.error(`AI Error: ${geminiRes.error}`, { id: 'ai-snap', duration: 4000 });
           setIsAiProcessing(false);
           return;
         }
@@ -382,7 +386,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             return;
           }
         } else {
-          toast.error('Gemini could not detect a valid Consumer Number in this frame', { id: 'ai-snap' });
+          toast.error('Cons No: not detected in camera view. Position receipt in camera view and tap 1-Tap Snap.', { id: 'ai-snap', duration: 4000 });
         }
       } catch (err: any) {
         console.error('Gemini snap OCR failed:', err);

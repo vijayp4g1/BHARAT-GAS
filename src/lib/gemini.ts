@@ -108,7 +108,7 @@ export async function scanBillWithGemini(
       },
     };
 
-    // Call gemini-3.6-flash endpoint
+    // Call gemini-3.6-flash endpoint with strict JSON responseSchema
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     const requestBody = {
@@ -116,7 +116,7 @@ export async function scanBillWithGemini(
         {
           parts: [
             {
-              text: "Extract LPG bill Cons No (usually 8 digits like 28721381) and Customer Name. Respond ONLY in JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}",
+              text: "Extract LPG utility bill Consumer Number (labeled as Cons No, Consumer No, Refill No, usually 8 digits like 28721381) and Customer Name. If missing or not visible, return empty strings.",
             },
             imgPart,
           ],
@@ -124,6 +124,14 @@ export async function scanBillWithGemini(
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            consumerNumber: { type: 'STRING' },
+            consumerName: { type: 'STRING' },
+          },
+          required: ['consumerNumber', 'consumerName'],
+        },
         maxOutputTokens: 300,
         temperature: 0.1,
       },
@@ -188,7 +196,7 @@ export async function scanBillWithGemini(
       consumerNumber: '',
       consumerName: '',
       found: false,
-      error: err.message || 'Unknown error',
+      error: err.message?.includes('JSON') ? undefined : err.message,
     };
   }
 }
