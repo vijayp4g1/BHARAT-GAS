@@ -116,7 +116,7 @@ export async function scanBillWithGemini(
         {
           parts: [
             {
-              text: "You are an expert OCR vision parser for LPG bills and receipts (Bharatgas, Siddhartha Bharatgas, Cash Memos, Refill Vouchers). Analyze this image for ANY paper receipt or bill. Extract the 6 to 10 digit Consumer Number (labeled as Cons No, Consumer No, Refill No, Customer ID, or standalone digits like 28721381, 1029384, printed or written anywhere on paper, even if partially covered by objects, angled, or upside-down). Also extract the Customer Name if visible. If no 6-10 digit number is found on paper, return empty strings.",
+              text: "You are an expert OCR vision parser for Siddhartha Bharatgas & Bharatgas LPG bills. Look at the 'Details of Receiver:' section. Extract the Consumer Number printed after 'Cons No:' (e.g. 1842, 28721381, 10293) and the Customer Name printed directly underneath it (e.g. MRS MEERABAI). Return JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}.",
             },
             imgPart,
           ],
@@ -167,9 +167,9 @@ export async function scanBillWithGemini(
       consumerName = parsed.consumerName ? String(parsed.consumerName).trim() : '';
     } catch (parseErr) {
       console.warn('JSON parse fallback active for Gemini output:', responseText);
-      const numMatch = responseText.match(/\b\d{7,10}\b/);
+      const numMatch = responseText.match(/Cons\s*No\s*:?\s*(\d{2,10})/i) || responseText.match(/\b\d{3,10}\b/);
       if (numMatch) {
-        consumerNumber = numMatch[0];
+        consumerNumber = numMatch[1] || numMatch[0];
       }
       const nameMatch = responseText.match(/"consumerName"\s*:\s*"([^"]+)"/i);
       if (nameMatch) {
