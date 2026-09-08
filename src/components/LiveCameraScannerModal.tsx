@@ -223,7 +223,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
+    if (video.videoWidth > 0 && ctx) {
       // Capture full video frame at high resolution (max 1200px) for crisp receipt text OCR
       const maxDim = 1200;
       let targetW = video.videoWidth;
@@ -255,50 +255,54 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         if (geminiRes.found && geminiRes.consumerNumber) {
           const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
 
+          if (!cleanNum || cleanNum.length < 5) {
+            toast.error('Could not extract valid Consumer Number from scan', { id: 'ai-snap' });
+            setIsAiProcessing(false);
+            return;
+          }
+
+          if (DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+            toast.error(`Ignored helpline/distributor number #${cleanNum}. Point at Consumer Number.`, { id: 'ai-snap' });
+            setIsAiProcessing(false);
+            return;
+          }
+
           const localMatch = await db.consumers
             .where('consumer_number')
             .equalsIgnoreCase(cleanNum)
             .first();
 
           if (localMatch) {
-            const isNameVerified = geminiRes.consumerName
-              ? areNamesSimilar(geminiRes.consumerName, localMatch.consumer_name)
-              : true;
-
-            if (isNameVerified) {
-              const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
-              if (isAlreadyAdded) {
-                setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
-                setTimeout(() => setAlreadyAddedNotice(null), 3000);
-                toast.success('Found but already added.', { id: 'ai-snap' });
-                setIsAiProcessing(false);
-                return;
-              }
-
-              // Success! Both number and name verified
-              scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
-              setAlreadyAddedNotice(null);
-
-              if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-              playSuccessBeep();
-
-              setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
-              setScannedCount((prev) => prev + 1);
-
-              onConsumerScanned({
-                consumer_number: localMatch.consumer_number,
-                consumer_name: localMatch.consumer_name,
-                address: localMatch.address,
-                mobile: localMatch.mobile,
-                found: true,
-              });
-
-              toast.success(`Gemini Scanned: #${localMatch.consumer_number}!`, { id: 'ai-snap' });
+            const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
+            if (isAlreadyAdded) {
+              setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
+              setTimeout(() => setAlreadyAddedNotice(null), 3000);
+              toast.success('Found but already added.', { id: 'ai-snap' });
               setIsAiProcessing(false);
               return;
-            } else {
-              toast.error(`Gemini read name "${geminiRes.consumerName}" but it didn't match database for #${cleanNum}`, { id: 'ai-snap', duration: 4000 });
             }
+
+            // Success! Consumer number matched in master database
+            scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
+            setAlreadyAddedNotice(null);
+
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            playSuccessBeep();
+
+            setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
+            setScannedCount((prev) => prev + 1);
+
+            onConsumerScanned({
+              consumer_number: localMatch.consumer_number,
+              consumer_name: localMatch.consumer_name,
+              address: localMatch.address,
+              mobile: localMatch.mobile,
+              found: true,
+            });
+
+            toast.success(`Scanned: #${localMatch.consumer_number} (${localMatch.consumer_name})!`, { id: 'ai-snap' });
+            setIsAiProcessing(false);
+            return;
           } else {
             // Check remote database if online
             let remoteMatch: any = null;
