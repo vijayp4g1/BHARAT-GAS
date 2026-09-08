@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2, Key } from 'lucide-react';
+import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2, Key, Search, Plus } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { scanBillWithGemini } from '../lib/gemini';
+import Tesseract from 'tesseract.js';
 
 interface LiveCameraScannerModalProps {
   isOpen: boolean;
@@ -74,43 +75,32 @@ function cleanAndNormalizeDigits(raw: string): string {
     .replace(/[^0-9]/g, '');
 }
 
-function getLevenshteinDistance(a: string, b: string): number {
-  const tmp: number[][] = [];
-  let i, j;
-  for (i = 0; i <= a.length; i++) {
-    tmp[i] = [i];
-  }
-  for (j = 0; j <= b.length; j++) {
-    tmp[0][j] = j;
-  }
-  for (i = 1; i <= a.length; i++) {
-    for (j = 1; j <= b.length; j++) {
-      tmp[i][j] = Math.min(
-        tmp[i - 1][j] + 1,
-        tmp[i][j - 1] + 1,
-        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-      );
-    }
-  }
-  return tmp[a.length][b.length];
-}
+function preprocessCanvasForOcr(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const processedCanvas = document.createElement('canvas');
+  processedCanvas.width = sourceCanvas.width;
+  processedCanvas.height = sourceCanvas.height;
+  const ctx = processedCanvas.getContext('2d');
+  if (!ctx) return sourceCanvas;
 
-function areNamesSimilar(scanned: string, dbName: string): boolean {
-  const s = scanned.toLowerCase().replace(/[^a-z]/g, '');
-  const d = dbName.toLowerCase().replace(/[^a-z]/g, '');
-  
-  if (s.length === 0 || d.length === 0) return false;
-  
-  if (s.length <= 3 || d.length <= 3) {
-    return d.includes(s) || s.includes(d);
+  ctx.drawImage(sourceCanvas, 0, 0);
+  const imgData = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+  const data = imgData.data;
+
+  // Grayscale & high contrast boost for receipt text OCR
+  const contrast = 50;
+  const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+
+  for (let i = 0; i < data.length; i += 4) {
+    const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    let color = factor * (avg - 128) + 128;
+    color = Math.min(255, Math.max(0, color));
+    data[i] = color;
+    data[i + 1] = color;
+    data[i + 2] = color;
   }
-  
-  if (d.includes(s) || s.includes(d)) return true;
-  
-  const dist = getLevenshteinDistance(s, d.substring(0, s.length));
-  const maxLen = Math.max(s.length, Math.min(d.length, s.length));
-  const similarity = 1 - dist / maxLen;
-  return similarity >= 0.5;
+
+  ctx.putImageData(imgData, 0, 0);
+  return processedCanvas;
 }
 
 export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
@@ -123,15 +113,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [isAiProcessing, setIsAiProcessing] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [scanEngine, setScanEngine] = useState<'LOCAL' | 'GEMINI'>('LOCAL');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedCount, setScannedCount] = useState<number>(0);
   const [statusText, setStatusText] = useState<string>('Align Cons No: inside box...');
+  const [manualInput, setManualInput] = useState<string>('');
 
   const scannedSetRef = useRef<Set<string>>(new Set(existingNumbers.map((n) => n.toLowerCase())));
-  const isProcessingFrameRef = useRef<boolean>(false);
 
   // Sync existing numbers
   useEffect(() => {
@@ -169,7 +160,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         await videoRef.current.play();
       }
       setIsScanning(true);
-      setStatusText('AI Vision Active — Position Cons No: in box');
+      setStatusText('Camera Active — Ready to scan');
     } catch (err) {
       console.error('Camera access error:', err);
       setStatusText('Camera permission denied or camera unavailable');
@@ -200,31 +191,151 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
+  // Process a candidate consumer number match
+  const processMatchedConsumerNumber = async (rawNum: string, fallbackName?: string) => {
+    const cleanNum = cleanAndNormalizeDigits(rawNum);
 
-
-  // Instant 1-Tap AI Snap Trigger using Gemini Multimodal AI
-  const handleAiSnap = async () => {
-    let apiKey =
-      import.meta.env.VITE_GEMINI_API_KEY ||
-      localStorage.getItem('VITE_GEMINI_API_KEY') ||
-      localStorage.getItem('GEMINI_API_KEY');
-
-    if (!apiKey) {
-      toast.error('Gemini API Key missing. Please set VITE_GEMINI_API_KEY in Vercel Environment Variables.', { duration: 5000 });
-      return;
+    if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 10) {
+      return false;
     }
 
+    if (DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+      toast.error(`Ignored helpline/distributor number #${cleanNum}.`);
+      return false;
+    }
+
+    const localMatch = await db.consumers
+      .where('consumer_number')
+      .equalsIgnoreCase(cleanNum)
+      .first();
+
+    if (localMatch) {
+      const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
+      if (isAlreadyAdded) {
+        setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
+        setTimeout(() => setAlreadyAddedNotice(null), 3000);
+        toast.success('Found but already added.');
+        return true;
+      }
+
+      // Success! Consumer number matched in master database
+      scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
+      setAlreadyAddedNotice(null);
+
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      playSuccessBeep();
+
+      setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
+      setScannedCount((prev) => prev + 1);
+
+      onConsumerScanned({
+        consumer_number: localMatch.consumer_number,
+        consumer_name: localMatch.consumer_name,
+        address: localMatch.address,
+        mobile: localMatch.mobile,
+        found: true,
+      });
+
+      toast.success(`Scanned: #${localMatch.consumer_number} (${localMatch.consumer_name})!`);
+      return true;
+    } else {
+      // Check remote database if online
+      let remoteMatch: any = null;
+      if (navigator.onLine) {
+        try {
+          const { data } = await supabase
+            .from('consumers')
+            .select('consumer_number, consumer_name, address, mobile')
+            .eq('consumer_number', cleanNum)
+            .maybeSingle();
+          remoteMatch = data;
+        } catch (e) {
+          console.error('Remote lookup error:', e);
+        }
+      }
+
+      const targetName = remoteMatch?.consumer_name || fallbackName?.trim().toUpperCase() || 'NEW CUSTOMER';
+      const targetAddress = remoteMatch?.address || 'Registered via Scanner';
+      const targetMobile = remoteMatch?.mobile || '';
+
+      // Auto-create and save new consumer into local IndexedDB
+      const newConsumerRecord: Consumer = {
+        id: `cons_${cleanNum}_${Date.now()}`,
+        consumer_number: cleanNum,
+        consumer_name: targetName,
+        mobile: targetMobile,
+        address: targetAddress,
+        verification_status: remoteMatch ? 'Verified' : 'Pending',
+        created_at: new Date().toISOString(),
+        searchWords: [
+          ...targetName.toLowerCase().split(/\s+/),
+          cleanNum.toLowerCase(),
+        ],
+      };
+
+      await db.consumers.put(newConsumerRecord).catch((err: any) => console.error('Dexie put error:', err));
+
+      // Auto-save to Supabase remote database if online and not existing
+      if (navigator.onLine && !remoteMatch) {
+        try {
+          await supabase
+            .from('consumers')
+            .insert([
+              {
+                consumer_number: cleanNum,
+                consumer_name: targetName,
+                address: targetAddress,
+                verification_status: 'Pending',
+              },
+            ]);
+          toast.success(`Synced #${cleanNum} to cloud database!`);
+        } catch (err: any) {
+          console.error('Supabase auto-insert error:', err);
+        }
+      }
+
+      const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
+      if (isAlreadyAdded) {
+        setAlreadyAddedNotice(`Consumer #${cleanNum} (${targetName}) is ALREADY in your delivery list!`);
+        setTimeout(() => setAlreadyAddedNotice(null), 3000);
+        toast.success('Found but already added.');
+        return true;
+      }
+
+      scannedSetRef.current.add(cleanNum.toLowerCase());
+      setAlreadyAddedNotice(null);
+
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      playSuccessBeep();
+
+      setLastScanned(`${cleanNum} - ${targetName}`);
+      setScannedCount((prev) => prev + 1);
+
+      onConsumerScanned({
+        consumer_number: cleanNum,
+        consumer_name: `${targetName} (New)`,
+        address: targetAddress,
+        mobile: targetMobile,
+        found: true,
+      });
+
+      toast.success(`✨ Registered New Customer #${cleanNum} (${targetName})!`, { duration: 4000 });
+      return true;
+    }
+  };
+
+  // Main Scan Trigger (Supports Native Barcode, Local Offline Tesseract, and Gemini AI Vision)
+  const handleSnap = async () => {
     if (!videoRef.current || !canvasRef.current) return;
-    
-    setIsAiProcessing(true);
-    toast.loading('AI Gemini vision parsing receipt...', { id: 'ai-snap' });
+
+    setIsProcessing(true);
+    toast.loading('Processing receipt...', { id: 'scan-snap' });
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
     if (video.videoWidth > 0 && ctx) {
-      // Capture full video frame at high resolution (max 1200px) for crisp receipt text OCR
       const maxDim = 1200;
       let targetW = video.videoWidth;
       let targetH = video.videoHeight;
@@ -242,216 +353,211 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       canvas.height = targetH;
       ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.80);
-
-      try {
-        const geminiRes = await scanBillWithGemini(imgDataUrl);
-        if (geminiRes.error) {
-          toast.error(`AI Error: ${geminiRes.error}`, { id: 'ai-snap', duration: 4000 });
-          setIsAiProcessing(false);
-          return;
-        }
-
-        if (geminiRes.found && geminiRes.consumerNumber) {
-          const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
-
-          if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 10) {
-            toast.error('Could not extract valid Consumer Number from scan', { id: 'ai-snap' });
-            setIsAiProcessing(false);
-            return;
-          }
-
-          if (DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
-            toast.error(`Ignored helpline/distributor number #${cleanNum}. Point at Consumer Number.`, { id: 'ai-snap' });
-            setIsAiProcessing(false);
-            return;
-          }
-
-          const localMatch = await db.consumers
-            .where('consumer_number')
-            .equalsIgnoreCase(cleanNum)
-            .first();
-
-          if (localMatch) {
-            const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
-            if (isAlreadyAdded) {
-              setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is ALREADY in your delivery list!`);
-              setTimeout(() => setAlreadyAddedNotice(null), 3000);
-              toast.success('Found but already added.', { id: 'ai-snap' });
-              setIsAiProcessing(false);
-              return;
+      // Method 1: Try Native Browser Barcode Detector if available
+      if ('BarcodeDetector' in window) {
+        try {
+          const barcodeDetector = new (window as any).BarcodeDetector({
+            formats: ['code_128', 'code_39', 'qr_code', 'ean_13', 'upc_a'],
+          });
+          const barcodes = await barcodeDetector.detect(canvas);
+          if (barcodes && barcodes.length > 0) {
+            for (const barcode of barcodes) {
+              const rawVal = barcode.rawValue || '';
+              const matched = await processMatchedConsumerNumber(rawVal);
+              if (matched) {
+                toast.success('Barcode scanned successfully!', { id: 'scan-snap' });
+                setIsProcessing(false);
+                return;
+              }
             }
+          }
+        } catch (e) {
+          console.warn('Native BarcodeDetector attempt skipped:', e);
+        }
+      }
 
-            // Success! Consumer number matched in master database
-            scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
-            setAlreadyAddedNotice(null);
+      // Method 2: Local Offline Tesseract OCR Engine
+      if (scanEngine === 'LOCAL') {
+        try {
+          toast.loading('Local Offline OCR scanning image...', { id: 'scan-snap' });
+          const preprocessed = preprocessCanvasForOcr(canvas);
+          const { data } = await Tesseract.recognize(preprocessed, 'eng');
+          const fullText = data.text || '';
 
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            playSuccessBeep();
+          // Look for Cons No / Consumer patterns first
+          const consNoMatches = Array.from(fullText.matchAll(/(?:CONS|CONSUMER|CON|NO|C\/N)\s*[:\-\#\.]*\s*(\d{1,10})/gi));
+          let success = false;
 
-            setLastScanned(`${localMatch.consumer_number} - ${localMatch.consumer_name}`);
-            setScannedCount((prev) => prev + 1);
+          for (const match of consNoMatches) {
+            const numCandidate = match[1];
+            if (numCandidate) {
+              const isOk = await processMatchedConsumerNumber(numCandidate);
+              if (isOk) {
+                success = true;
+                break;
+              }
+            }
+          }
 
-            onConsumerScanned({
-              consumer_number: localMatch.consumer_number,
-              consumer_name: localMatch.consumer_name,
-              address: localMatch.address,
-              mobile: localMatch.mobile,
-              found: true,
-            });
+          // If no explicit Cons No label found, check all standalone digit sequences against 31k database
+          if (!success) {
+            const digitMatches = fullText.match(/\b\d{1,10}\b/g) || [];
+            for (const dig of digitMatches) {
+              const isOk = await processMatchedConsumerNumber(dig);
+              if (isOk) {
+                success = true;
+                break;
+              }
+            }
+          }
 
-            toast.success(`Scanned: #${localMatch.consumer_number} (${localMatch.consumer_name})!`, { id: 'ai-snap' });
-            setIsAiProcessing(false);
+          if (success) {
+            toast.success('Local OCR scan complete!', { id: 'scan-snap' });
+            setIsProcessing(false);
             return;
           } else {
-            // Check remote database if online
-            let remoteMatch: any = null;
-            if (navigator.onLine) {
-              try {
-                const { data } = await supabase
-                  .from('consumers')
-                  .select('consumer_number, consumer_name, address, mobile')
-                  .eq('consumer_number', cleanNum)
-                  .maybeSingle();
-                remoteMatch = data;
-              } catch (e) {
-                console.error('Remote lookup error:', e);
-              }
-            }
+            toast.error('Cons No: not recognized by Local OCR. Try AI Gemini mode or type below.', { id: 'scan-snap', duration: 4000 });
+          }
+        } catch (err: any) {
+          console.error('Tesseract local OCR error:', err);
+          toast.error(`Local OCR error: ${err.message || 'failed'}. Try Gemini mode.`, { id: 'scan-snap' });
+        }
+      } else {
+        // Method 3: Gemini Cloud AI Vision
+        try {
+          toast.loading('AI Gemini vision parsing receipt...', { id: 'scan-snap' });
+          const imgDataUrl = canvas.toDataURL('image/jpeg', 0.80);
+          const geminiRes = await scanBillWithGemini(imgDataUrl);
 
-            const targetName = remoteMatch?.consumer_name || geminiRes.consumerName?.trim().toUpperCase() || 'NEW CUSTOMER';
-            const targetAddress = remoteMatch?.address || 'Registered via AI Scanner';
-            const targetMobile = remoteMatch?.mobile || '';
-
-            // Auto-create and save new consumer into local IndexedDB
-            const newConsumerRecord: Consumer = {
-              id: `cons_${cleanNum}_${Date.now()}`,
-              consumer_number: cleanNum,
-              consumer_name: targetName,
-              mobile: targetMobile,
-              address: targetAddress,
-              verification_status: remoteMatch ? 'Verified' : 'Pending',
-              created_at: new Date().toISOString(),
-              searchWords: [
-                ...targetName.toLowerCase().split(/\s+/),
-                cleanNum.toLowerCase(),
-              ],
-            };
-
-            await db.consumers.put(newConsumerRecord).catch((err: any) => console.error('Dexie put error:', err));
-
-            // Auto-save to Supabase remote database if online and not existing
-            if (navigator.onLine && !remoteMatch) {
-              try {
-                await supabase
-                  .from('consumers')
-                  .insert([
-                    {
-                      consumer_number: cleanNum,
-                      consumer_name: targetName,
-                      address: targetAddress,
-                      verification_status: 'Pending',
-                    },
-                  ]);
-                toast.success(`Synced #${cleanNum} to cloud database!`);
-              } catch (err: any) {
-                console.error('Supabase auto-insert error:', err);
-              }
-            }
-
-            const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
-            if (isAlreadyAdded) {
-              setAlreadyAddedNotice(`Consumer #${cleanNum} (${targetName}) is ALREADY in your delivery list!`);
-              setTimeout(() => setAlreadyAddedNotice(null), 3000);
-              toast.success('Found but already added.', { id: 'ai-snap' });
-              setIsAiProcessing(false);
-              return;
-            }
-
-            scannedSetRef.current.add(cleanNum.toLowerCase());
-            setAlreadyAddedNotice(null);
-
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            playSuccessBeep();
-
-            setLastScanned(`${cleanNum} - ${targetName}`);
-            setScannedCount((prev) => prev + 1);
-
-            onConsumerScanned({
-              consumer_number: cleanNum,
-              consumer_name: `${targetName} (New)`,
-              address: targetAddress,
-              mobile: targetMobile,
-              found: true,
-            });
-
-            toast.success(`✨ Registered New Customer #${cleanNum} (${targetName})!`, { id: 'ai-snap', duration: 5000 });
-            setIsAiProcessing(false);
+          if (geminiRes.error) {
+            toast.error(`AI Error: ${geminiRes.error}`, { id: 'scan-snap', duration: 4000 });
+            setIsProcessing(false);
             return;
           }
-        } else {
-          toast.error('Cons No: not detected in camera view. Position receipt in camera view and tap 1-Tap Snap.', { id: 'ai-snap', duration: 4000 });
+
+          if (geminiRes.found && geminiRes.consumerNumber) {
+            const ok = await processMatchedConsumerNumber(geminiRes.consumerNumber, geminiRes.consumerName);
+            if (ok) {
+              toast.success('AI Vision snap matched successfully!', { id: 'scan-snap' });
+              setIsProcessing(false);
+              return;
+            }
+          } else {
+            toast.error('Cons No: not detected in camera view. Reposition receipt or type below.', { id: 'scan-snap', duration: 4000 });
+          }
+        } catch (err: any) {
+          console.error('Gemini snap OCR failed:', err);
+          toast.error(`AI snap failed: ${err.message || 'unknown error'}`, { id: 'scan-snap' });
         }
-      } catch (err: any) {
-        console.error('Gemini snap OCR failed:', err);
-        toast.error(`AI snap failed: ${err.message || 'unknown error'}`, { id: 'ai-snap' });
       }
     } else {
-      toast.error('Camera feed is not ready yet', { id: 'ai-snap' });
+      toast.error('Camera feed is not ready yet', { id: 'scan-snap' });
     }
-    
-    setIsAiProcessing(false);
+
+    setIsProcessing(false);
+  };
+
+  // Method 4: Instant Manual Key-In Handler
+  const handleManualAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualInput.trim()) return;
+
+    setIsProcessing(true);
+    const cleanNum = cleanAndNormalizeDigits(manualInput);
+
+    if (!cleanNum) {
+      toast.error('Please enter valid digits for Consumer Number.');
+      setIsProcessing(false);
+      return;
+    }
+
+    const ok = await processMatchedConsumerNumber(cleanNum);
+    if (ok) {
+      setManualInput('');
+    } else {
+      toast.error(`Could not add Consumer #${cleanNum}`);
+    }
+    setIsProcessing(false);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col justify-between p-3 font-sans">
-      {/* Top Header Bar */}
-      <div className="flex items-center justify-between z-10 bg-slate-900/80 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400">
-            <Sparkles className="w-4 h-4" />
+    <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col justify-between p-3 font-sans">
+      {/* Top Header Bar with Engine Selector */}
+      <div className="flex flex-col gap-2 z-10 bg-slate-900/90 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white shadow-xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400">
+              <Zap className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold tracking-tight">Multi-Method Receipt Scanner</h2>
+              <p className="text-[11px] text-slate-400">Tesseract OCR • Native Barcode • Gemini AI</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-sm font-bold tracking-tight">Real-Time AI Vision Scanner</h2>
-            <p className="text-[11px] text-slate-400">Full-frame & crop 31k master database reader</p>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTorch}
+              className={`p-2.5 rounded-xl border transition-all ${
+                torchOn ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-white/10 text-white border-white/10'
+              }`}
+              title="Toggle Flashlight"
+            >
+              <Flashlight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10 transition-all"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Engine Toggle Buttons */}
+        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
           <button
-            onClick={toggleTorch}
-            className={`p-2.5 rounded-xl border transition-all ${
-              torchOn ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-white/10 text-white border-white/10'
+            type="button"
+            onClick={() => setScanEngine('LOCAL')}
+            className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              scanEngine === 'LOCAL'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/30'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
             }`}
-            title="Toggle Flashlight"
           >
-            <Flashlight className="w-4 h-4" />
+            <Zap className="w-3.5 h-3.5" /> ⚡ Local OCR (Offline)
           </button>
+
           <button
-            onClick={onClose}
-            className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10 transition-all"
+            type="button"
+            onClick={() => setScanEngine('GEMINI')}
+            className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              scanEngine === 'GEMINI'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                : 'bg-white/5 text-slate-300 hover:bg-white/10'
+            }`}
           >
-            <X className="w-4 h-4" />
+            <Sparkles className="w-3.5 h-3.5" /> ✨ Gemini AI Vision
           </button>
         </div>
       </div>
 
       {/* Viewfinder Video Stream Container */}
-      <div className="relative flex-1 my-3 rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center">
+      <div className="relative flex-1 my-2 rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center">
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Target Box */}
-        <div className="absolute inset-x-4 top-8 bottom-20 border-2 border-dashed border-amber-400/80 rounded-3xl pointer-events-none flex flex-col justify-between p-4 shadow-[0_0_60px_rgba(245,158,11,0.25)]">
+        <div className="absolute inset-x-4 top-6 bottom-24 border-2 border-dashed border-amber-400/80 rounded-3xl pointer-events-none flex flex-col justify-between p-4 shadow-[0_0_60px_rgba(245,158,11,0.25)]">
           <div className="flex justify-between">
             <div className="w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
             <div className="w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr-lg" />
           </div>
 
           <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-xs py-2 px-5 rounded-full mx-auto border border-amber-400/40 shadow-lg">
-            📷 Point camera at paper receipt (Uncover paper)
+            📷 Point camera at receipt ({scanEngine === 'LOCAL' ? 'Local Fast OCR' : 'Gemini AI Vision'})
           </div>
 
           <div className="flex justify-between">
@@ -479,17 +585,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         )}
 
-        {/* 1-Tap AI Snap Trigger Button on Viewfinder */}
+        {/* Snap Trigger Button on Viewfinder */}
         <div className="absolute bottom-4 inset-x-0 flex justify-center z-20">
           <button
             type="button"
-            onClick={handleAiSnap}
-            disabled={isAiProcessing}
-            className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 font-black px-6 py-3 rounded-2xl shadow-2xl shadow-amber-500/40 active:scale-95 transition-all flex items-center gap-2 border border-amber-300 text-xs tracking-wide uppercase"
+            onClick={handleSnap}
+            disabled={isProcessing}
+            className={`font-black px-6 py-3 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center gap-2 border text-xs tracking-wide uppercase ${
+              scanEngine === 'LOCAL'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 border-emerald-300 shadow-emerald-500/40'
+                : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 border-amber-300 shadow-amber-500/40'
+            }`}
           >
-            {isAiProcessing ? (
+            {isProcessing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> AI Analyzing...
+                <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> Scanning Receipt...
+              </>
+            ) : scanEngine === 'LOCAL' ? (
+              <>
+                <Zap className="w-4 h-4 text-slate-950" /> 1-Tap Fast Local OCR
               </>
             ) : (
               <>
@@ -500,20 +614,42 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         </div>
       </div>
 
-      {/* Bottom Status Bar */}
-      <div className="bg-slate-900/90 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white flex items-center justify-between">
-        <div>
-          <span className="text-xs font-bold text-slate-300 block">{statusText}</span>
-          <span className="text-[10px] text-amber-400 font-semibold">
-            {scannedCount} bills scanned this session
-          </span>
+      {/* Bottom Control Bar: Quick Manual Key-In & Session Counter */}
+      <div className="flex flex-col gap-2 bg-slate-900/90 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white">
+        <form onSubmit={handleManualAdd} className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="Or type Cons No (e.g. 1842) directly here..."
+              className="w-full bg-slate-800/90 border border-white/15 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-400"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!manualInput.trim() || isProcessing}
+            className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition-all shrink-0"
+          >
+            <Plus className="w-4 h-4" /> Add
+          </button>
+        </form>
+
+        <div className="flex items-center justify-between pt-1 border-t border-white/10">
+          <div>
+            <span className="text-[11px] font-bold text-slate-300 block">{statusText}</span>
+            <span className="text-[10px] text-amber-400 font-semibold">
+              {scannedCount} bills added this session
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg shadow-emerald-600/30 active:scale-95 transition-all"
+          >
+            Done ({scannedCount})
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-lg shadow-emerald-600/30 active:scale-95 transition-all"
-        >
-          Done ({scannedCount})
-        </button>
       </div>
     </div>
   );
