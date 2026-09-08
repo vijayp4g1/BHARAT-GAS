@@ -12,8 +12,15 @@ export interface GeminiOcrResult {
  */
 async function resizeAndCompressImage(
   imageSource: File | Blob | string,
-  maxDimension: number = 1000
+  maxDimension: number = 700
 ): Promise<{ data: string; mimeType: string }> {
+  if (typeof imageSource === 'string' && imageSource.startsWith('data:image/jpeg;base64,')) {
+    return {
+      data: imageSource.substring('data:image/jpeg;base64,'.length),
+      mimeType: 'image/jpeg',
+    };
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
 
@@ -46,7 +53,7 @@ async function resizeAndCompressImage(
       ctx.drawImage(img, 0, 0, width, height);
 
       // Convert to compressed JPEG
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
       const base64Data = dataUrl.split(',')[1];
       resolve({
         data: base64Data,
@@ -79,7 +86,9 @@ export async function scanBillWithGemini(
 ): Promise<GeminiOcrResult> {
   const apiKey =
     import.meta.env.VITE_GEMINI_API_KEY ||
-    localStorage.getItem('VITE_GEMINI_API_KEY');
+    import.meta.env.GEMINI_API_KEY ||
+    localStorage.getItem('VITE_GEMINI_API_KEY') ||
+    localStorage.getItem('GEMINI_API_KEY');
 
   if (!apiKey) {
     return {
@@ -107,7 +116,7 @@ export async function scanBillWithGemini(
         {
           parts: [
             {
-              text: "You are an expert OCR parser for LPG utility bills. Extract the Customer's unique Consumer Number (labeled as Cons No, Consumer No, Refill No, etc., usually 8 digits like 28721381) and the Customer's Name (e.g. PRAKASH). Respond ONLY with a clean JSON object matching this schema, without markdown formatting or backticks: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}. If not visible, leave empty.",
+              text: "Extract LPG bill Cons No (usually 8 digits like 28721381) and Customer Name. Respond ONLY in JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}",
             },
             imgPart,
           ],
@@ -115,6 +124,8 @@ export async function scanBillWithGemini(
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 60,
+        temperature: 0.1,
       },
     };
 

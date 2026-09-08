@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2 } from 'lucide-react';
+import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2, Key } from 'lucide-react';
 import db from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -226,12 +226,21 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
 
     if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
-      // Draw the current frame at full resolution for high AI accuracy
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
+      // Fast target box crop & scale (max 640px)
+      const cropX = Math.round(video.videoWidth * 0.08);
+      const cropY = Math.round(video.videoHeight * 0.15);
+      const cropW = Math.round(video.videoWidth * 0.84);
+      const cropH = Math.round(video.videoHeight * 0.70);
 
-      const imgDataUrl = canvas.toDataURL('image/png');
+      const targetW = Math.min(640, cropW);
+      const targetH = Math.round((cropH * targetW) / cropW);
+
+      canvas.width = targetW;
+      canvas.height = targetH;
+      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+
+      // Export directly to compressed JPEG data URL (bypasses double re-encoding)
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.65);
 
       try {
         const geminiRes = await scanBillWithGemini(imgDataUrl);
@@ -289,7 +298,86 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               toast.error(`Gemini read name "${geminiRes.consumerName}" but it didn't match database for #${cleanNum}`, { id: 'ai-snap', duration: 4000 });
             }
           } else {
-            toast.error(`Consumer number #${cleanNum} (${geminiRes.consumerName}) not found in database`, { id: 'ai-snap', duration: 4000 });
+            // Check remote database if online
+            let remoteMatch: any = null;
+            if (navigator.onLine) {
+              try {
+                const { data } = await supabase
+                  .from('consumers')
+                  .select('consumer_number, consumer_name, address, mobile')
+                  .eq('consumer_number', cleanNum)
+                  .maybeSingle();
+                remoteMatch = data;
+              } catch (e) {
+                console.error('Remote lookup error:', e);
+              }
+            }
+
+            const targetName = remoteMatch?.consumer_name || geminiRes.consumerName?.trim().toUpperCase() || 'NEW CUSTOMER';
+            const targetAddress = remoteMatch?.address || 'Registered via AI Scanner';
+            const targetMobile = remoteMatch?.mobile || '';
+
+            // Auto-create and save new consumer into local IndexedDB
+            const newConsumerRecord = {
+              consumer_number: cleanNum,
+              consumer_name: targetName,
+              mobile: targetMobile,
+              address: targetAddress,
+              verification_status: remoteMatch ? 'Verified' : 'New Customer',
+              created_at: new Date().toISOString(),
+              searchWords: [
+                ...targetName.toLowerCase().split(/\s+/),
+                cleanNum.toLowerCase(),
+              ],
+            };
+
+            await db.consumers.put(newConsumerRecord).catch(console.error);
+
+            // Auto-save to Supabase remote database if online and not existing
+            if (navigator.onLine && !remoteMatch) {
+              supabase
+                .from('consumers')
+                .insert([
+                  {
+                    consumer_number: cleanNum,
+                    consumer_name: targetName,
+                    address: targetAddress,
+                    verification_status: 'New Customer',
+                  },
+                ])
+                .then(() => toast.success(`Synced #${cleanNum} to cloud database!`))
+                .catch((err) => console.error('Supabase auto-insert error:', err));
+            }
+
+            const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
+            if (isAlreadyAdded) {
+              setAlreadyAddedNotice(`Consumer #${cleanNum} (${targetName}) is ALREADY in your delivery list!`);
+              setTimeout(() => setAlreadyAddedNotice(null), 3000);
+              toast.success('Found but already added.', { id: 'ai-snap' });
+              setIsAiProcessing(false);
+              return;
+            }
+
+            scannedSetRef.current.add(cleanNum.toLowerCase());
+            setAlreadyAddedNotice(null);
+
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            playSuccessBeep();
+
+            setLastScanned(`${cleanNum} - ${targetName}`);
+            setScannedCount((prev) => prev + 1);
+
+            onConsumerScanned({
+              consumer_number: cleanNum,
+              consumer_name: `${targetName} (New)`,
+              address: targetAddress,
+              mobile: targetMobile,
+              found: true,
+            });
+
+            toast.success(`✨ Registered New Customer #${cleanNum} (${targetName})!`, { id: 'ai-snap', duration: 5000 });
+            setIsAiProcessing(false);
+            return;
           }
         } else {
           toast.error('Gemini could not detect a valid Consumer Number in this frame', { id: 'ai-snap' });
