@@ -25,10 +25,19 @@ export const Login = () => {
       
       const { data: { session } } = await supabase.auth.getSession();
       if (session && session.user) {
-        if (session.user.email?.includes('@bgcls.local')) {
-          navigate('/agent/search');
+        // Query agents table for accurate role
+        const { data: agentData } = await supabase
+          .from('agents')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        const userRole = agentData?.role || (session.user.email?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER');
+
+        if (userRole === 'MANAGER') {
+          navigate('/manager/dashboard', { replace: true });
         } else {
-          navigate('/manager/dashboard');
+          navigate('/agent/search', { replace: true });
         }
       }
     };
@@ -69,60 +78,44 @@ export const Login = () => {
         localStorage.setItem('bgcls_agent_id', data.user.id);
       }
 
-      if (role === 'AGENT') {
-        const consumerCount = await db.consumers.count();
-        if (consumerCount === 0) {
-          toast.success('Agent logged in! Downloading data...');
-          // Hydrate offline database with consumers from Supabase in batches
-          let allConsumers: any[] = [];
-          let from = 0;
-          const step = 1000;
-          let fetchMore = true;
+      // Auto-detect actual user role from database
+      let actualRole: 'AGENT' | 'MANAGER' = role;
+      if (data?.user?.id) {
+        const { data: agentData } = await supabase
+          .from('agents')
+          .select('role')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-          while (fetchMore) {
-            const { data, error } = await supabase
-              .from('manager_consumer_summary')
-              .select('*')
-              .range(from, from + step - 1);
-              
-            if (error) {
-              console.error('Error fetching consumers:', error);
-              break;
-            }
-            
-            if (data && data.length > 0) {
-              allConsumers = [...allConsumers, ...data];
-              from += step;
-            }
-            
-            if (!data || data.length < step) {
-              fetchMore = false;
-            }
-          }
-            
-          if (allConsumers.length > 0) {
-            const formattedConsumers = allConsumers.map(c => {
-              const searchWords = [
-                ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
-                ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
-                ...(c.mobile ? [c.mobile.toLowerCase()] : [])
-              ];
-              return { ...c, searchWords };
-            });
-            await db.consumers.clear(); 
-            await db.consumers.bulkAdd(formattedConsumers);
-            console.log(`Hydrated ${formattedConsumers.length} consumers into Dexie`);
-          }
-        } else {
-          toast.success('Agent logged in! Local data ready.');
+        if (agentData?.role) {
+          actualRole = agentData.role as 'AGENT' | 'MANAGER';
         }
-        navigate('/agent/search');
-      } else {
-        toast.success('Manager logged in!');
+      }
+
+      if (actualRole === 'MANAGER') {
+        toast.success('Manager logged in successfully!');
         navigate('/manager/dashboard');
+      } else {
+        toast.success('Agent logged in successfully!');
+        navigate('/agent/search');
       }
       
     } catch (error: any) {
+      if (!navigator.onLine || error.message?.toLowerCase().includes('fetch')) {
+        try {
+          const localCount = await db.consumers.count();
+          if (localCount > 0) {
+            toast.success('Offline Mode Active: Logged in locally!');
+            if (!localStorage.getItem('bgcls_agent_id')) {
+              localStorage.setItem('bgcls_agent_id', 'offline_agent');
+            }
+            navigate('/agent/search');
+            return;
+          }
+        } catch (e) {
+          console.error('Offline fallback error:', e);
+        }
+      }
       toast.error(error.message || 'Invalid login credentials');
     } finally {
       setIsLoading(false);

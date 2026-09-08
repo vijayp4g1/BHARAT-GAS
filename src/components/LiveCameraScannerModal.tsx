@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Camera, Flashlight, CheckCircle2, AlertCircle, RefreshCw, Zap, Volume2, Sparkles, Loader2, Key } from 'lucide-react';
-import db from '../lib/db';
+import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { scanBillWithGemini } from '../lib/gemini';
@@ -318,12 +318,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             const targetMobile = remoteMatch?.mobile || '';
 
             // Auto-create and save new consumer into local IndexedDB
-            const newConsumerRecord = {
+            const newConsumerRecord: Consumer = {
+              id: `cons_${cleanNum}_${Date.now()}`,
               consumer_number: cleanNum,
               consumer_name: targetName,
               mobile: targetMobile,
               address: targetAddress,
-              verification_status: remoteMatch ? 'Verified' : 'New Customer',
+              verification_status: remoteMatch ? 'Verified' : 'Pending',
               created_at: new Date().toISOString(),
               searchWords: [
                 ...targetName.toLowerCase().split(/\s+/),
@@ -331,22 +332,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               ],
             };
 
-            await db.consumers.put(newConsumerRecord).catch(console.error);
+            await db.consumers.put(newConsumerRecord).catch((err: any) => console.error('Dexie put error:', err));
 
             // Auto-save to Supabase remote database if online and not existing
             if (navigator.onLine && !remoteMatch) {
-              supabase
-                .from('consumers')
-                .insert([
-                  {
-                    consumer_number: cleanNum,
-                    consumer_name: targetName,
-                    address: targetAddress,
-                    verification_status: 'New Customer',
-                  },
-                ])
-                .then(() => toast.success(`Synced #${cleanNum} to cloud database!`))
-                .catch((err) => console.error('Supabase auto-insert error:', err));
+              try {
+                await supabase
+                  .from('consumers')
+                  .insert([
+                    {
+                      consumer_number: cleanNum,
+                      consumer_name: targetName,
+                      address: targetAddress,
+                      verification_status: 'Pending',
+                    },
+                  ]);
+                toast.success(`Synced #${cleanNum} to cloud database!`);
+              } catch (err: any) {
+                console.error('Supabase auto-insert error:', err);
+              }
             }
 
             const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());

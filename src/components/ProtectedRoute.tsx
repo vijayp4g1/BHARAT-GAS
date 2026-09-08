@@ -20,14 +20,15 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
 
       // 2. Check Role if required
       if (allowedRole) {
-        // Fetch role from agents table
+        // Fetch role from agents table with safe fallback
         const { data: agent } = await supabase
           .from('agents')
           .select('role')
           .eq('id', session.user.id)
-          .single();
+          .maybeSingle();
           
-        setUserRole(agent?.role || null);
+        const fallbackRole = session.user.email?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
+        setUserRole(agent?.role || fallbackRole);
       }
       
       setIsAuthenticated(true);

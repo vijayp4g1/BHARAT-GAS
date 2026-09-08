@@ -574,29 +574,34 @@ export const AgentDispatchSummary: React.FC = () => {
     }
 
     // Auto-create & register new consumer in Dexie & Supabase
-    const newRecord = {
+    const newRecord: Consumer = {
+      id: `cons_${cleanNum}_${Date.now()}`,
       consumer_number: cleanNum,
       consumer_name: 'NEW CUSTOMER',
+      mobile: '',
       address: 'Registered via Manual Entry',
-      verification_status: 'New Customer',
+      verification_status: 'Pending',
       created_at: new Date().toISOString(),
       searchWords: ['new', 'customer', cleanNum.toLowerCase()],
     };
 
-    await db.consumers.put(newRecord).catch(console.error);
+    await db.consumers.put(newRecord).catch((err: any) => console.error('Dexie put error:', err));
 
     if (navigator.onLine) {
-      supabase
-        .from('consumers')
-        .insert([
-          {
-            consumer_number: cleanNum,
-            consumer_name: 'NEW CUSTOMER',
-            address: 'Registered via Manual Entry',
-            verification_status: 'New Customer',
-          },
-        ])
-        .catch((err) => console.error('Supabase auto-insert error:', err));
+      try {
+        await supabase
+          .from('consumers')
+          .insert([
+            {
+              consumer_number: cleanNum,
+              consumer_name: 'NEW CUSTOMER',
+              address: 'Registered via Manual Entry',
+              verification_status: 'Pending',
+            },
+          ]);
+      } catch (err: any) {
+        console.error('Supabase auto-insert error:', err);
+      }
     }
 
     setEntries((prev) => [
