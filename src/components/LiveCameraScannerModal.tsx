@@ -440,19 +440,19 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Target Box */}
-        <div className="absolute inset-x-6 top-1/5 bottom-1/4 border-2 border-dashed border-amber-400 rounded-3xl pointer-events-none flex flex-col justify-between p-3 shadow-[0_0_60px_rgba(245,158,11,0.3)]">
+        <div className="absolute inset-x-4 top-8 bottom-20 border-2 border-dashed border-amber-400/80 rounded-3xl pointer-events-none flex flex-col justify-between p-4 shadow-[0_0_60px_rgba(245,158,11,0.25)]">
           <div className="flex justify-between">
-            <div className="w-5 h-5 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
-            <div className="w-5 h-5 border-t-4 border-r-4 border-amber-400 rounded-tr-lg" />
+            <div className="w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
+            <div className="w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr-lg" />
           </div>
 
-          <div className="text-center bg-slate-950/80 backdrop-blur-md text-amber-300 font-extrabold text-xs py-1.5 px-4 rounded-full mx-auto border border-amber-400/40 shadow-lg">
-            Position Cons No: inside box
+          <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-xs py-2 px-5 rounded-full mx-auto border border-amber-400/40 shadow-lg">
+            📷 Point camera at paper receipt (Uncover paper)
           </div>
 
           <div className="flex justify-between">
-            <div className="w-5 h-5 border-b-4 border-l-4 border-amber-400 rounded-bl-lg" />
-            <div className="w-5 h-5 border-b-4 border-r-4 border-amber-400 rounded-br-lg" />
+            <div className="w-6 h-6 border-b-4 border-l-4 border-amber-400 rounded-bl-lg" />
+            <div className="w-6 h-6 border-b-4 border-r-4 border-amber-400 rounded-br-lg" />
           </div>
         </div>
 
