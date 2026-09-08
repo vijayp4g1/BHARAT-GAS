@@ -124,7 +124,7 @@ export async function scanBillWithGemini(
       ],
       generationConfig: {
         responseMimeType: 'application/json',
-        maxOutputTokens: 60,
+        maxOutputTokens: 300,
         temperature: 0.1,
       },
     };
@@ -146,13 +146,28 @@ export async function scanBillWithGemini(
     const responseText =
       resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    const parsed = JSON.parse(responseText.trim());
-    const consumerNumber = parsed.consumerNumber
-      ? String(parsed.consumerNumber).trim()
-      : '';
-    const consumerName = parsed.consumerName
-      ? String(parsed.consumerName).trim()
-      : '';
+    let consumerNumber = '';
+    let consumerName = '';
+
+    try {
+      const cleanJsonStr = responseText
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+      const parsed = JSON.parse(cleanJsonStr);
+      consumerNumber = parsed.consumerNumber ? String(parsed.consumerNumber).trim() : '';
+      consumerName = parsed.consumerName ? String(parsed.consumerName).trim() : '';
+    } catch (parseErr) {
+      console.warn('JSON parse fallback active for Gemini output:', responseText);
+      const numMatch = responseText.match(/\b\d{7,10}\b/);
+      if (numMatch) {
+        consumerNumber = numMatch[0];
+      }
+      const nameMatch = responseText.match(/"consumerName"\s*:\s*"([^"]+)"/i);
+      if (nameMatch) {
+        consumerName = nameMatch[1];
+      }
+    }
 
     if (consumerNumber) {
       return {
