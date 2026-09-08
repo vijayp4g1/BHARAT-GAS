@@ -116,7 +116,7 @@ export async function scanBillWithGemini(
         {
           parts: [
             {
-              text: "You are an expert OCR vision parser for Siddhartha Bharatgas & Bharatgas LPG bills. Look at the 'Details of Receiver:' section. Extract the Consumer Number printed after 'Cons No:' (e.g. 1842, 28721381, 10293) and the Customer Name printed directly underneath it (e.g. MRS MEERABAI). Return JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}.",
+              text: "You are an expert OCR vision parser for Siddhartha Bharatgas & Bharatgas LPG bills. Look at the 'Details of Receiver:' section. Extract the Consumer Number printed after 'Cons No:' (which can be any 1 to 10 digit number, e.g. 5, 42, 1842, 28721381, 10293) and the Customer Name printed directly underneath it (e.g. MRS MEERABAI). Return JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}.",
             },
             imgPart,
           ],
@@ -167,7 +167,7 @@ export async function scanBillWithGemini(
       consumerName = parsed.consumerName ? String(parsed.consumerName).trim() : '';
     } catch (parseErr) {
       console.warn('JSON parse fallback active for Gemini output:', responseText);
-      const numMatch = responseText.match(/Cons\s*No\s*:?\s*(\d{2,10})/i) || responseText.match(/\b\d{3,10}\b/);
+      const numMatch = responseText.match(/Cons\s*No\s*:?\s*(\d{1,10})/i) || responseText.match(/\b\d{1,10}\b/);
       if (numMatch) {
         consumerNumber = numMatch[1] || numMatch[0];
       }

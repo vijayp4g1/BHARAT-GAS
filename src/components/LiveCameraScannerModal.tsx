@@ -255,7 +255,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         if (geminiRes.found && geminiRes.consumerNumber) {
           const cleanNum = cleanAndNormalizeDigits(geminiRes.consumerNumber);
 
-          if (!cleanNum || cleanNum.length < 2) {
+          if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 10) {
             toast.error('Could not extract valid Consumer Number from scan', { id: 'ai-snap' });
             setIsAiProcessing(false);
             return;
