@@ -9,7 +9,9 @@ import {
   Search, 
   Plus, 
   Check, 
-  Camera
+  Camera,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
@@ -99,6 +101,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
@@ -139,12 +142,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     try {
       setStatusText('Connecting to HD camera...');
       
-      // Request continuous autofocus and high resolution for sharp receipts
+      // Request natural aspect ratio and continuous autofocus for sharp receipts
       const constraints: any = {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
           focusMode: { ideal: 'continuous' },
           advanced: [
             { focusMode: 'continuous' },
@@ -364,7 +367,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   };
 
   /**
-   * Capture the full camera frame at high clarity (1280px max)
+   * Capture the full camera frame at high clarity (up to 1600px max)
    * Avoids fragile screen-coordinate crops and lets Gemini AI see the full receipt.
    */
   const captureCameraFrame = (): string | null => {
@@ -374,7 +377,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 1280;
+    const maxDim = 1600;
     let targetW = video.videoWidth;
     let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
@@ -391,7 +394,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     canvas.height = targetH;
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas.toDataURL('image/jpeg', 0.85);
+    return canvas.toDataURL('image/jpeg', 0.88);
   };
 
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
@@ -437,6 +440,51 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       setIsProcessing(false);
     }
   }, [isProcessing]);
+
+  // Direct Photo Capture / Gallery Upload Handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    setIsShutterFlash(true);
+    setTimeout(() => setIsShutterFlash(false), 200);
+    toast.loading('Gemini AI reading photo...', { id: 'scan-snap' });
+
+    try {
+      setStatusText('Gemini AI reading photo...');
+      const result = await scanBillWithGemini(file);
+
+      if (result.error) {
+        toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
+        setStatusText('Hold bill steady and tap Snap...');
+        return;
+      }
+
+      if (result.found && result.consumerNumber) {
+        const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
+        if (matched) {
+          toast.success('Matched successfully!', { id: 'scan-snap' });
+          setStatusText(`Matched #${result.consumerNumber}! Ready for next bill`);
+          return;
+        }
+      } else {
+        setStatusText('Cons No: not detected in photo...');
+        toast.error('Cons No: not detected. Make sure "Details of Receiver:" is clearly visible.', {
+          id: 'scan-snap',
+          duration: 3500,
+        });
+      }
+    } catch (err: any) {
+      console.warn('File upload scan error:', err);
+      toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
+    } finally {
+      setIsProcessing(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
   // Manual Key-in Handler
   const handleManualAdd = async (e: React.FormEvent) => {
@@ -575,27 +623,51 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         )}
 
-        {/* Large Prominent 1-Tap AI Snap Button */}
-        <div className="absolute bottom-4 inset-x-0 flex justify-center z-20 px-4">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              performScan();
-            }}
-            disabled={isProcessing}
-            className="w-full max-w-sm bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black py-3.5 px-6 rounded-2xl shadow-2xl shadow-orange-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 border border-amber-300/80 text-xs sm:text-sm uppercase tracking-wide disabled:opacity-50"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin text-slate-950" /> Reading Receipt...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-5 h-5 text-slate-950" /> 1-TAP AI SNAP
-              </>
-            )}
-          </button>
+        {/* Dual Snap Controls: Live 1-Tap Snap & Native Camera / Upload */}
+        <div className="absolute bottom-3 inset-x-0 flex flex-col gap-2 z-20 px-3">
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          <div className="flex items-center gap-2 max-w-sm mx-auto w-full">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                performScan();
+              }}
+              disabled={isProcessing}
+              className="flex-1 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black py-3.5 px-4 rounded-2xl shadow-2xl shadow-orange-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 border border-amber-300/80 text-xs sm:text-sm uppercase tracking-wide disabled:opacity-50"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> Reading...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-slate-950" /> 1-TAP AI SNAP
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              disabled={isProcessing}
+              className="bg-slate-900/95 hover:bg-slate-800 text-white font-bold py-3.5 px-3.5 rounded-2xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-white/20 text-xs disabled:opacity-50 shrink-0"
+              title="Snap with phone camera or pick from gallery"
+            >
+              <Camera className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-semibold">Photo</span>
+            </button>
+          </div>
         </div>
       </div>
 
