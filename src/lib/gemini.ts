@@ -109,10 +109,10 @@ export async function scanBillWithGemini(
       },
     };
 
-    const promptText = `Extract from this Bharatgas LPG receipt:
-1. "consumerNumber": digits printed after "Cons No:" or "Consumer No:" (e.g. 1842). Clean digits only.
-2. "consumerName": customer name on the line directly below the consumer number (e.g. MRS MEERABAI).
-Strictly DO NOT extract distributor code (169624) or phone numbers.
+    const promptText = `Extract from this Bharatgas LPG cash memo/receipt:
+1. "consumerNumber": digits printed after "Cons No:" or "Consumer No:" (e.g. 89994449 or 1842). Look very closely at the first digit (dot-matrix print often fades on 8, 6, 9). Clean digits only.
+2. "consumerName": customer name printed on the line directly below the consumer number (e.g. MR. MOTHUKURI SAKETH, MRS MEERABAI). Preserve the full name.
+Strictly DO NOT extract distributor code (169624) or cash memo numbers.
 Return JSON: {"consumerNumber": "<digits>", "consumerName": "<name>"}. If not visible, return empty strings.`;
 
     const requestBody = {

@@ -17,6 +17,7 @@ import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { scanBillWithGemini } from '../lib/gemini';
+import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 
 interface LiveCameraScannerModalProps {
   isOpen: boolean;
@@ -243,32 +244,35 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return false;
     }
 
+    // Match with local Dexie or remote Supabase, checking number and name!
+    const match = await matchConsumerWithDatabase(cleanNum, extractedName);
+    const resolvedNum = match.consumer_number;
+    const finalName = match.consumer_name;
+    const finalAddress = match.address || 'Scanned via Gemini AI';
+    const finalMobile = match.mobile || '';
+
     // Anti-spam cooldown (5 seconds for the same number)
     const now = Date.now();
-    const lastSeen = recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
+    const lastSeen =
+      recentSeenCooldownRef.current.get(resolvedNum.toLowerCase()) ||
+      recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
     if (lastSeen && now - lastSeen < 5000) {
       return false;
     }
+    recentSeenCooldownRef.current.set(resolvedNum.toLowerCase(), now);
     recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
 
-    const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
+    const isAlreadyAdded =
+      scannedSetRef.current.has(resolvedNum.toLowerCase()) ||
+      scannedSetRef.current.has(cleanNum.toLowerCase());
     if (isAlreadyAdded) {
-      setAlreadyAddedNotice(`Consumer #${cleanNum} is already in delivery list!`);
+      setAlreadyAddedNotice(`Consumer #${resolvedNum} is already in delivery list!`);
       setTimeout(() => setAlreadyAddedNotice(null), 2500);
       return true;
     }
 
-    // 1. Check local Dexie master database (instant in-memory IndexedDB query)
-    const localMatch = await db.consumers
-      .where('consumer_number')
-      .equalsIgnoreCase(cleanNum)
-      .first();
-
-    const finalName = localMatch?.consumer_name || extractedName?.trim().toUpperCase() || 'Consumer';
-    const finalAddress = localMatch?.address || 'Scanned via Gemini AI';
-    const finalMobile = localMatch?.mobile || '';
-
     // INSTANT ADDITION TO UI (0ms delay - no blocking on network!)
+    scannedSetRef.current.add(resolvedNum.toLowerCase());
     scannedSetRef.current.add(cleanNum.toLowerCase());
     setAlreadyAddedNotice(null);
 
@@ -278,49 +282,27 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setIsSuccessFlash(true);
     setTimeout(() => setIsSuccessFlash(false), 400);
 
-    setLastScanned(`${cleanNum} - ${finalName}`);
+    setLastScanned(`${resolvedNum} - ${finalName}`);
     setScannedSessionList((prev) => [
-      { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
+      { consumer_number: resolvedNum, consumer_name: finalName, timestamp: Date.now() },
       ...prev,
     ]);
 
     onConsumerScanned({
-      consumer_number: cleanNum,
+      consumer_number: resolvedNum,
       consumer_name: finalName,
       address: finalAddress,
       mobile: finalMobile,
-      found: Boolean(localMatch),
+      found: match.found,
     });
 
-    toast.success(`✨ Added #${cleanNum} (${finalName})!`, { id: 'scan-snap' });
-
-    // Background asynchronous cloud sync if not matched locally (never blocks user!)
-    if (!localMatch && navigator.onLine) {
-      (async () => {
-        try {
-          const { data } = await supabase
-            .from('consumers')
-            .select('id, consumer_number, consumer_name, address, mobile')
-            .eq('consumer_number', cleanNum)
-            .maybeSingle();
-
-          if (data) {
-            const cachedRecord: Consumer = {
-              id: data.id || `cons_${cleanNum}_${Date.now()}`,
-              consumer_number: cleanNum,
-              consumer_name: data.consumer_name || finalName,
-              mobile: data.mobile || '',
-              address: data.address || finalAddress,
-              verification_status: 'Verified',
-              created_at: new Date().toISOString(),
-              searchWords: [...(data.consumer_name || finalName).toLowerCase().split(/\s+/), cleanNum.toLowerCase()],
-            };
-            await db.consumers.put(cachedRecord).catch(() => {});
-          }
-        } catch (e) {
-          // background sync
-        }
-      })();
+    if (match.corrected) {
+      toast.success(
+        `✨ Verified by Name: #${resolvedNum} (${finalName}) [Corrected from #${match.original_number}]`,
+        { id: 'scan-snap', duration: 4500 }
+      );
+    } else {
+      toast.success(`✨ Added #${resolvedNum} (${finalName})!`, { id: 'scan-snap' });
     }
 
     return true;

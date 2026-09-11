@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
+import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -167,6 +168,74 @@ export const AgentDispatchSummary: React.FC = () => {
       console.error('Failed to save entries to local storage:', err);
     }
   }, [entries, agentId, reportDate, isLoaded]);
+
+  // Track reverification attempts to prevent re-querying items that truly don't exist
+  const reverifyAttemptedRef = useRef<Set<string>>(new Set());
+
+  // Auto-correct / re-verify unverified entries against master database by customer name
+  useEffect(() => {
+    if (!isLoaded || entries.length === 0) return;
+
+    const unverifiedItems = entries.filter(
+      (e) =>
+        !e.found &&
+        e.consumer_name &&
+        e.consumer_name !== 'Consumer Record Not Found' &&
+        e.consumer_name !== 'Unverified / Manual Entry' &&
+        !reverifyAttemptedRef.current.has(e.consumer_number)
+    );
+
+    if (unverifiedItems.length === 0) return;
+
+    let isMounted = true;
+
+    const reverifyEntries = async () => {
+      let hasUpdates = false;
+      const updatedEntries = [...entries];
+
+      for (let i = 0; i < updatedEntries.length; i++) {
+        const item = updatedEntries[i];
+        if (
+          !item.found &&
+          item.consumer_name &&
+          !reverifyAttemptedRef.current.has(item.consumer_number)
+        ) {
+          reverifyAttemptedRef.current.add(item.consumer_number);
+          try {
+            const match = await matchConsumerWithDatabase(item.consumer_number, item.consumer_name);
+            if (match.found && isMounted) {
+              updatedEntries[i] = {
+                ...item,
+                consumer_number: match.consumer_number,
+                consumer_name: match.consumer_name,
+                address: match.address || item.address,
+                mobile: match.mobile || item.mobile,
+                found: true,
+                source: 'local',
+              };
+              hasUpdates = true;
+              toast.success(
+                `✨ Verified by Name: #${match.consumer_number} (${match.consumer_name})!`,
+                { id: `reverify-${match.consumer_number}`, duration: 4000 }
+              );
+            }
+          } catch (err) {
+            console.warn('Re-verification error:', err);
+          }
+        }
+      }
+
+      if (hasUpdates && isMounted) {
+        setEntries(updatedEntries);
+      }
+    };
+
+    const timer = setTimeout(reverifyEntries, 500);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [isLoaded, entries]);
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [copiedReport, setCopiedReport] = useState<boolean>(false);
@@ -423,34 +492,40 @@ export const AgentDispatchSummary: React.FC = () => {
       try {
         let combinedMap = new Map<string, Consumer>();
 
-        const localMatches = await db.consumers
-          .where('consumer_number')
-          .startsWith(query)
-          .limit(30)
-          .toArray();
-
-        localMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
-
-        if (combinedMap.size < 15) {
-          const prefixQuery = query.length >= 3 ? query.slice(0, 3) : query.slice(0, 2);
-          const candidates = await db.consumers
+        const isNumeric = /^\d+$/.test(query);
+        if (isNumeric) {
+          const localMatches = await db.consumers
             .where('consumer_number')
-            .startsWith(prefixQuery)
-            .limit(150)
+            .startsWith(query)
+            .limit(30)
             .toArray();
 
-          candidates.forEach((c) => {
-            if (c.consumer_number && c.consumer_number.toLowerCase().includes(query)) {
-              combinedMap.set(c.consumer_number, c);
-            }
-          });
+          localMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
 
-          if (combinedMap.size < 5) {
-            const allLocal = await db.consumers
-              .filter((c) => !!(c.consumer_number && c.consumer_number.toLowerCase().includes(query)))
-              .limit(30)
+          if (combinedMap.size < 15) {
+            const prefixQuery = query.length >= 3 ? query.slice(0, 3) : query.slice(0, 2);
+            const candidates = await db.consumers
+              .where('consumer_number')
+              .startsWith(prefixQuery)
+              .limit(150)
               .toArray();
-            allLocal.forEach((item) => combinedMap.set(item.consumer_number, item));
+
+            candidates.forEach((c) => {
+              if (c.consumer_number && c.consumer_number.toLowerCase().includes(query)) {
+                combinedMap.set(c.consumer_number, c);
+              }
+            });
+          }
+        } else {
+          // Name query: search words in local Dexie
+          const nameTokens = query.split(/\s+/).filter((w) => w.length >= 2);
+          if (nameTokens.length > 0) {
+            const nameMatches = await db.consumers
+              .where('searchWords')
+              .anyOfIgnoreCase(nameTokens)
+              .limit(40)
+              .toArray();
+            nameMatches.forEach((item) => combinedMap.set(item.consumer_number, item));
           }
         }
 
@@ -494,20 +569,20 @@ export const AgentDispatchSummary: React.FC = () => {
     toast.success(`Added ${consumer.consumer_name} (#${consumer.consumer_number})`);
   };
 
-  // Add a single consumer number
+  // Add a single consumer number or customer name
   const handleAddSingle = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanNum = singleInput.trim();
-    if (!cleanNum) return;
+    const cleanInput = singleInput.trim();
+    if (!cleanInput) return;
 
-    if (entries.some((e) => e.consumer_number.toLowerCase() === cleanNum.toLowerCase())) {
+    if (entries.some((e) => e.consumer_number.toLowerCase() === cleanInput.toLowerCase())) {
       toast.error('Consumer number already added');
       return;
     }
 
     if (suggestions.length > 0) {
       const exactMatch = suggestions.find(
-        (s) => s.consumer_number.toLowerCase() === cleanNum.toLowerCase()
+        (s) => s.consumer_number.toLowerCase() === cleanInput.toLowerCase()
       );
       if (exactMatch) {
         handleSelectSuggestion(exactMatch);
@@ -515,74 +590,44 @@ export const AgentDispatchSummary: React.FC = () => {
       }
     }
 
-    // 1. Check local Dexie
-    const match = await db.consumers
-      .where('consumer_number')
-      .equalsIgnoreCase(cleanNum)
-      .first();
+    // Comprehensive lookup: checks number first, then searches by name in Dexie and Supabase!
+    const match = await matchConsumerWithDatabase(cleanInput, cleanInput);
 
-    if (match) {
+    if (match.found) {
+      if (entries.some((e) => e.consumer_number.toLowerCase() === match.consumer_number.toLowerCase())) {
+        toast.error(`Consumer #${match.consumer_number} is already added`);
+        return;
+      }
+
       setEntries((prev) => [
         ...prev,
         {
-          consumer_id: match.id,
           consumer_number: match.consumer_number,
           consumer_name: match.consumer_name,
           address: match.address,
           mobile: match.mobile,
           found: true,
           source: 'local',
-          cylinder_type: match.cylinder_type === '10KG_LITE' ? '10KG_LITE' : (match.cylinder_type as string) === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
+          cylinder_type: '14.2KG_STD',
           payment_mode: 'CASH',
           empty_collected: true,
         },
       ]);
       setSingleInput('');
       setShowSuggestions(false);
-      toast.success(`Added ${match.consumer_name}`);
+      if (match.corrected) {
+        toast.success(`✨ Verified by Name: Added #${match.consumer_number} (${match.consumer_name})`);
+      } else {
+        toast.success(`Added ${match.consumer_name}`);
+      }
       return;
     }
 
-    // 2. Check remote Supabase
-    if (navigator.onLine) {
-      try {
-        const { data: remoteData } = await supabase
-          .from('consumers')
-          .select('id, consumer_number, consumer_name, address, mobile, cylinder_type')
-          .eq('consumer_number', cleanNum)
-          .maybeSingle();
-
-        if (remoteData) {
-          setEntries((prev) => [
-            ...prev,
-            {
-              consumer_id: remoteData.id,
-              consumer_number: remoteData.consumer_number,
-              consumer_name: remoteData.consumer_name,
-              address: remoteData.address,
-              mobile: remoteData.mobile,
-              found: true,
-              source: 'remote',
-              cylinder_type: remoteData.cylinder_type === '10KG_LITE' ? '10KG_LITE' : remoteData.cylinder_type === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
-              payment_mode: 'CASH',
-              empty_collected: true,
-            },
-          ]);
-          setSingleInput('');
-          setShowSuggestions(false);
-          toast.success(`Added ${remoteData.consumer_name}`);
-          return;
-        }
-      } catch (remoteErr) {
-        console.warn('Remote check failed:', remoteErr);
-      }
-    }
-
-    // 3. Unmatched Number: Add safely as Unverified manual entry (no illegal DB insert)
+    // Unmatched: Add safely as Unverified manual entry
     setEntries((prev) => [
       ...prev,
       {
-        consumer_number: cleanNum,
+        consumer_number: cleanInput,
         consumer_name: 'Unverified / Manual Entry',
         address: 'Not in master database',
         mobile: '',
@@ -595,7 +640,7 @@ export const AgentDispatchSummary: React.FC = () => {
     ]);
     setSingleInput('');
     setShowSuggestions(false);
-    toast(`Added #${cleanNum} as unverified entry`, { icon: 'ℹ️' });
+    toast(`Added #${cleanInput} as unverified entry`, { icon: 'ℹ️' });
   };
 
   // Process bulk raw input text
@@ -806,6 +851,40 @@ export const AgentDispatchSummary: React.FC = () => {
     ), { duration: 4000 });
   };
 
+  // Manual / On-demand verification by customer name ONLY for unverified items
+  const handleVerifyByName = async (index: number) => {
+    const item = entries[index];
+    if (!item || item.found) return;
+
+    const toastId = toast.loading(`Checking master database for "${item.consumer_name}"...`);
+    try {
+      const match = await matchConsumerWithDatabase(item.consumer_number, item.consumer_name);
+      if (match.found) {
+        setEntries((prev) => {
+          const updated = [...prev];
+          updated[index] = {
+            ...updated[index],
+            consumer_number: match.consumer_number,
+            consumer_name: match.consumer_name,
+            address: match.address || updated[index].address,
+            mobile: match.mobile || updated[index].mobile,
+            found: true,
+            source: 'local',
+          };
+          return updated;
+        });
+        toast.success(
+          `✨ Verified! Corrected to #${match.consumer_number} (${match.consumer_name})`,
+          { id: toastId, duration: 4500 }
+        );
+      } else {
+        toast.error(`No database match found for "${item.consumer_name}"`, { id: toastId });
+      }
+    } catch (err) {
+      toast.error('Search failed', { id: toastId });
+    }
+  };
+
   const handleMoveEntry = (index: number, direction: 'up' | 'down') => {
     if (
       (direction === 'up' && index === 0) ||
@@ -919,9 +998,50 @@ export const AgentDispatchSummary: React.FC = () => {
     found: boolean;
   }) => {
     setEntries((prev) => {
-      if (prev.some((e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase())) {
+      // 1. Check if number is already in the list
+      const existingIdx = prev.findIndex(
+        (e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase()
+      );
+      if (existingIdx !== -1) {
+        // Upgrade to verified if it was unverified
+        if (!prev[existingIdx].found && scannedItem.found) {
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            consumer_name: scannedItem.consumer_name,
+            address: scannedItem.address || updated[existingIdx].address,
+            mobile: scannedItem.mobile || updated[existingIdx].mobile,
+            found: true,
+            source: 'local',
+          };
+          return updated;
+        }
         return prev;
       }
+
+      // 2. Check if an unverified entry exists with the same name (1st digit was misread/blurred)
+      const unverifiedNameIdx = prev.findIndex(
+        (e) =>
+          !e.found &&
+          e.consumer_name &&
+          scannedItem.consumer_name &&
+          e.consumer_name.trim().toLowerCase() === scannedItem.consumer_name.trim().toLowerCase()
+      );
+      if (unverifiedNameIdx !== -1) {
+        const updated = [...prev];
+        updated[unverifiedNameIdx] = {
+          ...updated[unverifiedNameIdx],
+          consumer_number: scannedItem.consumer_number,
+          consumer_name: scannedItem.consumer_name,
+          address: scannedItem.address || updated[unverifiedNameIdx].address,
+          mobile: scannedItem.mobile || updated[unverifiedNameIdx].mobile,
+          found: scannedItem.found,
+          source: scannedItem.found ? 'local' : 'manual',
+        };
+        return updated;
+      }
+
+      // 3. Brand new entry
       return [
         ...prev,
         {
@@ -1539,9 +1659,22 @@ export const AgentDispatchSummary: React.FC = () => {
                               <CheckCheck className="w-2.5 h-2.5" /> Verified
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-md">
-                              <XCircle className="w-2.5 h-2.5" /> Unverified
-                            </span>
+                            <div className="inline-flex items-center gap-1 flex-wrap">
+                              <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-md">
+                                <XCircle className="w-2.5 h-2.5" /> Unverified
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleVerifyByName(originalIndex);
+                                }}
+                                className="inline-flex items-center gap-1 text-[9px] bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black px-1.5 py-0.5 rounded-md shadow-xs transition-all cursor-pointer"
+                                title="Search database by customer name and correct consumer number"
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-slate-950" /> Verify by Name
+                              </button>
+                            </div>
                           )}
                           {item.source === 'route' && (
                             <span className="inline-flex items-center gap-0.5 text-[9px] bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded-md">
