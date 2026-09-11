@@ -9,17 +9,13 @@ import {
   Loader2, 
   Search, 
   Plus, 
-  RotateCcw,
-  Check,
-  Eye,
-  SlidersHorizontal,
-  Volume2
+  Check, 
+  Eye
 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { scanBillWithGemini } from '../lib/gemini';
-import Tesseract from 'tesseract.js';
 
 interface LiveCameraScannerModalProps {
   isOpen: boolean;
@@ -96,34 +92,6 @@ function cleanAndNormalizeDigits(raw: string): string {
     .replace(/[^0-9]/g, '');
 }
 
-function preprocessCanvasForOcr(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
-  const processedCanvas = document.createElement('canvas');
-  processedCanvas.width = sourceCanvas.width;
-  processedCanvas.height = sourceCanvas.height;
-  const ctx = processedCanvas.getContext('2d');
-  if (!ctx) return sourceCanvas;
-
-  ctx.drawImage(sourceCanvas, 0, 0);
-  const imgData = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-  const data = imgData.data;
-
-  // Grayscale & high contrast boost for receipt text OCR
-  const contrast = 50;
-  const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-
-  for (let i = 0; i < data.length; i += 4) {
-    const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    let color = factor * (avg - 128) + 128;
-    color = Math.min(255, Math.max(0, color));
-    data[i] = color;
-    data[i + 1] = color;
-    data[i + 2] = color;
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-  return processedCanvas;
-}
-
 export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   isOpen,
   onClose,
@@ -134,7 +102,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [scanEngine, setScanEngine] = useState<'GEMINI' | 'LOCAL'>('GEMINI');
   const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
@@ -185,7 +152,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         videoRef.current.srcObject = mediaStream;
         await videoRef.current.play();
       }
-      setStatusText('Gemini AI Active — Align receipt');
+      setStatusText('Gemini AI Vision Active — Point at receipt');
     } catch (err) {
       console.error('Camera access error:', err);
       setStatusText('Camera permission denied or camera unavailable');
@@ -356,8 +323,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   /**
    * Crop and capture the active viewfinder area
-   * Cropping the center ~75% focuses Gemini AI directly on the receipt,
-   * eliminating background hands/steering wheel and boosting inference speed by 3x.
+   * Focuses Gemini AI directly on the receipt area,
+   * eliminating background hands/steering wheel and speeding inference by 3x.
    */
   const captureViewfinderCrop = (): HTMLCanvasElement | null => {
     if (!videoRef.current || !canvasRef.current) return null;
@@ -366,13 +333,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    // Viewfinder target box is centered with some margins
+    // Viewfinder target box is centered with margins
     const cropX = Math.round(video.videoWidth * 0.08);
     const cropY = Math.round(video.videoHeight * 0.08);
     const cropW = Math.round(video.videoWidth * 0.84);
     const cropH = Math.round(video.videoHeight * 0.78);
 
-    // Target max dimensions for crisp dot-matrix receipt OCR
+    // Max 900px resolution for sharp dot-matrix OCR
     const maxDim = 900;
     let targetW = cropW;
     let targetH = cropH;
@@ -393,7 +360,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     return canvas;
   };
 
-  // Main Scan Trigger (Supports Gemini AI Vision & Local Offline OCR)
+  // Main Scan Trigger (Exclusively Gemini AI Vision)
   const performScan = useCallback(async (isAutoTrigger = false) => {
     if (isProcessing || !videoRef.current || !canvasRef.current) return;
 
@@ -406,72 +373,34 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
 
     try {
-      if (scanEngine === 'GEMINI') {
-        setStatusText('Gemini AI parsing Cons No & Name...');
-        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const result = await scanBillWithGemini(imgDataUrl);
+      setStatusText('Gemini AI reading Cons No & Name...');
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      const result = await scanBillWithGemini(imgDataUrl);
 
-        if (result.error) {
+      if (result.error) {
+        if (!isAutoTrigger) {
+          toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
+        }
+        setStatusText('Reposition receipt in box...');
+        return;
+      }
+
+      if (result.found && result.consumerNumber) {
+        const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
+        if (matched) {
           if (!isAutoTrigger) {
-            toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
+            toast.success('Matched successfully!', { id: 'scan-snap' });
           }
-          setStatusText('Reposition receipt in box...');
+          setStatusText(`Matched #${result.consumerNumber}! Flip to next bill`);
           return;
         }
-
-        if (result.found && result.consumerNumber) {
-          const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
-          if (matched) {
-            if (!isAutoTrigger) {
-              toast.success('Matched successfully!', { id: 'scan-snap' });
-            }
-            setStatusText(`Matched #${result.consumerNumber}! Flip to next bill`);
-            return;
-          }
-        } else {
-          setStatusText('Align "Cons No:" & Name inside box...');
-          if (!isAutoTrigger) {
-            toast.error('Cons No: not detected. Bring camera closer to "Details of Receiver:"', {
-              id: 'scan-snap',
-              duration: 3000,
-            });
-          }
-        }
       } else {
-        // Local Offline Tesseract OCR Mode (Strict Consumer Number Matching Only)
-        setStatusText('Local OCR reading text...');
-        const preprocessed = preprocessCanvasForOcr(canvas);
-        const { data } = await Tesseract.recognize(preprocessed, 'eng');
-        const fullText = data.text || '';
-
-        // Strict Regex: ONLY match when explicitly preceded by CONS NO / CONSUMER NO (never bare "NO" or random digits!)
-        const consNoRegex = /(?:CONS(?:UMER)?[\s\.\-_]*NO|DETAILS\s*OF\s*RECEIVER[\s\S]*?CONS[\s\.\-_]*NO)[\s\:\.\-#]*([0-9]{1,10})/gi;
-        const consNoMatches = Array.from(fullText.matchAll(consNoRegex));
-        let matched = false;
-
-        for (const match of consNoMatches) {
-          if (match[1]) {
-            const candidateNum = match[1];
-            // Verify candidate is not a helpline or distributor code
-            if (!DISTRIBUTOR_BLACKLIST.has(candidateNum) && candidateNum.length >= 1) {
-              matched = await processMatchedConsumerNumber(candidateNum);
-              if (matched) break;
-            }
-          }
-        }
-
-        // Note: Do NOT guess arbitrary numbers from shop numbers, house numbers, or GST!
-        if (matched) {
-          setStatusText('Matched via Local OCR!');
-          if (!isAutoTrigger) toast.success('Local OCR matched!', { id: 'scan-snap' });
-        } else {
-          setStatusText('Dot-matrix text faint. Switch to Gemini AI for 100% match.');
-          if (!isAutoTrigger) {
-            toast.error('Cons No: not detected. Tip: Switch to Gemini AI Vision for dot-matrix bills!', {
-              id: 'scan-snap',
-              duration: 4000,
-            });
-          }
+        setStatusText('Align "Cons No:" & Name inside box...');
+        if (!isAutoTrigger) {
+          toast.error('Cons No: not detected. Bring camera closer to "Details of Receiver:"', {
+            id: 'scan-snap',
+            duration: 3000,
+          });
         }
       }
     } catch (err: any) {
@@ -482,7 +411,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [isProcessing, scanEngine]);
+  }, [isProcessing]);
 
   // Continuous Auto-Scan Interval Loop
   useEffect(() => {
@@ -535,7 +464,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <h2 className="text-sm font-bold tracking-tight flex items-center gap-1.5">
                 <span>Gemini AI Receipt Scanner</span>
                 <span className="text-[9px] bg-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded uppercase">
-                  Cons No & Name
+                  100% AI Vision
                 </span>
               </h2>
               <p className="text-[10px] text-slate-300">Extracts Cons No & customer name below it</p>
@@ -561,35 +490,19 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         </div>
 
-        {/* Engine and Auto-Scan Controls */}
-        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/10">
+        {/* Auto-Scan Toggle Bar */}
+        <div className="pt-1 border-t border-white/10 flex items-center justify-between">
           <button
             type="button"
             onClick={() => setAutoScanEnabled(!autoScanEnabled)}
-            className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border ${
+            className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border ${
               autoScanEnabled
                 ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
                 : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
             }`}
           >
-            <Zap className={`w-3.5 h-3.5 ${autoScanEnabled ? 'animate-bounce' : ''}`} />
-            {autoScanEnabled ? 'Auto-Scan: ON (Hands-free)' : 'Auto-Scan: OFF'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setScanEngine(scanEngine === 'GEMINI' ? 'LOCAL' : 'GEMINI')}
-            className="py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-white/10 bg-white/10 text-white hover:bg-white/15"
-          >
-            {scanEngine === 'GEMINI' ? (
-              <>
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Mode: Gemini AI
-              </>
-            ) : (
-              <>
-                <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" /> Mode: Local OCR
-              </>
-            )}
+            <Zap className={`w-3.5 h-3.5 ${autoScanEnabled ? 'animate-bounce text-slate-950' : ''}`} />
+            {autoScanEnabled ? 'Hands-Free Auto-Scan: ACTIVE (Zero clicking)' : 'Auto-Scan: PAUSED (Tap Snap to scan)'}
           </button>
         </div>
       </div>
@@ -599,7 +512,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Target Box with High-Tech Corner Guides & Laser Animation */}
+        {/* Target Box with Corner Guides & Sweeping Laser Animation */}
         <div
           className={`absolute inset-x-4 top-6 bottom-20 border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-4 transition-all duration-300 ${
             isSuccessFlash
@@ -612,7 +525,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             <div className="w-7 h-7 border-t-4 border-r-4 border-amber-400 rounded-tr-xl" />
           </div>
 
-          {/* Sweeping Laser Animation Line (Active when scanning) */}
+          {/* Sweeping Laser Animation Line */}
           <div className="relative w-full h-1 overflow-visible">
             <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_12px_#fbbf24] animate-pulse" />
           </div>
