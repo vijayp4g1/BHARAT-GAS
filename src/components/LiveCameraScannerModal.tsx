@@ -4,13 +4,11 @@ import {
   Flashlight, 
   CheckCircle2, 
   AlertCircle, 
-  Zap, 
   Sparkles, 
   Loader2, 
   Search, 
   Plus, 
   Check, 
-  Eye,
   Camera
 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
@@ -103,7 +101,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
@@ -397,28 +394,24 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     return canvas.toDataURL('image/jpeg', 0.85);
   };
 
-  // Main Scan Trigger (Exclusively Gemini AI Vision)
-  const performScan = useCallback(async (isAutoTrigger = false) => {
+  // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
+  const performScan = useCallback(async () => {
     if (isProcessing || !videoRef.current) return;
 
     const imgDataUrl = captureCameraFrame();
     if (!imgDataUrl) return;
 
     setIsProcessing(true);
-    if (!isAutoTrigger) {
-      setIsShutterFlash(true);
-      setTimeout(() => setIsShutterFlash(false), 200);
-      toast.loading('Gemini AI reading cash memo...', { id: 'scan-snap' });
-    }
+    setIsShutterFlash(true);
+    setTimeout(() => setIsShutterFlash(false), 200);
+    toast.loading('Gemini AI reading cash memo...', { id: 'scan-snap' });
 
     try {
       setStatusText('Gemini AI reading Cons No & Name...');
       const result = await scanBillWithGemini(imgDataUrl);
 
       if (result.error) {
-        if (!isAutoTrigger) {
-          toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
-        }
+        toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
         setStatusText('Hold bill steady and tap Snap...');
         return;
       }
@@ -426,43 +419,24 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       if (result.found && result.consumerNumber) {
         const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
         if (matched) {
-          if (!isAutoTrigger) {
-            toast.success('Matched successfully!', { id: 'scan-snap' });
-          }
+          toast.success('Matched successfully!', { id: 'scan-snap' });
           setStatusText(`Matched #${result.consumerNumber}! Ready for next bill`);
           return;
         }
       } else {
         setStatusText('Hold paper steady ~6 inches away...');
-        if (!isAutoTrigger) {
-          toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
-            id: 'scan-snap',
-            duration: 3500,
-          });
-        }
+        toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
+          id: 'scan-snap',
+          duration: 3500,
+        });
       }
     } catch (err: any) {
       console.warn('Scan cycle error:', err);
-      if (!isAutoTrigger) {
-        toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
-      }
+      toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
     } finally {
       setIsProcessing(false);
     }
   }, [isProcessing]);
-
-  // Continuous Auto-Scan Loop (Runs silently without spamming error banners)
-  useEffect(() => {
-    if (!isOpen || !autoScanEnabled) return;
-
-    const intervalTimer = setInterval(() => {
-      if (!isProcessing && videoRef.current && videoRef.current.videoWidth > 0) {
-        performScan(true);
-      }
-    }, 2000);
-
-    return () => clearInterval(intervalTimer);
-  }, [isOpen, autoScanEnabled, isProcessing, performScan]);
 
   // Manual Key-in Handler
   const handleManualAdd = async (e: React.FormEvent) => {
@@ -502,7 +476,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <h2 className="text-sm font-bold tracking-tight flex items-center gap-1.5">
                 <span>Gemini AI Receipt Scanner</span>
                 <span className="text-[9px] bg-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded uppercase">
-                  100% AI Vision
+                  1-Tap Snap
                 </span>
               </h2>
               <p className="text-[10px] text-slate-300">Targeting Cons No: & customer name</p>
@@ -526,22 +500,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
-        </div>
-
-        {/* Auto-Scan Toggle Bar */}
-        <div className="pt-1 border-t border-white/10 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setAutoScanEnabled(!autoScanEnabled)}
-            className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border ${
-              autoScanEnabled
-                ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
-                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
-            }`}
-          >
-            <Zap className={`w-3.5 h-3.5 ${autoScanEnabled ? 'animate-bounce text-slate-950' : ''}`} />
-            {autoScanEnabled ? 'Hands-Free Auto-Scan: ON (Zero clicking)' : 'Auto-Scan: OFF (Tap 1-Tap Snap)'}
-          </button>
         </div>
       </div>
 
@@ -584,13 +542,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
                 <span>Reading Cons No & Name...</span>
               </>
-            ) : autoScanEnabled ? (
-              <>
-                <Eye className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span>Hold bill steady in box (Auto-scanning)</span>
-              </>
             ) : (
-              <span>Point at bill and tap 1-Tap Snap</span>
+              <>
+                <Camera className="w-3.5 h-3.5 text-amber-400" />
+                <span>Align bill in box & tap 1-TAP SNAP</span>
+              </>
             )}
           </div>
 
@@ -625,7 +581,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              performScan(false);
+              performScan();
             }}
             disabled={isProcessing}
             className="w-full max-w-sm bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black py-3.5 px-6 rounded-2xl shadow-2xl shadow-orange-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 border border-amber-300/80 text-xs sm:text-sm uppercase tracking-wide disabled:opacity-50"

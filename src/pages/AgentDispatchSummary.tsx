@@ -35,7 +35,8 @@ import {
   Filter,
   Layers,
   Sparkles,
-  Edit2
+  Edit2,
+  Camera
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -927,7 +928,7 @@ export const AgentDispatchSummary: React.FC = () => {
   const [inputMode, setInputMode] = useState<'single' | 'bulk'>('single');
   const [isLiveScannerOpen, setIsLiveScannerOpen] = useState<boolean>(false);
 
-  // Handle continuous auto-scanner result from Live Camera
+  // Handle consumer scanned from Live Camera (Gemini AI Vision)
   const handleConsumerAutoScanned = (scannedItem: {
     consumer_number: string;
     consumer_name: string;
@@ -1271,7 +1272,7 @@ export const AgentDispatchSummary: React.FC = () => {
         </div>
       )}
 
-      {/* Super-Fast Live Continuous Auto-Scanner Launch Banner */}
+      {/* Gemini AI Receipt Scanner Launch Banner */}
       <button
         type="button"
         onClick={() => setIsLiveScannerOpen(true)}
@@ -1279,15 +1280,15 @@ export const AgentDispatchSummary: React.FC = () => {
       >
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-slate-950/20 flex items-center justify-center text-slate-950 shrink-0">
-            <Zap className="w-5 h-5 animate-pulse text-slate-950" />
+            <Camera className="w-5 h-5 text-slate-950" />
           </div>
           <div className="text-left">
-            <h3 className="text-xs font-black tracking-tight uppercase text-slate-950">🎥 Live Continuous Auto-Scanner</h3>
-            <p className="text-[11px] font-bold text-slate-900/90">Hands-free scan stack of bills (Zero clicking)</p>
+            <h3 className="text-xs font-black tracking-tight uppercase text-slate-950">📸 Gemini AI Receipt Scanner</h3>
+            <p className="text-[11px] font-bold text-slate-900/90">1-Tap Snap cash memos to extract Cons No & Name</p>
           </div>
         </div>
         <span className="bg-slate-950 text-amber-400 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider shrink-0 shadow-sm">
-          START SCAN
+          OPEN SCANNER
         </span>
       </button>
 
