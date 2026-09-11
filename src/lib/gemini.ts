@@ -12,9 +12,9 @@ export interface GeminiOcrResult {
  */
 async function resizeAndCompressImage(
   imageSource: File | Blob | string,
-  maxDimension: number = 1600
+  maxDimension: number = 1000
 ): Promise<{ data: string; mimeType: string }> {
-  // If it is already a base64 data URL, extract directly to preserve full pixel clarity
+  // If it is already a base64 data URL, extract directly to preserve full speed
   if (typeof imageSource === 'string' && imageSource.startsWith('data:image/')) {
     const [header, base64Data] = imageSource.split(',');
     const mimeMatch = header.match(/data:(.*?);base64/);
@@ -53,8 +53,8 @@ async function resizeAndCompressImage(
 
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Convert to high-clarity compressed JPEG
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      // Convert to lightweight high-clarity JPEG for fast upload
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
       const base64Data = dataUrl.split(',')[1];
       resolve({
         data: base64Data,
@@ -109,18 +109,11 @@ export async function scanBillWithGemini(
       },
     };
 
-    const promptText = `You are an expert OCR vision parser specialized in Bharat Gas and Siddhartha Bharatgas LPG delivery receipts (cash memos).
-Examine the image carefully regardless of rotation, tilt, angle, shadows, or lighting.
-Look for the section titled "Details of Receiver:" or "Consumer No:" or "Cons No:" or the receiver table.
-Extract ONLY these two exact fields:
-1. "consumerNumber": Find the Consumer Number digits printed after "Cons No:" or "Cons No." or "Consumer No:" or "Consumer:" (e.g. 1842, 3840, 10294). Return ONLY the clean digits (1 to 10 digits).
-2. "consumerName": Extract the customer/consumer name printed directly on the line below the consumer number or right beside it (e.g. MRS MEERABAI, GHANSHYAM GEHALOTH). Return in uppercase.
-Strictly DO NOT extract:
-- Distributor Code (e.g. 169624)
-- Booking helpline phone numbers (e.g. 7718012345, 1800224344, 23092200, 23192200)
-- GSTIN, address lines, or price amounts.
-If you locate the consumer number, return: {"consumerNumber": "<digits>", "consumerName": "<name>"}.
-If no consumer number is visible anywhere in the image, return: {"consumerNumber": "", "consumerName": ""}.`;
+    const promptText = `Extract from this Bharatgas LPG receipt:
+1. "consumerNumber": digits printed after "Cons No:" or "Consumer No:" (e.g. 1842). Clean digits only.
+2. "consumerName": customer name on the line directly below the consumer number (e.g. MRS MEERABAI).
+Strictly DO NOT extract distributor code (169624) or phone numbers.
+Return JSON: {"consumerNumber": "<digits>", "consumerName": "<name>"}. If not visible, return empty strings.`;
 
     const requestBody = {
       contents: [
@@ -141,7 +134,7 @@ If no consumer number is visible anywhere in the image, return: {"consumerNumber
           },
           required: ['consumerNumber', 'consumerName'],
         },
-        maxOutputTokens: 1000,
+        maxOutputTokens: 200,
         thinkingConfig: {
           thinkingBudget: 0,
         },
@@ -149,7 +142,7 @@ If no consumer number is visible anywhere in the image, return: {"consumerNumber
       },
     };
 
-    // Primary fast endpoint: gemini-2.5-flash (sub-second vision inference with thinkingBudget 0)
+    // Primary fast endpoint: gemini-2.5-flash with zero thinking budget
     let response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
@@ -160,12 +153,20 @@ If no consumer number is visible anywhere in the image, return: {"consumerNumber
     );
 
     if (!response.ok) {
+      // Fallback without thinkingConfig for models that don't support it
+      const fallbackBody = {
+        ...requestBody,
+        generationConfig: {
+          ...requestBody.generationConfig,
+          thinkingConfig: undefined,
+        },
+      };
       response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify(fallbackBody),
         }
       );
     }

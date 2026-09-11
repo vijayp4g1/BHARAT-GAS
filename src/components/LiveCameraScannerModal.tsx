@@ -251,124 +251,84 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
     recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
 
-    // 1. Check local Dexie master database
+    const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
+    if (isAlreadyAdded) {
+      setAlreadyAddedNotice(`Consumer #${cleanNum} is already in delivery list!`);
+      setTimeout(() => setAlreadyAddedNotice(null), 2500);
+      return true;
+    }
+
+    // 1. Check local Dexie master database (instant in-memory IndexedDB query)
     const localMatch = await db.consumers
       .where('consumer_number')
       .equalsIgnoreCase(cleanNum)
       .first();
 
-    if (localMatch) {
-      const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
-      if (isAlreadyAdded) {
-        setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is already added!`);
-        setTimeout(() => setAlreadyAddedNotice(null), 3000);
-        return true;
-      }
+    const finalName = localMatch?.consumer_name || extractedName?.trim().toUpperCase() || 'Consumer';
+    const finalAddress = localMatch?.address || 'Scanned via Gemini AI';
+    const finalMobile = localMatch?.mobile || '';
 
-      // Success! Consumer number matched in master database
-      scannedSetRef.current.add(localMatch.consumer_number.toLowerCase());
-      setAlreadyAddedNotice(null);
+    // INSTANT ADDITION TO UI (0ms delay - no blocking on network!)
+    scannedSetRef.current.add(cleanNum.toLowerCase());
+    setAlreadyAddedNotice(null);
 
-      if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
-      playSuccessBeep();
+    if (navigator.vibrate) navigator.vibrate([100, 40, 100]);
+    playSuccessBeep();
 
-      setIsSuccessFlash(true);
-      setTimeout(() => setIsSuccessFlash(false), 800);
+    setIsSuccessFlash(true);
+    setTimeout(() => setIsSuccessFlash(false), 400);
 
-      const displayName = localMatch.consumer_name || extractedName || 'Matched Consumer';
-      setLastScanned(`${localMatch.consumer_number} - ${displayName}`);
+    setLastScanned(`${cleanNum} - ${finalName}`);
+    setScannedSessionList((prev) => [
+      { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
+      ...prev,
+    ]);
 
-      setScannedSessionList((prev) => [
-        { consumer_number: localMatch.consumer_number, consumer_name: displayName, timestamp: Date.now() },
-        ...prev,
-      ]);
+    onConsumerScanned({
+      consumer_number: cleanNum,
+      consumer_name: finalName,
+      address: finalAddress,
+      mobile: finalMobile,
+      found: Boolean(localMatch),
+    });
 
-      onConsumerScanned({
-        consumer_number: localMatch.consumer_number,
-        consumer_name: displayName,
-        address: localMatch.address,
-        mobile: localMatch.mobile,
-        found: true,
-      });
+    toast.success(`✨ Added #${cleanNum} (${finalName})!`, { id: 'scan-snap' });
 
-      toast.success(`✨ Scanned #${localMatch.consumer_number} (${displayName})!`);
-      return true;
-    } else {
-      // 2. Check remote database if online
-      let remoteMatch: any = null;
-      if (navigator.onLine) {
+    // Background asynchronous cloud sync if not matched locally (never blocks user!)
+    if (!localMatch && navigator.onLine) {
+      (async () => {
         try {
           const { data } = await supabase
             .from('consumers')
             .select('id, consumer_number, consumer_name, address, mobile')
             .eq('consumer_number', cleanNum)
             .maybeSingle();
-          remoteMatch = data;
+
+          if (data) {
+            const cachedRecord: Consumer = {
+              id: data.id || `cons_${cleanNum}_${Date.now()}`,
+              consumer_number: cleanNum,
+              consumer_name: data.consumer_name || finalName,
+              mobile: data.mobile || '',
+              address: data.address || finalAddress,
+              verification_status: 'Verified',
+              created_at: new Date().toISOString(),
+              searchWords: [...(data.consumer_name || finalName).toLowerCase().split(/\s+/), cleanNum.toLowerCase()],
+            };
+            await db.consumers.put(cachedRecord).catch(() => {});
+          }
         } catch (e) {
-          console.warn('Remote lookup error:', e);
+          // background sync
         }
-      }
-
-      const finalName = remoteMatch?.consumer_name || extractedName?.trim().toUpperCase() || 'New / Unverified';
-      const finalAddress = remoteMatch?.address || 'Scanned via Gemini AI';
-      const finalMobile = remoteMatch?.mobile || '';
-
-      if (remoteMatch) {
-        const cachedRecord: Consumer = {
-          id: remoteMatch.id || `cons_${cleanNum}_${Date.now()}`,
-          consumer_number: cleanNum,
-          consumer_name: finalName,
-          mobile: finalMobile,
-          address: finalAddress,
-          verification_status: 'Verified',
-          created_at: new Date().toISOString(),
-          searchWords: [...finalName.toLowerCase().split(/\s+/), cleanNum.toLowerCase()],
-        };
-        await db.consumers.put(cachedRecord).catch((err: any) => console.error('Dexie put error:', err));
-      }
-
-      const isAlreadyAdded = scannedSetRef.current.has(cleanNum.toLowerCase());
-      if (isAlreadyAdded) {
-        setAlreadyAddedNotice(`Consumer #${cleanNum} is already in your delivery list!`);
-        setTimeout(() => setAlreadyAddedNotice(null), 3000);
-        return true;
-      }
-
-      scannedSetRef.current.add(cleanNum.toLowerCase());
-      setAlreadyAddedNotice(null);
-
-      if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
-      playSuccessBeep();
-
-      setIsSuccessFlash(true);
-      setTimeout(() => setIsSuccessFlash(false), 800);
-
-      setLastScanned(`${cleanNum} - ${finalName}`);
-      setScannedSessionList((prev) => [
-        { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
-        ...prev,
-      ]);
-
-      onConsumerScanned({
-        consumer_number: cleanNum,
-        consumer_name: finalName,
-        address: finalAddress,
-        mobile: finalMobile,
-        found: Boolean(remoteMatch),
-      });
-
-      if (remoteMatch) {
-        toast.success(`✨ Matched #${cleanNum} (${finalName})!`);
-      } else {
-        toast(`Added #${cleanNum} (${finalName})`, { icon: 'ℹ️' });
-      }
-      return true;
+      })();
     }
+
+    return true;
   };
 
   /**
-   * Capture the full camera frame at high clarity (up to 1600px max)
-   * Avoids fragile screen-coordinate crops and lets Gemini AI see the full receipt.
+   * Capture the full camera frame at optimal clarity (1000px max, lightweight JPEG)
+   * Drastically reduces network upload payload to ~60KB for sub-second Gemini inference.
    */
   const captureCameraFrame = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
@@ -377,7 +337,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 1600;
+    const maxDim = 1000;
     let targetW = video.videoWidth;
     let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
@@ -394,7 +354,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     canvas.height = targetH;
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.75);
   };
 
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
