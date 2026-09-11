@@ -12,15 +12,8 @@ export interface GeminiOcrResult {
  */
 async function resizeAndCompressImage(
   imageSource: File | Blob | string,
-  maxDimension: number = 700
+  maxDimension: number = 1280
 ): Promise<{ data: string; mimeType: string }> {
-  if (typeof imageSource === 'string' && imageSource.startsWith('data:image/jpeg;base64,')) {
-    return {
-      data: imageSource.substring('data:image/jpeg;base64,'.length),
-      mimeType: 'image/jpeg',
-    };
-  }
-
   return new Promise((resolve, reject) => {
     const img = new Image();
 
@@ -52,8 +45,8 @@ async function resizeAndCompressImage(
 
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Convert to compressed JPEG
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+      // Convert to high-clarity compressed JPEG
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       const base64Data = dataUrl.split(',')[1];
       resolve({
         data: base64Data,
@@ -109,16 +102,18 @@ export async function scanBillWithGemini(
     };
 
     // Primary fast endpoint: gemini-2.5-flash (sub-second vision inference)
-    const promptText = `You are a specialist OCR vision parser for Bharatgas & Siddhartha Bharatgas LPG cash memos.
-Locate the section titled "Details of Receiver:".
+    const promptText = `You are an expert OCR vision parser specialized in Bharatgas and Siddhartha Bharatgas LPG delivery receipts (cash memos).
+Examine the image carefully regardless of rotation, tilt, or lighting.
+Look for the section titled "Details of Receiver:" or the text "Cons No:".
 Extract ONLY these two exact fields:
-1. "consumerNumber": The consumer number digits printed immediately after "Cons No:" or "Cons No." (e.g. 1842, 10294, etc.). Return ONLY the clean digits.
-2. "consumerName": The person's name printed directly on the line below the consumer number (e.g. MRS MEERABAI).
+1. "consumerNumber": Find the Consumer Number digits printed immediately after "Cons No:" or "Cons No." or "Consumer No:" (e.g. 1842, 3840, 10294). Return ONLY the clean digits.
+2. "consumerName": Extract the customer name printed on the line directly below the consumer number (e.g. MRS MEERABAI, GHANSHYAM GEHALOTH).
 Strictly DO NOT extract:
-- Distributor Code (169624)
-- Booking Helpline Phone Numbers (7718012345, 1800224344, 23092200)
-- GSTIN, PIN codes, item descriptions, or amounts.
-Return valid JSON with "consumerNumber" and "consumerName".`;
+- Distributor Code (e.g. 169624)
+- Booking helpline phone numbers (e.g. 7718012345, 1800224344, 23092200, 23192200)
+- GSTIN, address lines, or price amounts.
+If you clearly see the consumer number, return: {"consumerNumber": "<digits>", "consumerName": "<name>"}.
+If no consumer number is visible in the image, return: {"consumerNumber": "", "consumerName": ""}.`;
 
     const requestBody = {
       contents: [

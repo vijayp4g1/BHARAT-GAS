@@ -10,7 +10,8 @@ import {
   Search, 
   Plus, 
   Check, 
-  Eye
+  Eye,
+  Camera
 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
@@ -66,14 +67,14 @@ function playSuccessBeep() {
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(880, ctx.currentTime);
-    gain.gain.setValueAtTime(0.18, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start();
-    osc.stop(ctx.currentTime + 0.28);
+    osc.stop(ctx.currentTime + 0.3);
   } catch (err) {
     // Audio fallback
   }
@@ -107,14 +108,15 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
-  const [statusText, setStatusText] = useState<string>('Align Cons No: & Name inside box...');
+  const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
   const [manualInput, setManualInput] = useState<string>('');
   const [isSuccessFlash, setIsSuccessFlash] = useState<boolean>(false);
+  const [isShutterFlash, setIsShutterFlash] = useState<boolean>(false);
 
   // Set of all added consumer numbers to prevent re-adding
   const scannedSetRef = useRef<Set<string>>(new Set(existingNumbers.map((n) => n.toLowerCase())));
   
-  // Cooldown map to avoid spamming the same bill while it remains in front of the lens
+  // Cooldown map to avoid spamming the same bill
   const recentSeenCooldownRef = useRef<Map<string, number>>(new Map());
 
   // Sync existing numbers
@@ -138,24 +140,54 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   const startCamera = async () => {
     try {
-      setStatusText('Starting HD camera feed...');
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
+      setStatusText('Connecting to HD camera...');
+      
+      // Request continuous autofocus and high resolution for sharp receipts
+      const constraints: any = {
         video: {
-          facingMode: 'environment',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          focusMode: { ideal: 'continuous' },
+          advanced: [
+            { focusMode: 'continuous' },
+            { exposureMode: 'continuous' },
+            { whiteBalanceMode: 'continuous' }
+          ]
         },
-      });
+      };
+
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (errFallback) {
+        // Fallback to basic environment camera if advanced constraints fail
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+      }
 
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         await videoRef.current.play();
       }
-      setStatusText('Gemini AI Vision Active — Point at receipt');
+
+      // Attempt to apply continuous autofocus capability
+      const track = mediaStream.getVideoTracks()[0];
+      if (track) {
+        const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
+        if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+          await track.applyConstraints({
+            advanced: [{ focusMode: 'continuous' } as any]
+          }).catch(() => {});
+        }
+      }
+
+      setStatusText('Gemini AI Vision Active — Hold bill steady');
     } catch (err) {
       console.error('Camera access error:', err);
-      setStatusText('Camera permission denied or camera unavailable');
+      setStatusText('Camera unavailable or permission denied');
     }
   };
 
@@ -182,6 +214,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
+  // Tap-to-focus on mobile
+  const triggerFocus = async () => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
+      if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: 'continuous' } as any]
+        }).catch(() => {});
+      }
+    }
+  };
+
   // Process a candidate consumer number match
   const processMatchedConsumerNumber = async (
     rawNum: string,
@@ -197,11 +243,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return false;
     }
 
-    // Check anti-spam cooldown (5 seconds for the same number)
+    // Anti-spam cooldown (5 seconds for the same number)
     const now = Date.now();
     const lastSeen = recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
     if (lastSeen && now - lastSeen < 5000) {
-      return false; // Still within cooldown, ignore quietly
+      return false;
     }
     recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
 
@@ -214,7 +260,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     if (localMatch) {
       const isAlreadyAdded = scannedSetRef.current.has(localMatch.consumer_number.toLowerCase());
       if (isAlreadyAdded) {
-        setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) already added!`);
+        setAlreadyAddedNotice(`Consumer #${localMatch.consumer_number} (${localMatch.consumer_name}) is already added!`);
         setTimeout(() => setAlreadyAddedNotice(null), 3000);
         return true;
       }
@@ -267,7 +313,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const finalAddress = remoteMatch?.address || 'Scanned via Gemini AI';
       const finalMobile = remoteMatch?.mobile || '';
 
-      // Cache locally if verified remotely
       if (remoteMatch) {
         const cachedRecord: Consumer = {
           id: remoteMatch.id || `cons_${cleanNum}_${Date.now()}`,
@@ -322,27 +367,19 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   };
 
   /**
-   * Crop and capture the active viewfinder area
-   * Focuses Gemini AI directly on the receipt area,
-   * eliminating background hands/steering wheel and speeding inference by 3x.
+   * Capture the full camera frame at high clarity (1280px max)
+   * Avoids fragile screen-coordinate crops and lets Gemini AI see the full receipt.
    */
-  const captureViewfinderCrop = (): HTMLCanvasElement | null => {
+  const captureCameraFrame = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    // Viewfinder target box is centered with margins
-    const cropX = Math.round(video.videoWidth * 0.08);
-    const cropY = Math.round(video.videoHeight * 0.08);
-    const cropW = Math.round(video.videoWidth * 0.84);
-    const cropH = Math.round(video.videoHeight * 0.78);
-
-    // Max 900px resolution for sharp dot-matrix OCR
-    const maxDim = 900;
-    let targetW = cropW;
-    let targetH = cropH;
+    const maxDim = 1280;
+    let targetW = video.videoWidth;
+    let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
       if (targetW > targetH) {
         targetH = Math.round((targetH * maxDim) / targetW);
@@ -355,33 +392,34 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
     canvas.width = targetW;
     canvas.height = targetH;
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas;
+    return canvas.toDataURL('image/jpeg', 0.85);
   };
 
   // Main Scan Trigger (Exclusively Gemini AI Vision)
   const performScan = useCallback(async (isAutoTrigger = false) => {
-    if (isProcessing || !videoRef.current || !canvasRef.current) return;
+    if (isProcessing || !videoRef.current) return;
 
-    const canvas = captureViewfinderCrop();
-    if (!canvas) return;
+    const imgDataUrl = captureCameraFrame();
+    if (!imgDataUrl) return;
 
     setIsProcessing(true);
     if (!isAutoTrigger) {
-      toast.loading('Gemini AI reading receipt...', { id: 'scan-snap' });
+      setIsShutterFlash(true);
+      setTimeout(() => setIsShutterFlash(false), 200);
+      toast.loading('Gemini AI reading cash memo...', { id: 'scan-snap' });
     }
 
     try {
       setStatusText('Gemini AI reading Cons No & Name...');
-      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.82);
       const result = await scanBillWithGemini(imgDataUrl);
 
       if (result.error) {
         if (!isAutoTrigger) {
           toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
         }
-        setStatusText('Reposition receipt in box...');
+        setStatusText('Hold bill steady and tap Snap...');
         return;
       }
 
@@ -391,15 +429,15 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           if (!isAutoTrigger) {
             toast.success('Matched successfully!', { id: 'scan-snap' });
           }
-          setStatusText(`Matched #${result.consumerNumber}! Flip to next bill`);
+          setStatusText(`Matched #${result.consumerNumber}! Ready for next bill`);
           return;
         }
       } else {
-        setStatusText('Align "Cons No:" & Name inside box...');
+        setStatusText('Hold paper steady ~6 inches away...');
         if (!isAutoTrigger) {
-          toast.error('Cons No: not detected. Bring camera closer to "Details of Receiver:"', {
+          toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
             id: 'scan-snap',
-            duration: 3000,
+            duration: 3500,
           });
         }
       }
@@ -413,7 +451,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   }, [isProcessing]);
 
-  // Continuous Auto-Scan Interval Loop
+  // Continuous Auto-Scan Loop (Runs silently without spamming error banners)
   useEffect(() => {
     if (!isOpen || !autoScanEnabled) return;
 
@@ -421,12 +459,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       if (!isProcessing && videoRef.current && videoRef.current.videoWidth > 0) {
         performScan(true);
       }
-    }, 1500);
+    }, 2000);
 
     return () => clearInterval(intervalTimer);
   }, [isOpen, autoScanEnabled, isProcessing, performScan]);
 
-  // Manual Input Key-in Handler
+  // Manual Key-in Handler
   const handleManualAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
@@ -467,7 +505,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                   100% AI Vision
                 </span>
               </h2>
-              <p className="text-[10px] text-slate-300">Extracts Cons No & customer name below it</p>
+              <p className="text-[10px] text-slate-300">Targeting Cons No: & customer name</p>
             </div>
           </div>
 
@@ -502,19 +540,28 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             }`}
           >
             <Zap className={`w-3.5 h-3.5 ${autoScanEnabled ? 'animate-bounce text-slate-950' : ''}`} />
-            {autoScanEnabled ? 'Hands-Free Auto-Scan: ACTIVE (Zero clicking)' : 'Auto-Scan: PAUSED (Tap Snap to scan)'}
+            {autoScanEnabled ? 'Hands-Free Auto-Scan: ON (Zero clicking)' : 'Auto-Scan: OFF (Tap 1-Tap Snap)'}
           </button>
         </div>
       </div>
 
       {/* Viewfinder Video Stream Container */}
-      <div className="relative flex-1 my-2 rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center">
+      <div 
+        onClick={triggerFocus}
+        className="relative flex-1 my-2 rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center cursor-pointer"
+        title="Tap to focus"
+      >
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Target Box with Corner Guides & Sweeping Laser Animation */}
+        {/* Shutter Flash Animation */}
+        {isShutterFlash && (
+          <div className="absolute inset-0 bg-white/60 pointer-events-none z-30 transition-opacity duration-150" />
+        )}
+
+        {/* Target Box Guides & Sweeping Laser Animation */}
         <div
-          className={`absolute inset-x-4 top-6 bottom-20 border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-4 transition-all duration-300 ${
+          className={`absolute inset-x-4 top-6 bottom-24 border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-4 transition-all duration-300 ${
             isSuccessFlash
               ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_80px_rgba(16,185,129,0.5)]'
               : 'border-dashed border-amber-400/80 shadow-[0_0_60px_rgba(245,158,11,0.25)]'
@@ -527,7 +574,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
           {/* Sweeping Laser Animation Line */}
           <div className="relative w-full h-1 overflow-visible">
-            <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_12px_#fbbf24] animate-pulse" />
+            <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_14px_#fbbf24] animate-pulse" />
           </div>
 
           {/* Central Instruction Badge */}
@@ -535,15 +582,15 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             {isProcessing ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                <span>Reading Cons No: & Name...</span>
+                <span>Reading Cons No & Name...</span>
               </>
             ) : autoScanEnabled ? (
               <>
                 <Eye className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span>Align "Details of Receiver:" in box</span>
+                <span>Hold bill steady in box (Auto-scanning)</span>
               </>
             ) : (
-              <span>Align receipt and tap Snap below</span>
+              <span>Point at bill and tap 1-Tap Snap</span>
             )}
           </div>
 
@@ -572,21 +619,24 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         )}
 
-        {/* Manual Snap Trigger Button on Viewfinder */}
-        <div className="absolute bottom-3 inset-x-0 flex justify-center z-20">
+        {/* Large Prominent 1-Tap AI Snap Button */}
+        <div className="absolute bottom-4 inset-x-0 flex justify-center z-20 px-4">
           <button
             type="button"
-            onClick={() => performScan(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              performScan(false);
+            }}
             disabled={isProcessing}
-            className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black px-6 py-2.5 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center gap-2 border border-amber-300/80 text-xs uppercase tracking-wide disabled:opacity-50"
+            className="w-full max-w-sm bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black py-3.5 px-6 rounded-2xl shadow-2xl shadow-orange-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 border border-amber-300/80 text-xs sm:text-sm uppercase tracking-wide disabled:opacity-50"
           >
             {isProcessing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> Reading Receipt...
+                <Loader2 className="w-5 h-5 animate-spin text-slate-950" /> Reading Receipt...
               </>
             ) : (
               <>
-                <Sparkles className="w-4 h-4 text-slate-950" /> 1-Tap Manual Snap
+                <Sparkles className="w-5 h-5 text-slate-950" /> 1-TAP AI SNAP
               </>
             )}
           </button>
@@ -598,7 +648,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         <div className="bg-slate-900/90 backdrop-blur-md border border-white/10 p-2 rounded-2xl mb-2 text-white">
           <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 mb-1 font-semibold">
             <span>Bills Added This Session ({scannedSessionList.length}):</span>
-            <span className="text-amber-400">Ready for Day End</span>
+            <span className="text-amber-400 font-bold">Ready for Day End</span>
           </div>
           <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
             {scannedSessionList.map((item, idx) => (
