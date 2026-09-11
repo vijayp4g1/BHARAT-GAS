@@ -263,3 +263,27 @@ ALTER TABLE dispatch_items ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow authenticated read/write on daily_dispatch" ON daily_dispatch FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "Allow authenticated read/write on dispatch_items" ON dispatch_items FOR ALL USING (auth.role() = 'authenticated');
+
+-- 8. Day End Delivery Reports
+CREATE TABLE day_end_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID REFERENCES agents(id),
+    agent_name TEXT NOT NULL,
+    report_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    total_deliveries INTEGER NOT NULL DEFAULT 0,
+    domestic_14kg INTEGER NOT NULL DEFAULT 0,
+    composite_10kg INTEGER NOT NULL DEFAULT 0,
+    commercial_19kg INTEGER NOT NULL DEFAULT 0,
+    empties_collected INTEGER NOT NULL DEFAULT 0,
+    cash_count INTEGER NOT NULL DEFAULT 0,
+    upi_count INTEGER NOT NULL DEFAULT 0,
+    due_count INTEGER NOT NULL DEFAULT 0,
+    entries JSONB NOT NULL DEFAULT '[]'::jsonb,
+    raw_csv TEXT,
+    supervisor_phone TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE day_end_reports ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow authenticated read/write on day_end_reports" ON day_end_reports FOR ALL USING (auth.role() = 'authenticated');
+

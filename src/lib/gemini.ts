@@ -108,16 +108,23 @@ export async function scanBillWithGemini(
       },
     };
 
-    // Call gemini-3.6-flash endpoint with strict JSON responseSchema
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+    // Primary fast endpoint: gemini-2.5-flash (sub-second vision inference)
+    const promptText = `You are a specialist OCR vision parser for Bharatgas & Siddhartha Bharatgas LPG cash memos.
+Locate the section titled "Details of Receiver:".
+Extract ONLY these two exact fields:
+1. "consumerNumber": The consumer number digits printed immediately after "Cons No:" or "Cons No." (e.g. 1842, 10294, etc.). Return ONLY the clean digits.
+2. "consumerName": The person's name printed directly on the line below the consumer number (e.g. MRS MEERABAI).
+Strictly DO NOT extract:
+- Distributor Code (169624)
+- Booking Helpline Phone Numbers (7718012345, 1800224344, 23092200)
+- GSTIN, PIN codes, item descriptions, or amounts.
+Return valid JSON with "consumerNumber" and "consumerName".`;
 
     const requestBody = {
       contents: [
         {
           parts: [
-            {
-              text: "You are an expert OCR vision parser for Siddhartha Bharatgas & Bharatgas LPG bills. Look at the 'Details of Receiver:' section. Extract the Consumer Number printed after 'Cons No:' (which can be any 1 to 10 digit number, e.g. 5, 42, 1842, 28721381, 10293) and the Customer Name printed directly underneath it (e.g. MRS MEERABAI). Return JSON: {\"consumerNumber\": \"...\", \"consumerName\": \"...\"}.",
-            },
+            { text: promptText },
             imgPart,
           ],
         },
@@ -132,18 +139,31 @@ export async function scanBillWithGemini(
           },
           required: ['consumerNumber', 'consumerName'],
         },
-        maxOutputTokens: 300,
+        maxOutputTokens: 150,
         temperature: 0.1,
       },
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
+    // Try gemini-2.5-flash first for sub-second speed, fallback to gemini-3.6-flash if needed
+    let response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      }
+    );
+
+    if (!response.ok) {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        }
+      );
+    }
 
     if (!response.ok) {
       const errText = await response.text();

@@ -7,7 +7,7 @@ export interface Consumer {
   mobile: string;
   address: string;
   verification_status: 'Pending' | 'Verified' | 'Rejected' | 'Not Collected';
-  cylinder_type?: '14.2KG_STD' | '10KG_LITE' | '5KG_LITE';
+  cylinder_type?: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM' | '5KG_LITE';
   booking_ref?: string;
   area_code?: string;
   created_at: string;
