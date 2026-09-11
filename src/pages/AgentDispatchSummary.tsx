@@ -122,7 +122,7 @@ export const AgentDispatchSummary: React.FC = () => {
 
   // Deliveries List Filter & Search
   const [listSearchQuery, setListSearchQuery] = useState<string>('');
-  const [listFilterTab, setListFilterTab] = useState<'ALL' | '14KG' | '10KG' | 'UNVERIFIED'>('ALL');
+  const [listFilterTab, setListFilterTab] = useState<'ALL' | 'UNVERIFIED'>('ALL');
 
   const [entries, setEntries] = useState<ItemEntry[]>(() => {
     try {
@@ -888,7 +888,7 @@ export const AgentDispatchSummary: React.FC = () => {
     return entries.map((item) => item.consumer_number).join(',');
   }, [entries]);
 
-  // Construct Detailed WhatsApp report text
+  // Construct WhatsApp report text
   const reportMessageText = useMemo(() => {
     if (entries.length === 0) return '';
 
@@ -897,33 +897,15 @@ export const AgentDispatchSummary: React.FC = () => {
     text += `📅 *Date:* ${formattedDateString}\n`;
     text += `📊 *Total Deliveries Completed:* ${entries.length}\n\n`;
 
-    text += `🔥 *Cylinder Breakdown:*\n`;
-    text += `• 14.2kg Domestic: ${kpis.count14kg}\n`;
-    text += `• 10kg Composite: ${kpis.count10kg}\n`;
-    if (kpis.count19kg > 0) {
-      text += `• 19kg Commercial: ${kpis.count19kg}\n`;
-    }
-    text += `🔄 *Empties Received:* ${kpis.emptiesCollected} / ${entries.length}\n\n`;
-
-    text += `💰 *Payment Summary:*\n`;
-    text += `• Cash: ${kpis.cashCount}\n`;
-    text += `• Online / UPI: ${kpis.upiCount}\n`;
-    if (kpis.dueCount > 0) {
-      text += `• Due / Pending: ${kpis.dueCount}\n`;
-    }
-    text += `\n`;
-
     text += `*Completed Deliveries List:*\n`;
     entries.forEach((item, index) => {
-      const typeLabel = item.cylinder_type === '10KG_LITE' ? '10kg Lite' : item.cylinder_type === '19KG_COMM' ? '19kg Comm' : '14.2kg';
-      const emptyLabel = item.empty_collected ? 'Empty: Yes' : 'Empty: NO';
-      text += `${index + 1}. #${item.consumer_number} - ${item.consumer_name} [${typeLabel} | ${item.payment_mode} | ${emptyLabel}]\n`;
+      text += `${index + 1}. #${item.consumer_number} - ${item.consumer_name}\n`;
     });
 
     text += `\n*CSV Numbers:*\n${rawCsvString}`;
 
     return text;
-  }, [entries, agentName, formattedDateString, kpis, rawCsvString]);
+  }, [entries, agentName, formattedDateString, rawCsvString]);
 
   const [inputMode, setInputMode] = useState<'single' | 'bulk'>('single');
   const [isLiveScannerOpen, setIsLiveScannerOpen] = useState<boolean>(false);
@@ -1067,8 +1049,6 @@ export const AgentDispatchSummary: React.FC = () => {
   const displayedEntries = useMemo(() => {
     return entries.filter((item) => {
       // Tab filter
-      if (listFilterTab === '14KG' && item.cylinder_type !== '14.2KG_STD') return false;
-      if (listFilterTab === '10KG' && item.cylinder_type !== '10KG_LITE') return false;
       if (listFilterTab === 'UNVERIFIED' && item.found) return false;
 
       // In-list search query
@@ -1447,51 +1427,6 @@ export const AgentDispatchSummary: React.FC = () => {
         )}
       </div>
 
-      {/* LPG Reconciliation KPI Strip */}
-      {entries.length > 0 && (
-        <div className="bg-white rounded-3xl p-3 shadow-sm border border-slate-200 mb-3">
-          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <Flame className="w-3.5 h-3.5 text-orange-500" /> LPG Stock & Cash Reconciliation
-            </span>
-            <span className="text-slate-400 font-normal">Tap chips in list to adjust</span>
-          </div>
-
-          <div className="grid grid-cols-4 gap-1.5 mb-2">
-            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-2 text-center">
-              <span className="text-[10px] text-blue-600 font-semibold block">14.2kg Std</span>
-              <span className="text-base font-black text-blue-900">{kpis.count14kg}</span>
-            </div>
-            <div className="bg-purple-50 border border-purple-100 rounded-2xl p-2 text-center">
-              <span className="text-[10px] text-purple-600 font-semibold block">10kg Lite</span>
-              <span className="text-base font-black text-purple-900">{kpis.count10kg}</span>
-            </div>
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-2 text-center">
-              <span className="text-[10px] text-emerald-600 font-semibold block">Empties</span>
-              <span className="text-base font-black text-emerald-900">{kpis.emptiesCollected}</span>
-            </div>
-            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-2 text-center">
-              <span className="text-[10px] text-amber-700 font-semibold block">Total</span>
-              <span className="text-base font-black text-amber-950">{kpis.totalDeliveries}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-1.5 flex items-center justify-center gap-1 font-semibold text-slate-700">
-              <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Cash: <strong className="text-slate-900">{kpis.cashCount}</strong></span>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-1.5 flex items-center justify-center gap-1 font-semibold text-slate-700">
-              <QrCode className="w-3.5 h-3.5 text-blue-600" />
-              <span>UPI: <strong className="text-slate-900">{kpis.upiCount}</strong></span>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-1.5 flex items-center justify-center gap-1 font-semibold text-slate-700">
-              <Clock className="w-3.5 h-3.5 text-rose-500" />
-              <span>Due: <strong className="text-slate-900">{kpis.dueCount}</strong></span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Deliveries List */}
       <div className="bg-white rounded-3xl p-3.5 shadow-sm border border-slate-200 mb-3">
@@ -1555,36 +1490,18 @@ export const AgentDispatchSummary: React.FC = () => {
               >
                 All ({entries.length})
               </button>
-              <button
-                onClick={() => setListFilterTab('14KG')}
-                className={`px-2.5 py-1 rounded-xl text-[10px] font-bold shrink-0 transition-all ${
-                  listFilterTab === '14KG'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                14.2kg ({kpis.count14kg})
-              </button>
-              <button
-                onClick={() => setListFilterTab('10KG')}
-                className={`px-2.5 py-1 rounded-xl text-[10px] font-bold shrink-0 transition-all ${
-                  listFilterTab === '10KG'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                10kg Lite ({kpis.count10kg})
-              </button>
-              <button
-                onClick={() => setListFilterTab('UNVERIFIED')}
-                className={`px-2.5 py-1 rounded-xl text-[10px] font-bold shrink-0 transition-all ${
-                  listFilterTab === 'UNVERIFIED'
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Unverified ({entries.filter((e) => !e.found).length})
-              </button>
+              {entries.some((e) => !e.found) && (
+                <button
+                  onClick={() => setListFilterTab('UNVERIFIED')}
+                  className={`px-2.5 py-1 rounded-xl text-[10px] font-bold shrink-0 transition-all ${
+                    listFilterTab === 'UNVERIFIED'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Unverified ({entries.filter((e) => !e.found).length})
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1607,7 +1524,7 @@ export const AgentDispatchSummary: React.FC = () => {
                   key={`${item.consumer_number}-${index}`}
                   className="p-2.5 rounded-2xl border border-slate-100 bg-slate-50/90 hover:bg-slate-100 transition-colors"
                 >
-                  <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5 min-w-0">
                       <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full text-[11px] font-black flex items-center justify-center mt-0.5">
                         {originalIndex + 1}
@@ -1639,86 +1556,13 @@ export const AgentDispatchSummary: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Move and Delete Buttons */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={() => handleMoveEntry(originalIndex, 'up')}
-                        disabled={originalIndex === 0}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-800 disabled:opacity-20 rounded-xl"
-                        title="Move Up"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleMoveEntry(originalIndex, 'down')}
-                        disabled={originalIndex === entries.length - 1}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-800 disabled:opacity-20 rounded-xl"
-                        title="Move Down"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleRemoveEntry(originalIndex)}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-                        title="Remove"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Interactive Status Chips (Cylinder, Payment, Empty) */}
-                  <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/60">
-                    {/* Cylinder Type Toggle Chip */}
+                    {/* Delete Button */}
                     <button
-                      onClick={() => handleToggleCylinder(originalIndex)}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all ${
-                        item.cylinder_type === '10KG_LITE'
-                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                          : item.cylinder_type === '19KG_COMM'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : 'bg-blue-100 text-blue-800 border border-blue-200'
-                      }`}
-                      title="Tap to change cylinder type"
+                      onClick={() => handleRemoveEntry(originalIndex)}
+                      className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors shrink-0"
+                      title="Remove"
                     >
-                      <Flame className="w-3 h-3" />
-                      {item.cylinder_type === '10KG_LITE' ? '10kg Lite' : item.cylinder_type === '19KG_COMM' ? '19kg Comm' : '14.2kg Std'}
-                    </button>
-
-                    {/* Payment Mode Toggle Chip */}
-                    <button
-                      onClick={() => handleTogglePayment(originalIndex)}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all ${
-                        item.payment_mode === 'CASH'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : item.payment_mode === 'UPI'
-                          ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                          : 'bg-rose-100 text-rose-800 border border-rose-200'
-                      }`}
-                      title="Tap to change payment mode"
-                    >
-                      {item.payment_mode === 'CASH' ? (
-                        <Banknote className="w-3 h-3" />
-                      ) : item.payment_mode === 'UPI' ? (
-                        <QrCode className="w-3 h-3" />
-                      ) : (
-                        <Clock className="w-3 h-3" />
-                      )}
-                      {item.payment_mode}
-                    </button>
-
-                    {/* Empty Cylinder Collected Toggle */}
-                    <button
-                      onClick={() => handleToggleEmpty(originalIndex)}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all ${
-                        item.empty_collected
-                          ? 'bg-teal-100 text-teal-800 border border-teal-200'
-                          : 'bg-slate-200 text-slate-600 border border-slate-300'
-                      }`}
-                      title="Tap to toggle empty cylinder collected"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      {item.empty_collected ? 'Empty: Yes' : 'Empty: No'}
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
