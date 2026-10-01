@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import db, { type Consumer } from '../lib/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { supabase } from '../lib/supabase';
 import { AgentBottomNav } from '../components/AgentBottomNav';
 import { 
@@ -41,6 +42,7 @@ import {
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
+import { autoSyncMasterConsumers } from '../lib/sync';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -248,7 +250,8 @@ export const AgentDispatchSummary: React.FC = () => {
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Database metrics & sync state
-  const [dbCount, setDbCount] = useState<number>(0);
+  const liveDbCount = useLiveQuery(() => db.consumers.count(), []) ?? 0;
+  const dbCount = liveDbCount;
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
   const [syncProgress, setSyncProgress] = useState<number>(0);
   const [syncStatusText, setSyncStatusText] = useState<string>('');
@@ -265,8 +268,6 @@ export const AgentDispatchSummary: React.FC = () => {
         }
 
         const localCount = await db.consumers.count();
-        setDbCount(localCount);
-
         const savedTime = localStorage.getItem('bgcls_last_sync_time');
         if (savedTime) setLastSyncedTime(savedTime);
 
@@ -281,15 +282,48 @@ export const AgentDispatchSummary: React.FC = () => {
           setSupervisorsList(managers);
         }
 
-        // Auto sync if local DB is empty
-        if (localCount === 0 && navigator.onLine) {
-          syncFullMasterDatabase();
+        const localVersion = localStorage.getItem('bgcls_master_version');
+        const isOutdatedVersion = localVersion !== 'v2_merged_33k';
+
+        // Auto sync if local DB is empty or if new records exist in cloud or version is outdated
+        if (navigator.onLine) {
+          const { count: remoteTotal } = await supabase
+            .from('manager_consumer_summary')
+            .select('*', { count: 'exact', head: true });
+
+          if (localCount === 0 || isOutdatedVersion || (remoteTotal && remoteTotal > localCount)) {
+            console.log(`Auto-triggering master consumers sync: local=${localCount}, remote=${remoteTotal}, outdated=${isOutdatedVersion}`);
+            syncFullMasterDatabase();
+          }
         }
       } catch (err) {
         console.error('Failed to load initial data:', err);
       }
     };
     loadInitialData();
+
+    // Listen for global background sync completion and live progress
+    const handleGlobalSynced = async (_e: any) => {
+      const savedTime = localStorage.getItem('bgcls_last_sync_time');
+      if (savedTime) setLastSyncedTime(savedTime);
+      setIsSyncingDb(false);
+      setSyncStatusText('');
+    };
+
+    const handleProgress = (e: any) => {
+      if (e?.detail) {
+        setIsSyncingDb(e.detail.progressPct < 100);
+        setSyncProgress(e.detail.progressPct);
+        setSyncStatusText(e.detail.statusText || '');
+      }
+    };
+
+    window.addEventListener('bgcls-consumers-synced', handleGlobalSynced);
+    window.addEventListener('bgcls-sync-progress', handleProgress);
+    return () => {
+      window.removeEventListener('bgcls-consumers-synced', handleGlobalSynced);
+      window.removeEventListener('bgcls-sync-progress', handleProgress);
+    };
   }, []);
 
   // Fetch today's assigned route whenever agentId or reportDate changes
@@ -355,7 +389,7 @@ export const AgentDispatchSummary: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Hydrate local database with full consumers from Supabase (Fixed Step = 1000)
+  // Hydrate local database with full consumers from Supabase (Robust & Safe)
   const syncFullMasterDatabase = async () => {
     if (!navigator.onLine) {
       toast.error('Internet connection required to sync database');
@@ -367,83 +401,21 @@ export const AgentDispatchSummary: React.FC = () => {
     setSyncStatusText('Connecting to server...');
 
     try {
-      const { count: totalRemote, error: countErr } = await supabase
-        .from('consumers')
-        .select('*', { count: 'exact', head: true });
-
-      if (countErr) throw countErr;
-
-      const totalToFetch = totalRemote || 31359;
-      let allFetched: any[] = [];
-      let from = 0;
-      const step = 1000;
-      let fetchMore = true;
-
-      setSyncStatusText(`Starting download of ${totalToFetch.toLocaleString()} records...`);
-
-      while (fetchMore) {
-        const { data, error } = await supabase
-          .from('manager_consumer_summary')
-          .select('id, consumer_number, consumer_name, mobile, address, verification_status, cylinder_type, area_code, created_at, has_location, has_photos')
-          .range(from, from + step - 1);
-
-        if (error) {
-          console.error('Batch fetch error:', error);
-          toast.error(`Sync interrupted at ${allFetched.length.toLocaleString()} items`);
-          break;
+      const result = await autoSyncMasterConsumers({
+        force: true,
+        onProgress: (pct, text) => {
+          setSyncProgress(pct);
+          setSyncStatusText(text);
         }
+      });
 
-        if (data && data.length > 0) {
-          allFetched = [...allFetched, ...data];
-          from += step;
+      setSyncProgress(100);
 
-          const progressPct = Math.min(99, Math.round((allFetched.length / totalToFetch) * 100));
-          setSyncProgress(progressPct);
-          setSyncStatusText(
-            `Downloaded ${allFetched.length.toLocaleString()} / ${totalToFetch.toLocaleString()} records`
-          );
-        }
+      const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSyncedTime(nowFormatted);
+      localStorage.setItem('bgcls_last_sync_time', nowFormatted);
 
-        if (!data || data.length < step) {
-          fetchMore = false;
-        }
-      }
-
-      if (allFetched.length > 0) {
-        setSyncStatusText(`Indexing ${allFetched.length.toLocaleString()} records locally...`);
-
-        const formattedConsumers = allFetched.map((c) => {
-          const searchWords = [
-            ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
-            ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
-            ...(c.mobile ? [c.mobile.toLowerCase()] : []),
-          ];
-          return {
-            ...c,
-            has_location: !!c.has_location,
-            has_photos: !!c.has_photos,
-            searchWords,
-          };
-        });
-
-        await db.consumers.clear();
-
-        const chunkSize = 5000;
-        for (let i = 0; i < formattedConsumers.length; i += chunkSize) {
-          const chunk = formattedConsumers.slice(i, i + chunkSize);
-          await db.consumers.bulkAdd(chunk);
-        }
-
-        const newCount = await db.consumers.count();
-        setDbCount(newCount);
-        setSyncProgress(100);
-
-        const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncedTime(nowFormatted);
-        localStorage.setItem('bgcls_last_sync_time', nowFormatted);
-
-        toast.success(`Database updated! ${newCount.toLocaleString()} master consumers active.`);
-      }
+      toast.success(`Database updated! ${result.syncedCount.toLocaleString()} master consumers active.`);
     } catch (err) {
       console.error('Database sync failed:', err);
       toast.error('Failed to sync master database');

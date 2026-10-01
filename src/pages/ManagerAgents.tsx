@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Loader2, UserPlus, Users, Trash2, X, User, Phone, Edit2 } from 'lucide-react';
+import { ArrowLeft, Loader2, UserPlus, Users, Trash2, X, User, Phone, Edit2, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 
@@ -188,9 +188,16 @@ export const ManagerAgents = () => {
           <Users size={22} className="text-blue-200" /> 
           Team Members
         </h1>
+        <Link 
+          to="/manager/find-agent"
+          className="flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-amber-950 px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
+        >
+          <Search size={16} /> <span className="hidden sm:inline">Find Beat / Colony</span>
+          <span className="sm:hidden">Find Beat</span>
+        </Link>
         <button 
           onClick={openAddModal}
-          className="flex items-center gap-2 bg-white text-blue-900 hover:bg-blue-50 px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-sm sm:text-base active:scale-95"
+          className="flex items-center gap-2 bg-white text-blue-900 hover:bg-blue-50 px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-xs sm:text-sm active:scale-95 shrink-0"
         >
           <UserPlus size={18} /> <span className="hidden sm:inline">Add Member</span>
         </button>

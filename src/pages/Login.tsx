@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import db from '../lib/db';
 import { Loader2, User, ShieldCheck } from 'lucide-react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
+import { getFastAuthSession } from '../lib/auth';
 
 export const Login = () => {
   const [role, setRole] = useState<'AGENT' | 'MANAGER'>('AGENT');
@@ -11,11 +12,14 @@ export const Login = () => {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   
   const navigate = useNavigate();
 
   // Check session on mount
-  React.useEffect(() => {
+  useEffect(() => {
+    let isMounted = true;
+
     const checkSession = async () => {
       const savedUsername = localStorage.getItem('bgcls_remember_username');
       if (savedUsername) {
@@ -23,25 +27,27 @@ export const Login = () => {
         setRememberMe(true);
       }
       
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && session.user) {
-        // Query agents table for accurate role
-        const { data: agentData } = await supabase
-          .from('agents')
-          .select('role')
-          .eq('id', session.user.id)
-          .maybeSingle();
+      const authSession = await getFastAuthSession();
+      if (!isMounted) return;
 
-        const userRole = agentData?.role || (session.user.email?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER');
-
-        if (userRole === 'MANAGER') {
+      if (authSession) {
+        // Instant redirect without delay or login screen flash
+        if (authSession.role === 'MANAGER') {
           navigate('/manager/dashboard', { replace: true });
         } else {
           navigate('/agent/search', { replace: true });
         }
+      } else {
+        // Not logged in (or just logged out) -> reveal clean login form
+        setIsCheckingSession(false);
       }
     };
+
     checkSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -53,6 +59,9 @@ export const Login = () => {
 
     setIsLoading(true);
     try {
+      // Clear any prior logout flag
+      sessionStorage.removeItem('bgcls_just_logged_out');
+
       // Handle Remember Me
       if (rememberMe) {
         localStorage.setItem('bgcls_remember_username', username);
@@ -74,10 +83,6 @@ export const Login = () => {
 
       if (error) throw error;
       
-      if (data?.user?.id) {
-        localStorage.setItem('bgcls_agent_id', data.user.id);
-      }
-
       // Auto-detect actual user role from database
       let actualRole: 'AGENT' | 'MANAGER' = role;
       if (data?.user?.id) {
@@ -90,14 +95,17 @@ export const Login = () => {
         if (agentData?.role) {
           actualRole = agentData.role as 'AGENT' | 'MANAGER';
         }
+
+        localStorage.setItem('bgcls_agent_id', data.user.id);
+        localStorage.setItem('bgcls_user_role', actualRole);
       }
 
       if (actualRole === 'MANAGER') {
         toast.success('Manager logged in successfully!');
-        navigate('/manager/dashboard');
+        navigate('/manager/dashboard', { replace: true });
       } else {
         toast.success('Agent logged in successfully!');
-        navigate('/agent/search');
+        navigate('/agent/search', { replace: true });
       }
       
     } catch (error: any) {
@@ -109,7 +117,8 @@ export const Login = () => {
             if (!localStorage.getItem('bgcls_agent_id')) {
               localStorage.setItem('bgcls_agent_id', 'offline_agent');
             }
-            navigate('/agent/search');
+            localStorage.setItem('bgcls_user_role', 'AGENT');
+            navigate('/agent/search', { replace: true });
             return;
           }
         } catch (e) {
@@ -121,6 +130,25 @@ export const Login = () => {
       setIsLoading(false);
     }
   };
+
+  if (isCheckingSession) {
+    return (
+      <div className="min-h-screen bg-premium-gradient flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+        <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-20 h-20 rounded-3xl flex items-center justify-center mb-6 shadow-2xl shadow-blue-500/30 transform rotate-3">
+            <span className="font-black text-white text-3xl tracking-tighter">BG</span>
+          </div>
+          <h2 className="text-xl font-bold text-white tracking-wide mb-2">Siddhartha Gas</h2>
+          <div className="flex items-center gap-2 text-blue-200/80 text-xs font-semibold">
+            <Loader2 className="animate-spin" size={14} />
+            <span>Loading Siddhartha Gas...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-premium-gradient flex flex-col items-center justify-center p-4 overflow-hidden relative">

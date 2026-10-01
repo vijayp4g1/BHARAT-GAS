@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { BulkImportModal } from '../components/BulkImportModal';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
+import { performLogout } from '../lib/auth';
 
 const CountUp = ({ end, duration = 1500 }: { end: number, duration?: number }) => {
   const [count, setCount] = useState(0);
@@ -41,9 +42,10 @@ export const ManagerDashboard = () => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    toast.success('Logged out successfully');
-    navigate('/');
+    toast.loading('Logging out...', { id: 'logout' });
+    await performLogout();
+    toast.success('Logged out successfully', { id: 'logout' });
+    navigate('/', { replace: true });
   };
 
   const fetchDashboardData = async () => {
@@ -213,7 +215,19 @@ export const ManagerDashboard = () => {
       <main className="max-w-6xl w-full mx-auto p-4 sm:p-5 md:p-8 space-y-6 md:space-y-8 mt-2">
         
         {/* Quick Actions Grid */}
-        <section className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
+          <Link to="/manager/find-agent" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group bg-gradient-to-br from-amber-500/10 via-white to-white border border-amber-200/80 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-md shadow-amber-500/20">
+              <Search size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-1.5">
+                Find Agent
+                <span className="text-[9px] bg-amber-500 text-white px-1.5 py-0.2 rounded-full font-black tracking-wider uppercase">New</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">By colony/village</p>
+            </div>
+          </Link>
           <Link to="/manager/consumers" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
             <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
               <List size={20} />

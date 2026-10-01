@@ -35,7 +35,7 @@ export const ManagerConsumers = () => {
 
       if (debouncedSearchQuery) {
         const escaped = debouncedSearchQuery.replace(/[%_]/g, '\\$&');
-        query = query.or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%`);
+        query = query.or(`consumer_name.ilike.%${escaped}%,consumer_number.ilike.%${escaped}%,mobile.ilike.%${escaped}%,address.ilike.%${escaped}%`);
       }
 
       if (filter === 'Completed') {

@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
-import { setupSyncListeners, syncOfflineData, pullLatestCloudData } from './lib/sync';
+import { setupSyncListeners, syncOfflineData, pullLatestCloudData, autoSyncMasterConsumers } from './lib/sync';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
@@ -16,6 +16,7 @@ import { ManagerAgents } from './pages/ManagerAgents';
 import { ManagerReports } from './pages/ManagerReports';
 import { ManagerConsumers } from './pages/ManagerConsumers';
 import { ManagerConsumerProfile } from './pages/ManagerConsumerProfile';
+import { FindDeliveryAgent } from './pages/FindDeliveryAgent';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
@@ -23,11 +24,14 @@ function App() {
     setupSyncListeners();
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);
+    // Automatically check and sync new master consumers without needing any button click
+    autoSyncMasterConsumers().catch(console.error);
 
     // Periodically pull latest data from cloud every 60 seconds when online
     const intervalId = setInterval(() => {
       if (navigator.onLine) {
         pullLatestCloudData().catch(console.error);
+        autoSyncMasterConsumers().catch(console.error);
       }
     }, 60000);
 
@@ -61,10 +65,16 @@ function App() {
         <Route path="/agent/consumer/:id" element={
           <ProtectedRoute allowedRole="AGENT"><ConsumerProfile /></ProtectedRoute>
         } />
+        <Route path="/agent/find-agent" element={
+          <ProtectedRoute allowedRole="AGENT"><FindDeliveryAgent /></ProtectedRoute>
+        } />
 
         {/* Manager Routes */}
         <Route path="/manager/dashboard" element={
           <ProtectedRoute allowedRole="MANAGER"><ManagerDashboard /></ProtectedRoute>
+        } />
+        <Route path="/manager/find-agent" element={
+          <ProtectedRoute allowedRole="MANAGER"><FindDeliveryAgent /></ProtectedRoute>
         } />
         <Route path="/manager/dispatch" element={
           <ProtectedRoute allowedRole="MANAGER"><ManagerDispatch /></ProtectedRoute>

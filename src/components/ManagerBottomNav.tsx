@@ -1,63 +1,86 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { List, Users, Map, Download, LayoutDashboard } from 'lucide-react';
+import { List, Users, Map, Download, LayoutDashboard, Compass } from 'lucide-react';
 
 export const ManagerBottomNav = () => {
   const location = useLocation();
   const path = location.pathname;
 
+  const navItems = [
+    {
+      to: '/manager/dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      isActive: path === '/manager/dashboard',
+      activeColor: 'text-blue-600',
+      activeIndicator: 'bg-blue-600',
+    },
+    {
+      to: '/manager/find-agent',
+      label: 'Find Area',
+      icon: Compass,
+      isActive: path.startsWith('/manager/find-agent'),
+      activeColor: 'text-amber-600',
+      activeIndicator: 'bg-amber-600',
+    },
+    {
+      to: '/manager/consumers',
+      label: 'Consumers',
+      icon: List,
+      isActive: path.startsWith('/manager/consumer') && path !== '/manager/consumers/map' && path !== '/manager/consumers/reports',
+      activeColor: 'text-blue-600',
+      activeIndicator: 'bg-blue-600',
+    },
+    {
+      to: '/manager/agents',
+      label: 'Agents',
+      icon: Users,
+      isActive: path.startsWith('/manager/agent'),
+      activeColor: 'text-blue-600',
+      activeIndicator: 'bg-blue-600',
+    },
+    {
+      to: '/manager/map',
+      label: 'Map',
+      icon: Map,
+      isActive: path === '/manager/map',
+      activeColor: 'text-blue-600',
+      activeIndicator: 'bg-blue-600',
+    },
+    {
+      to: '/manager/reports',
+      label: 'Reports',
+      icon: Download,
+      isActive: path === '/manager/reports',
+      activeColor: 'text-blue-600',
+      activeIndicator: 'bg-blue-600',
+    },
+  ];
+
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/50 flex items-center justify-around p-2 pb-safe z-[1000] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-      <Link 
-        to="/manager/dashboard" 
-        className={`flex flex-col items-center justify-center p-2 min-h-[56px] min-w-[56px] transition-colors relative ${path === '/manager/dashboard' ? 'text-blue-600' : 'text-slate-500 hover:text-blue-600'}`}
-      >
-        <LayoutDashboard size={24} className="mb-1" />
-        <span className="text-[10px] font-bold">Dashboard</span>
-        {path === '/manager/dashboard' && (
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-t-full"></div>
-        )}
-      </Link>
-      <Link 
-        to="/manager/consumers" 
-        className={`flex flex-col items-center justify-center p-2 min-h-[56px] min-w-[56px] transition-colors relative ${path.startsWith('/manager/consumer') && path !== '/manager/consumers/map' && path !== '/manager/consumers/reports' ? 'text-blue-600' : 'text-slate-500 hover:text-blue-600'}`}
-      >
-        <List size={24} className="mb-1" />
-        <span className="text-[10px] font-bold">Consumers</span>
-        {path.startsWith('/manager/consumer') && (
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-t-full"></div>
-        )}
-      </Link>
-      <Link 
-        to="/manager/agents" 
-        className={`flex flex-col items-center justify-center p-2 min-h-[56px] min-w-[56px] transition-colors relative ${path.startsWith('/manager/agent') ? 'text-blue-600' : 'text-slate-500 hover:text-blue-600'}`}
-      >
-        <Users size={24} className="mb-1" />
-        <span className="text-[10px] font-bold">Agents</span>
-        {path.startsWith('/manager/agent') && (
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-t-full"></div>
-        )}
-      </Link>
-      <Link 
-        to="/manager/map" 
-        className={`flex flex-col items-center justify-center p-2 min-h-[56px] min-w-[56px] transition-colors relative ${path === '/manager/map' ? 'text-blue-600' : 'text-slate-500 hover:text-blue-600'}`}
-      >
-        <Map size={24} className="mb-1" />
-        <span className="text-[10px] font-bold">Map</span>
-        {path === '/manager/map' && (
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-t-full"></div>
-        )}
-      </Link>
-      <Link 
-        to="/manager/reports" 
-        className={`flex flex-col items-center justify-center p-2 min-h-[56px] min-w-[56px] transition-colors relative ${path === '/manager/reports' ? 'text-blue-600' : 'text-slate-500 hover:text-blue-600'}`}
-      >
-        <Download size={24} className="mb-1" />
-        <span className="text-[10px] font-bold">Reports</span>
-        {path === '/manager/reports' && (
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-t-full"></div>
-        )}
-      </Link>
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 pb-safe z-[1000] shadow-[0_-4px_25px_rgba(0,0,0,0.08)]">
+      <div className="grid grid-cols-6 max-w-lg mx-auto py-1 px-1">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={`flex flex-col items-center justify-center py-1 px-0.5 min-h-[50px] transition-all relative ${
+                item.isActive ? `${item.activeColor} font-bold` : 'text-slate-500 hover:text-slate-900 font-medium'
+              }`}
+            >
+              <Icon size={19} className={`mb-1 transition-transform ${item.isActive ? 'scale-110' : ''}`} />
+              <span className="text-[8.5px] leading-tight tracking-tight text-center truncate max-w-full">
+                {item.label}
+              </span>
+              {item.isActive && (
+                <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-1 ${item.activeIndicator} rounded-full`}></div>
+              )}
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 };

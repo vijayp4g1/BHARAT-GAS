@@ -367,10 +367,182 @@ export async function syncOfflineData() {
   }
 }
 
+export const MASTER_DATA_VERSION = 'v2_merged_33k';
+
+let activeSyncPromise: Promise<{ syncedCount: number; updated: boolean }> | null = null;
+const progressListeners = new Set<(progressPct: number, statusText: string) => void>();
+
+/**
+ * Automatically checks if cloud master consumers count is greater than local IndexedDB count,
+ * or if force is true, or if local data version is outdated, and automatically synchronizes all consumers.
+ * Uses a singleton promise to ensure only one auto-sync runs at any time across the entire web app.
+ */
+export async function autoSyncMasterConsumers(options?: {
+  onProgress?: (progressPct: number, statusText: string) => void;
+  force?: boolean;
+}): Promise<{ syncedCount: number; updated: boolean }> {
+  if (options?.onProgress) {
+    progressListeners.add(options.onProgress);
+  }
+
+  const broadcastProgress = (pct: number, text: string) => {
+    progressListeners.forEach((listener) => {
+      try { listener(pct, text); } catch (_) {}
+    });
+    window.dispatchEvent(
+      new CustomEvent('bgcls-sync-progress', { detail: { progressPct: pct, statusText: text } })
+    );
+  };
+
+  if (activeSyncPromise) {
+    return activeSyncPromise;
+  }
+
+  activeSyncPromise = (async () => {
+    if (!navigator.onLine) {
+      return { syncedCount: await db.consumers.count(), updated: false };
+    }
+
+    try {
+      const localCount = await db.consumers.count();
+      const localVersion = localStorage.getItem('bgcls_master_version');
+
+      // Check total count on remote server
+      const { count: remoteTotal, error: countErr } = await supabase
+        .from('manager_consumer_summary')
+        .select('*', { count: 'exact', head: true });
+
+      if (countErr || !remoteTotal) {
+        console.warn('Could not determine remote consumer count:', countErr);
+        return { syncedCount: localCount, updated: false };
+      }
+
+      // Auto-sync if force requested, DB empty, fewer records, or outdated version
+      const isOutdatedVersion = localVersion !== MASTER_DATA_VERSION;
+      const needsSync = options?.force || localCount < remoteTotal || localCount === 0 || isOutdatedVersion;
+      if (!needsSync) {
+        return { syncedCount: localCount, updated: false };
+      }
+
+      console.log(`Auto-syncing master consumers: Local (${localCount}) -> Remote (${remoteTotal}) [version: ${localVersion} -> ${MASTER_DATA_VERSION}]`);
+      broadcastProgress(0, `Syncing ${remoteTotal.toLocaleString()} consumers...`);
+
+      let allFetched: any[] = [];
+      let from = 0;
+      const step = 1000;
+      let fetchMore = true;
+
+      while (fetchMore) {
+        let batchData: any[] | null = null;
+        let batchError: any = null;
+
+        // Retry up to 3 times per batch with backoff
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const { data, error } = await supabase
+            .from('manager_consumer_summary')
+            .select('id, consumer_number, consumer_name, mobile, address, created_at, has_location, has_photos')
+            .range(from, from + step - 1);
+
+          if (!error && data) {
+            batchData = data;
+            batchError = null;
+            break;
+          } else {
+            batchError = error;
+            console.warn(`Retry attempt ${attempt} for batch [${from}..${from + step - 1}]:`, error);
+            await new Promise((r) => setTimeout(r, 600 * attempt));
+          }
+        }
+
+        if (batchError || !batchData) {
+          console.error('Batch fetch permanently failed after retries:', batchError);
+          broadcastProgress(0, 'Sync failed to complete remote download');
+          break;
+        }
+
+        if (batchData.length > 0) {
+          allFetched = [...allFetched, ...batchData];
+          from += step;
+
+          const progressPct = Math.min(99, Math.round((allFetched.length / remoteTotal) * 100));
+          broadcastProgress(
+            progressPct,
+            `Downloaded ${allFetched.length.toLocaleString()} / ${remoteTotal.toLocaleString()} consumers (${progressPct}%)`
+          );
+        }
+
+        if (batchData.length < step) {
+          fetchMore = false;
+        }
+      }
+
+      // Only overwrite local database if we fetched the full remote dataset (or at least 95% if minor discrepancy)
+      if (allFetched.length >= remoteTotal * 0.95 && allFetched.length > 0) {
+        broadcastProgress(99, `Indexing ${allFetched.length.toLocaleString()} records locally...`);
+
+        const formattedConsumers = allFetched.map((c) => {
+          const searchWords = [
+            ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
+            ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
+            ...(c.mobile ? [c.mobile.toLowerCase()] : []),
+          ];
+          return {
+            id: c.id,
+            consumer_number: c.consumer_number,
+            consumer_name: c.consumer_name,
+            mobile: c.mobile,
+            address: c.address,
+            verification_status: 'Not Collected' as const,
+            has_location: !!c.has_location,
+            has_photos: !!c.has_photos,
+            created_at: c.created_at,
+            searchWords,
+          };
+        });
+
+        // Fast transaction replace
+        await db.transaction('rw', db.consumers, async () => {
+          await db.consumers.clear();
+          const chunkSize = 5000;
+          for (let i = 0; i < formattedConsumers.length; i += chunkSize) {
+            const chunk = formattedConsumers.slice(i, i + chunkSize);
+            await db.consumers.bulkAdd(chunk);
+          }
+        });
+
+        const finalCount = await db.consumers.count();
+        const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        localStorage.setItem('bgcls_last_sync_time', nowFormatted);
+        localStorage.setItem('bgcls_master_version', MASTER_DATA_VERSION);
+
+        broadcastProgress(100, `Auto-sync complete: ${finalCount.toLocaleString()} consumers active`);
+
+        // Dispatch events to inform all open components & views
+        window.dispatchEvent(new CustomEvent('bgcls-consumers-synced', { detail: { count: finalCount } }));
+        return { syncedCount: finalCount, updated: true };
+      } else {
+        console.warn(`Auto-sync did not fetch complete dataset (${allFetched.length}/${remoteTotal}). Existing local DB preserved.`);
+        return { syncedCount: localCount, updated: false };
+      }
+    } catch (err) {
+      console.error('Auto sync master consumers failed:', err);
+      return { syncedCount: await db.consumers.count(), updated: false };
+    } finally {
+      activeSyncPromise = null;
+      if (options?.onProgress) {
+        progressListeners.delete(options.onProgress);
+      }
+    }
+  })();
+
+  return activeSyncPromise;
+}
+
 // Global listener setup
 export function setupSyncListeners() {
   window.addEventListener('online', () => {
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);
+    autoSyncMasterConsumers().catch(console.error);
   });
 }

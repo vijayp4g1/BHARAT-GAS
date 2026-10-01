@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Loader2, RefreshCw, Database, Users } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Search, Loader2, RefreshCw, Database, Users, Compass, ChevronRight } from 'lucide-react';
 import db from '../lib/db';
 import { ConsumerCard } from '../components/ConsumerCard';
 import { ConsumerModal } from '../components/ConsumerModal';
@@ -9,7 +9,8 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 import { AgentBottomNav } from '../components/AgentBottomNav';
-import { pullLatestCloudData } from '../lib/sync';
+import { pullLatestCloudData, autoSyncMasterConsumers } from '../lib/sync';
+import { performLogout } from '../lib/auth';
 
 export const AgentSearch = () => {
   useAgentLocationTracking();
@@ -25,9 +26,10 @@ export const AgentSearch = () => {
   const [hydrationProgress, setHydrationProgress] = useState(0);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    toast.success('Logged out successfully');
-    navigate('/');
+    toast.loading('Logging out...', { id: 'logout' });
+    await performLogout();
+    toast.success('Logged out successfully', { id: 'logout' });
+    navigate('/', { replace: true });
   };
 
   useEffect(() => {
@@ -41,67 +43,46 @@ export const AgentSearch = () => {
     };
   }, []);
 
-  // Check if DB is empty and hydrate if needed (fixes 0 search results after clear cache)
+  // Check if DB needs sync and hydrate automatically
   useEffect(() => {
+    const handleProgress = (e: any) => {
+      if (e?.detail) {
+        setIsHydrating(e.detail.progressPct < 100);
+        setHydrationProgress(e.detail.progressPct);
+      }
+    };
+    window.addEventListener('bgcls-sync-progress', handleProgress);
+
     const hydrateIfNeeded = async () => {
       if (!isOnline) return;
-      const count = await db.consumers.count();
-      if (count === 0) {
-        setIsHydrating(true);
-        try {
-          const { count: totalRemote } = await supabase.from('manager_consumer_summary').select('*', { count: 'exact', head: true });
-          const totalToFetch = totalRemote || 10000;
-          
-          let allConsumers: any[] = [];
-          let from = 0;
-          const step = 1000;
-          let fetchMore = true;
+      try {
+        const localVersion = localStorage.getItem('bgcls_master_version');
+        const isOutdatedVersion = localVersion !== 'v2_merged_33k';
+        const localCount = await db.consumers.count();
+        const { count: remoteTotal } = await supabase
+          .from('manager_consumer_summary')
+          .select('*', { count: 'exact', head: true });
 
-          while (fetchMore) {
-            const { data, error } = await supabase
-              .from('manager_consumer_summary')
-              .select('*')
-              .range(from, from + step - 1);
-              
-            if (error) break;
-            if (data && data.length > 0) {
-              allConsumers = [...allConsumers, ...data];
-              from += step;
-              setHydrationProgress(Math.min(100, Math.round((allConsumers.length / totalToFetch) * 100)));
-            }
-            if (!data || data.length < step) {
-              fetchMore = false;
-            }
-          }
-            
-          if (allConsumers.length > 0) {
-            const formattedConsumers = allConsumers.map(c => {
-              const searchWords = [
-                ...(c.consumer_name ? c.consumer_name.toLowerCase().split(/\s+/) : []),
-                ...(c.consumer_number ? [c.consumer_number.toLowerCase()] : []),
-                ...(c.mobile ? [c.mobile.toLowerCase()] : [])
-              ];
-              return { 
-                ...c, 
-                has_location: !!c.has_location,
-                has_photos: !!c.has_photos,
-                searchWords
-              };
-            });
-            await db.consumers.bulkAdd(formattedConsumers);
-            console.log(`Hydrated ${allConsumers.length} consumers from background sync`);
-          }
-        } catch (_e) {
-          toast.error('Failed to download data.');
-        } finally {
-          setIsHydrating(false);
+        if (localCount === 0 || isOutdatedVersion || (remoteTotal && remoteTotal > localCount)) {
+          setIsHydrating(true);
+          await autoSyncMasterConsumers({
+            onProgress: (pct) => setHydrationProgress(pct),
+          });
         }
+      } catch (err) {
+        console.error('Hydration error:', err);
+      } finally {
+        setIsHydrating(false);
       }
     };
     hydrateIfNeeded();
     if (isOnline) {
       pullLatestCloudData().catch(console.error);
     }
+
+    return () => {
+      window.removeEventListener('bgcls-sync-progress', handleProgress);
+    };
   }, [isOnline]);
 
   // Debounce search to prevent UI freezing on every keystroke
@@ -370,6 +351,26 @@ export const AgentSearch = () => {
       <ConsumerModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} />
 
       <main className="flex-1 p-4 sm:p-5 overflow-y-auto relative z-0">
+        {/* Find Delivery Area & Agent Shortcut */}
+        <Link 
+          to="/agent/find-agent"
+          className="mb-4 p-3.5 bg-gradient-to-r from-amber-500/25 via-amber-500/15 to-blue-500/15 border border-amber-300/40 rounded-2xl text-white backdrop-blur-md hover:border-amber-300/80 transition-all shadow-md flex items-center justify-between group active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-md shadow-amber-500/30 group-hover:scale-105 transition-transform shrink-0">
+              <Compass size={22} className="text-amber-950" />
+            </div>
+            <div>
+              <div className="text-sm font-bold flex items-center gap-2 text-white">
+                Find Delivery Area & Agent
+                <span className="text-[10px] bg-amber-400 text-amber-950 font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider">New</span>
+              </div>
+              <p className="text-xs text-blue-100 font-medium">Search colonies, villages & landmarks to identify beat code</p>
+            </div>
+          </div>
+          <ChevronRight size={20} className="text-amber-300 group-hover:translate-x-1 transition-transform shrink-0" />
+        </Link>
+
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-white font-bold tracking-wide flex items-center gap-2 text-lg">
             {debouncedSearch ? 'Search Results' : 'Recent Consumers'}
