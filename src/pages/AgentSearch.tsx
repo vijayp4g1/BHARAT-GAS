@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 import { AgentBottomNav } from '../components/AgentBottomNav';
-import { pullLatestCloudData, autoSyncMasterConsumers } from '../lib/sync';
+import { pullLatestCloudData, autoSyncMasterConsumers, MASTER_DATA_VERSION } from '../lib/sync';
 import { performLogout } from '../lib/auth';
 
 export const AgentSearch = () => {
@@ -57,7 +57,7 @@ export const AgentSearch = () => {
       if (!isOnline) return;
       try {
         const localVersion = localStorage.getItem('bgcls_master_version');
-        const isOutdatedVersion = localVersion !== 'v2_merged_33k';
+        const isOutdatedVersion = localVersion !== MASTER_DATA_VERSION;
         const localCount = await db.consumers.count();
         const { count: remoteTotal } = await supabase
           .from('manager_consumer_summary')

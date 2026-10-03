@@ -41,8 +41,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
-import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
-import { autoSyncMasterConsumers } from '../lib/sync';
+import { matchConsumerWithDatabase, registerNewConsumer, DISTRIBUTOR_BLACKLIST } from '../lib/consumerMatcher';
+import { autoSyncMasterConsumers, MASTER_DATA_VERSION } from '../lib/sync';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -104,10 +104,39 @@ const normalizeStoredEntries = (rawItems: any[]): ItemEntry[] => {
   }));
 };
 
+// Helper to safely load stored entries for a specific agent and date
+const loadEntriesForDate = (agent: string, dateStr: string): ItemEntry[] => {
+  try {
+    const devId = getDeviceId();
+    const currentAgent = agent || localStorage.getItem('bgcls_agent_id') || 'agent_default';
+    const date = dateStr || new Date().toISOString().split('T')[0];
+
+    // 1. Try date + device + agent specific key
+    const scopedKey = getDeviceScopedKey(currentAgent, date);
+    const savedScoped = localStorage.getItem(scopedKey);
+    if (savedScoped) return normalizeStoredEntries(JSON.parse(savedScoped));
+
+    // 2. Fallbacks only apply to today's date on initial startup
+    const today = new Date().toISOString().split('T')[0];
+    if (date === today) {
+      const savedLatest = localStorage.getItem(`bgcls_day_end_latest_${devId}`);
+      if (savedLatest) return normalizeStoredEntries(JSON.parse(savedLatest));
+
+      const legacy = localStorage.getItem('bgcls_day_end_entries');
+      if (legacy) return normalizeStoredEntries(JSON.parse(legacy));
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+};
+
 export const AgentDispatchSummary: React.FC = () => {
   const [agentName, setAgentName] = useState<string>('Delivery Agent');
   const [agentId, setAgentId] = useState<string>(() => localStorage.getItem('bgcls_agent_id') || 'agent_default');
   const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const activeDateRef = useRef<string>(reportDate);
   const [rawInput, setRawInput] = useState<string>('');
   const [singleInput, setSingleInput] = useState<string>('');
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
@@ -128,28 +157,9 @@ export const AgentDispatchSummary: React.FC = () => {
   const [listFilterTab, setListFilterTab] = useState<'ALL' | 'UNVERIFIED'>('ALL');
 
   const [entries, setEntries] = useState<ItemEntry[]>(() => {
-    try {
-      const devId = getDeviceId();
-      const currentAgent = localStorage.getItem('bgcls_agent_id') || 'agent_default';
-      const today = new Date().toISOString().split('T')[0];
-      
-      // 1. Try date + device + agent specific key
-      const scopedKey = `bgcls_day_end_entries_${devId}_${currentAgent}_${today}`;
-      const savedScoped = localStorage.getItem(scopedKey);
-      if (savedScoped) return normalizeStoredEntries(JSON.parse(savedScoped));
-
-      // 2. Try latest device fallback
-      const savedLatest = localStorage.getItem(`bgcls_day_end_latest_${devId}`);
-      if (savedLatest) return normalizeStoredEntries(JSON.parse(savedLatest));
-
-      // 3. Fallback to legacy global key
-      const legacy = localStorage.getItem('bgcls_day_end_entries');
-      if (legacy) return normalizeStoredEntries(JSON.parse(legacy));
-
-      return [];
-    } catch {
-      return [];
-    }
+    const currentAgent = localStorage.getItem('bgcls_agent_id') || 'agent_default';
+    const today = new Date().toISOString().split('T')[0];
+    return loadEntriesForDate(currentAgent, today);
   });
 
   // Mark initial load as completed after first render
@@ -157,19 +167,57 @@ export const AgentDispatchSummary: React.FC = () => {
     setIsLoaded(true);
   }, []);
 
-  // Auto-save entries to device-scoped localStorage ONLY after initial load
+  // Auto-save entries to device-scoped localStorage ONLY for the active date after initial load
   useEffect(() => {
     if (!isLoaded) return;
+    // Guard against saving to the wrong date during date transitions
+    if (activeDateRef.current !== reportDate) return;
+
     try {
       const key = getDeviceScopedKey(agentId, reportDate);
       const jsonStr = JSON.stringify(entries);
       localStorage.setItem(key, jsonStr);
-      localStorage.setItem(`bgcls_day_end_latest_${getDeviceId()}`, jsonStr);
-      localStorage.setItem('bgcls_day_end_entries', jsonStr);
+
+      // Only update fallback cache if working on today's report
+      const today = new Date().toISOString().split('T')[0];
+      if (reportDate === today) {
+        localStorage.setItem(`bgcls_day_end_latest_${getDeviceId()}`, jsonStr);
+        localStorage.setItem('bgcls_day_end_entries', jsonStr);
+      }
     } catch (err) {
       console.error('Failed to save entries to local storage:', err);
     }
   }, [entries, agentId, reportDate, isLoaded]);
+
+  // Handle switching report date safely without cross-overwriting entries
+  const handleDateChange = (newDate: string) => {
+    if (!newDate || newDate === reportDate) return;
+
+    // 1. Immediately persist current entries to the previous date's scoped storage
+    try {
+      const prevKey = getDeviceScopedKey(agentId, activeDateRef.current);
+      localStorage.setItem(prevKey, JSON.stringify(entries));
+    } catch (saveErr) {
+      console.warn('Failed to persist previous date entries before switching:', saveErr);
+    }
+
+    // 2. Load stored entries for the newly selected date
+    const loadedForNewDate = loadEntriesForDate(agentId, newDate);
+
+    // 3. Atomically update active date ref, reportDate state, and entries state
+    activeDateRef.current = newDate;
+    setReportDate(newDate);
+    setEntries(loadedForNewDate);
+    setListSearchQuery('');
+    reverifyAttemptedRef.current.clear();
+
+    toast(
+      loadedForNewDate.length > 0
+        ? `Loaded ${loadedForNewDate.length} deliveries for ${newDate}`
+        : `Switched to ${newDate} (New report sheet)`,
+      { icon: '📅', duration: 3000 }
+    );
+  };
 
   // Track reverification attempts to prevent re-querying items that truly don't exist
   const reverifyAttemptedRef = useRef<Set<string>>(new Set());
@@ -208,6 +256,7 @@ export const AgentDispatchSummary: React.FC = () => {
             if (match.found && isMounted) {
               updatedEntries[i] = {
                 ...item,
+                consumer_id: match.consumer_id || item.consumer_id,
                 consumer_number: match.consumer_number,
                 consumer_name: match.consumer_name,
                 address: match.address || item.address,
@@ -283,7 +332,7 @@ export const AgentDispatchSummary: React.FC = () => {
         }
 
         const localVersion = localStorage.getItem('bgcls_master_version');
-        const isOutdatedVersion = localVersion !== 'v2_merged_33k';
+        const isOutdatedVersion = localVersion !== MASTER_DATA_VERSION;
 
         // Auto sync if local DB is empty or if new records exist in cloud or version is outdated
         if (navigator.onLine) {
@@ -574,6 +623,7 @@ export const AgentDispatchSummary: React.FC = () => {
       setEntries((prev) => [
         ...prev,
         {
+          consumer_id: match.consumer_id,
           consumer_number: match.consumer_number,
           consumer_name: match.consumer_name,
           address: match.address,
@@ -587,7 +637,9 @@ export const AgentDispatchSummary: React.FC = () => {
       ]);
       setSingleInput('');
       setShowSuggestions(false);
-      if (match.corrected) {
+      if (match.is_new) {
+        toast.success(`🎉 Registered & Added New Customer: #${match.consumer_number} (${match.consumer_name})`);
+      } else if (match.corrected) {
         toast.success(`✨ Verified by Name: Added #${match.consumer_number} (${match.consumer_name})`);
       } else {
         toast.success(`Added ${match.consumer_name}`);
@@ -674,8 +726,8 @@ export const AgentDispatchSummary: React.FC = () => {
       if (missingNumbers.length > 0 && navigator.onLine) {
         try {
           const { data: remoteResults } = await supabase
-            .from('consumers')
-            .select('id, consumer_number, consumer_name, address, mobile, cylinder_type')
+            .from('manager_consumer_summary')
+            .select('id, consumer_number, consumer_name, address, mobile')
             .in('consumer_number', missingNumbers);
 
           if (remoteResults && remoteResults.length > 0) {
@@ -688,7 +740,7 @@ export const AgentDispatchSummary: React.FC = () => {
                 mobile: r.mobile,
                 found: true,
                 source: 'remote',
-                cylinder_type: r.cylinder_type === '10KG_LITE' ? '10KG_LITE' : r.cylinder_type === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
+                cylinder_type: '14.2KG_STD',
                 payment_mode: 'CASH',
                 empty_collected: true,
               });
@@ -696,6 +748,29 @@ export const AgentDispatchSummary: React.FC = () => {
           }
         } catch (remoteErr) {
           console.error('Remote lookup error:', remoteErr);
+        }
+      }
+
+      // Auto-register any new numbers in the main database
+      for (const num of uniqueNewNumbers) {
+        if (!resolvedMap.has(num.toLowerCase()) && num.length >= 3 && !DISTRIBUTOR_BLACKLIST.has(num)) {
+          try {
+            const newCons = await registerNewConsumer(num);
+            resolvedMap.set(num.toLowerCase(), {
+              consumer_id: newCons.id,
+              consumer_number: newCons.consumer_number,
+              consumer_name: newCons.consumer_name,
+              address: newCons.address,
+              mobile: newCons.mobile,
+              found: true,
+              source: 'local',
+              cylinder_type: '14.2KG_STD',
+              payment_mode: 'CASH',
+              empty_collected: true,
+            });
+          } catch (autoErr) {
+            console.warn('Failed to auto-register bulk consumer:', autoErr);
+          }
         }
       }
 
@@ -836,6 +911,7 @@ export const AgentDispatchSummary: React.FC = () => {
           const updated = [...prev];
           updated[index] = {
             ...updated[index],
+            consumer_id: match.consumer_id || updated[index].consumer_id,
             consumer_number: match.consumer_number,
             consumer_name: match.consumer_name,
             address: match.address || updated[index].address,
@@ -881,8 +957,13 @@ export const AgentDispatchSummary: React.FC = () => {
       try {
         const key = getDeviceScopedKey(agentId, reportDate);
         localStorage.removeItem(key);
-        localStorage.removeItem(`bgcls_day_end_latest_${getDeviceId()}`);
-        localStorage.removeItem('bgcls_day_end_entries');
+
+        // Only clear latest fallback if clearing today's date
+        const today = new Date().toISOString().split('T')[0];
+        if (reportDate === today) {
+          localStorage.removeItem(`bgcls_day_end_latest_${getDeviceId()}`);
+          localStorage.removeItem('bgcls_day_end_entries');
+        }
       } catch (err) {
         console.error('Failed to clear local storage keys:', err);
       }
@@ -963,6 +1044,7 @@ export const AgentDispatchSummary: React.FC = () => {
 
   // Handle consumer scanned from Live Camera (Gemini AI Vision)
   const handleConsumerAutoScanned = (scannedItem: {
+    consumer_id?: string;
     consumer_number: string;
     consumer_name: string;
     address?: string;
@@ -980,6 +1062,7 @@ export const AgentDispatchSummary: React.FC = () => {
           const updated = [...prev];
           updated[existingIdx] = {
             ...updated[existingIdx],
+            consumer_id: scannedItem.consumer_id || updated[existingIdx].consumer_id,
             consumer_name: scannedItem.consumer_name,
             address: scannedItem.address || updated[existingIdx].address,
             mobile: scannedItem.mobile || updated[existingIdx].mobile,
@@ -1003,6 +1086,7 @@ export const AgentDispatchSummary: React.FC = () => {
         const updated = [...prev];
         updated[unverifiedNameIdx] = {
           ...updated[unverifiedNameIdx],
+          consumer_id: scannedItem.consumer_id || updated[unverifiedNameIdx].consumer_id,
           consumer_number: scannedItem.consumer_number,
           consumer_name: scannedItem.consumer_name,
           address: scannedItem.address || updated[unverifiedNameIdx].address,
@@ -1017,6 +1101,7 @@ export const AgentDispatchSummary: React.FC = () => {
       return [
         ...prev,
         {
+          consumer_id: scannedItem.consumer_id,
           consumer_number: scannedItem.consumer_number,
           consumer_name: scannedItem.consumer_name,
           address: scannedItem.address,
@@ -1314,7 +1399,7 @@ export const AgentDispatchSummary: React.FC = () => {
             <input
               type="date"
               value={reportDate}
-              onChange={(e) => setReportDate(e.target.value)}
+              onChange={(e) => handleDateChange(e.target.value)}
               className="w-full bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
             />
           </div>

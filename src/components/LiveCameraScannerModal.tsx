@@ -11,7 +11,8 @@ import {
   Check, 
   Camera,
   Image as ImageIcon,
-  Upload
+  Upload,
+  WifiOff
 } from 'lucide-react';
 import db, { type Consumer } from '../lib/db';
 import { supabase } from '../lib/supabase';
@@ -23,6 +24,7 @@ interface LiveCameraScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConsumerScanned: (consumer: {
+    consumer_id?: string;
     consumer_number: string;
     consumer_name: string;
     address?: string;
@@ -113,6 +115,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [manualInput, setManualInput] = useState<string>('');
   const [isSuccessFlash, setIsSuccessFlash] = useState<boolean>(false);
   const [isShutterFlash, setIsShutterFlash] = useState<boolean>(false);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  // Monitor network online/offline state
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setStatusText('Connection restored — Ready to scan');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setStatusText('Offline: AI Snap requires connection');
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Set of all added consumer numbers to prevent re-adding
   const scannedSetRef = useRef<Set<string>>(new Set(existingNumbers.map((n) => n.toLowerCase())));
@@ -289,6 +310,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     ]);
 
     onConsumerScanned({
+      consumer_id: match.consumer_id,
       consumer_number: resolvedNum,
       consumer_name: finalName,
       address: finalAddress,
@@ -296,7 +318,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       found: match.found,
     });
 
-    if (match.corrected) {
+    if (match.is_new) {
+      toast.success(
+        `🎉 Registered New Customer #${resolvedNum} (${finalName}) into Database!`,
+        { id: 'scan-snap', duration: 4500 }
+      );
+    } else if (match.corrected) {
       toast.success(
         `✨ Verified by Name: #${resolvedNum} (${finalName}) [Corrected from #${match.original_number}]`,
         { id: 'scan-snap', duration: 4500 }
@@ -319,7 +346,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 1000;
+    const maxDim = 800;
     let targetW = video.videoWidth;
     let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
@@ -336,12 +363,17 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     canvas.height = targetH;
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas.toDataURL('image/jpeg', 0.75);
+    return canvas.toDataURL('image/jpeg', 0.70);
   };
 
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
   const performScan = useCallback(async () => {
     if (isProcessing || !videoRef.current) return;
+
+    if (!navigator.onLine) {
+      toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
+      return;
+    }
 
     const imgDataUrl = captureCameraFrame();
     if (!imgDataUrl) return;
@@ -387,6 +419,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!navigator.onLine) {
+      toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
+      return;
+    }
 
     setIsProcessing(true);
     setIsShutterFlash(true);
@@ -554,6 +591,17 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         )}
 
+        {/* Offline Warning Notification Banner */}
+        {!isOnline && !alreadyAddedNotice && (
+          <div className="absolute top-4 left-4 right-4 bg-amber-500 text-slate-950 p-2.5 rounded-2xl shadow-xl flex items-center gap-2.5 border border-amber-300 font-bold text-xs z-30 animate-pulse">
+            <WifiOff className="w-4 h-4 shrink-0 text-slate-950" />
+            <div className="min-w-0">
+              <p className="leading-tight text-[11px] font-black uppercase">Offline Mode</p>
+              <p className="text-[10px] text-slate-900 font-semibold leading-tight">AI Snap requires internet. Enter Cons No in input below.</p>
+            </div>
+          </div>
+        )}
+
         {/* Live Detected Success Notification Badge */}
         {lastScanned && !alreadyAddedNotice && (
           <div className="absolute top-4 left-4 right-4 bg-emerald-600 text-white p-3 rounded-2xl shadow-xl flex items-center gap-2.5 border border-emerald-400/40 z-20">
@@ -582,12 +630,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 e.stopPropagation();
                 performScan();
               }}
-              disabled={isProcessing}
-              className="flex-1 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black py-3.5 px-4 rounded-2xl shadow-2xl shadow-orange-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 border border-amber-300/80 text-xs sm:text-sm uppercase tracking-wide disabled:opacity-50"
+              disabled={isProcessing || !isOnline}
+              className={`flex-1 font-black py-3.5 px-4 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-2 border text-xs sm:text-sm uppercase tracking-wide disabled:opacity-60 ${
+                !isOnline
+                  ? 'bg-slate-800 text-amber-300 border-amber-500/40 shadow-none cursor-not-allowed'
+                  : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 border-amber-300/80 shadow-orange-500/30'
+              }`}
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> Reading...
+                </>
+              ) : !isOnline ? (
+                <>
+                  <WifiOff className="w-4 h-4 text-amber-400" /> Offline (Use Input Below)
                 </>
               ) : (
                 <>

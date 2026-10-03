@@ -225,7 +225,24 @@ export async function syncOfflineData() {
           updated_at: consumer.updated_at || new Date().toISOString(),
         });
 
-        if (!upsertError) {
+        if (upsertError) {
+          const { error: rpcError } = await supabase.rpc('sync_consumer', {
+            p_id: consumer.id,
+            p_consumer_number: consumer.consumer_number,
+            p_consumer_name: consumer.consumer_name,
+            p_mobile: consumer.mobile || '',
+            p_address: consumer.address,
+            p_verification_status: consumer.verification_status || 'Not Collected',
+            p_assigned_agent_id: null,
+            p_area_code: null,
+            p_created_at: consumer.created_at || new Date().toISOString(),
+            p_updated_at: consumer.updated_at || new Date().toISOString(),
+          });
+
+          if (!rpcError) {
+            await db.consumers.update(consumer.id, { synced: true });
+          }
+        } else {
           await db.consumers.update(consumer.id, { synced: true });
         }
       }
@@ -367,7 +384,7 @@ export async function syncOfflineData() {
   }
 }
 
-export const MASTER_DATA_VERSION = 'v2_merged_33k';
+export const MASTER_DATA_VERSION = 'v3_clean_customers';
 
 let activeSyncPromise: Promise<{ syncedCount: number; updated: boolean }> | null = null;
 const progressListeners = new Set<(progressPct: number, statusText: string) => void>();
