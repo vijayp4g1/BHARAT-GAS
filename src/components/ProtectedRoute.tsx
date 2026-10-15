@@ -3,7 +3,10 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 
-export const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode, allowedRole?: 'AGENT' | 'MANAGER' }) => {
+import { isCurrentStaffOrManager } from '../lib/staffAuth';
+import toast from 'react-hot-toast';
+
+export const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode, allowedRole?: 'AGENT' | 'MANAGER' | 'STAFF' }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const location = useLocation();
@@ -51,6 +54,16 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
   // Not logged in at all
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // Staff Route Protection: strictly accessible by Managers and Authorized Staff
+  if (allowedRole === 'STAFF') {
+    const hasStaffAccess = isCurrentStaffOrManager();
+    if (!hasStaffAccess) {
+      toast.error('Restricted: Only authorized staff members can access Cylinder Settlement.');
+      return <Navigate to="/agent/search" replace />;
+    }
+    return <>{children}</>;
   }
 
   // Logged in, but wrong role (e.g. Agent trying to access Manager URL)

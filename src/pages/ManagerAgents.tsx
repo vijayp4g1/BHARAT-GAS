@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Loader2, UserPlus, Users, Trash2, X, User, Phone, Edit2, Search } from 'lucide-react';
+import { ArrowLeft, Loader2, UserPlus, Users, Trash2, X, User, Phone, Edit2, Search, ShieldCheck, Flame } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
+import { hasStaffPermission, grantStaffPermission, revokeStaffPermission } from '../lib/staffAuth';
 
 export const ManagerAgents = () => {
   const [agents, setAgents] = useState<any[]>([]);
@@ -178,6 +179,23 @@ export const ManagerAgents = () => {
     }
   };
 
+  const handleToggleStaffAccess = async (agent: any) => {
+    const isCurrentlyStaff = hasStaffPermission(agent.id, agent.username, agent.is_staff, agent.name);
+    const nextVal = !isCurrentlyStaff;
+
+    // Optimistic UI update so the badge updates immediately
+    setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_staff: nextVal } : a));
+
+    if (isCurrentlyStaff) {
+      await revokeStaffPermission(agent.id, agent.username);
+      toast.success(`Revoked staff access from ${agent.name}`);
+    } else {
+      await grantStaffPermission(agent.id, agent.username);
+      toast.success(`⭐ Granted Staff Access to ${agent.name}! They can now record cylinder settlements.`);
+    }
+  };
+
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pb-20 md:pb-10">
       <header className="glass-header text-white p-4 sm:p-5 sticky top-0 z-20 flex items-center gap-3">
@@ -189,8 +207,15 @@ export const ManagerAgents = () => {
           Team Members
         </h1>
         <Link 
+          to="/staff/settlement"
+          className="flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 sm:px-4 py-2 rounded-xl font-black transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
+        >
+          <Flame size={16} className="fill-slate-950" /> <span className="hidden sm:inline">Cylinder Settlement Book</span>
+          <span className="sm:hidden">Staff Book</span>
+        </Link>
+        <Link 
           to="/manager/find-agent"
-          className="flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-amber-950 px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
+          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
         >
           <Search size={16} /> <span className="hidden sm:inline">Find Beat / Colony</span>
           <span className="sm:hidden">Find Beat</span>
@@ -229,7 +254,7 @@ export const ManagerAgents = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {agents.map(agent => (
               <div key={agent.id} className="glass-card glass-card-hover p-5 rounded-2xl flex flex-col group relative overflow-hidden">
-                <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0 ${
                       agent.role === 'MANAGER' 
@@ -250,7 +275,37 @@ export const ManagerAgents = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-100">
+                {/* Staff Permission Toggle Banner */}
+                {agent.role !== 'MANAGER' && (() => {
+                  const isStaff = hasStaffPermission(agent.id, agent.username, agent.is_staff, agent.name);
+                  return (
+                    <div className="mb-3 pt-2.5 pb-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-600 font-semibold">Staff Book:</span>
+                        {isStaff && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300">
+                            GRANTED
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStaffAccess(agent)}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm active:scale-95 ${
+                          isStaff
+                            ? 'bg-amber-400 hover:bg-amber-500 text-slate-950 font-black border border-amber-500 shadow-amber-400/20 shadow-md'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+                        }`}
+                      >
+                        <ShieldCheck size={14} className={isStaff ? 'text-slate-950 fill-amber-300' : 'text-slate-400'} />
+                        <span>{isStaff ? '⭐ Staff Allowed' : 'Grant Staff'}</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+
+
+                <div className="flex items-center justify-between mt-auto pt-3 border-t border-slate-100">
                   <div className="flex gap-2">
                     <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md ${
                       agent.role === 'MANAGER' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'

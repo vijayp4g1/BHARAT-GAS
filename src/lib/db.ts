@@ -55,11 +55,38 @@ export interface DeliveryNote {
   isDeleted?: boolean;
 }
 
+export interface StaffCylinderSettlement {
+  id: string;
+  settlement_date: string; // YYYY-MM-DD
+  agent_id: string;
+  agent_name: string;
+  cylinder_price: number; // e.g. 994
+  supplied_cylinders: number; // e.g. 40
+  cash_cylinders: number; // e.g. 20
+  online_cylinders: number; // e.g. 10
+  upi_cylinders: number; // e.g. 10
+  due_cylinders: number; // e.g. 0
+  returned_full_cylinders: number; // e.g. 0
+  empty_cylinders: number; // e.g. 40
+  expected_cash: number; // cash_cylinders * cylinder_price
+  actual_cash: number;
+  cash_difference: number; // actual_cash - expected_cash
+  online_amount: number; // online_cylinders * cylinder_price
+  upi_amount: number; // upi_cylinders * cylinder_price
+  total_amount: number; // total value
+  status: 'BALANCED' | 'SHORTAGE' | 'EXCESS';
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+  synced?: boolean;
+}
+
 const db = new Dexie('BGCLS_Database') as Dexie & {
   consumers: EntityTable<Consumer, 'id'>;
   consumer_locations: EntityTable<ConsumerLocation, 'id'>;
   consumer_photos: EntityTable<ConsumerPhoto, 'id'>;
   delivery_notes: EntityTable<DeliveryNote, 'id'>;
+  staff_cylinder_settlements: EntityTable<StaffCylinderSettlement, 'id'>;
 };
 
 // Schema declaration
@@ -76,6 +103,10 @@ db.version(7).stores({
 
 db.version(8).stores({
   consumers: 'id, consumer_number, consumer_name, mobile, cylinder_type, synced, isDeleted, last_interacted_at, *searchWords'
+});
+
+db.version(9).stores({
+  staff_cylinder_settlements: 'id, settlement_date, agent_id, synced'
 });
 
 export default db;

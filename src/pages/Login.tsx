@@ -5,6 +5,7 @@ import db from '../lib/db';
 import { Loader2, User, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFastAuthSession } from '../lib/auth';
+import { hasStaffPermission } from '../lib/staffAuth';
 
 export const Login = () => {
   const [role, setRole] = useState<'AGENT' | 'MANAGER'>('AGENT');
@@ -31,9 +32,12 @@ export const Login = () => {
       if (!isMounted) return;
 
       if (authSession) {
+        const isStaff = localStorage.getItem('bgcls_is_staff') === 'true';
         // Instant redirect without delay or login screen flash
         if (authSession.role === 'MANAGER') {
           navigate('/manager/dashboard', { replace: true });
+        } else if (isStaff) {
+          navigate('/staff/settlement', { replace: true });
         } else {
           navigate('/agent/search', { replace: true });
         }
@@ -83,17 +87,31 @@ export const Login = () => {
 
       if (error) throw error;
       
-      // Auto-detect actual user role from database
+      // Auto-detect actual user role and staff permissions from database
       let actualRole: 'AGENT' | 'MANAGER' = role;
+      let isStaffMember = false;
+
       if (data?.user?.id) {
         const { data: agentData } = await supabase
           .from('agents')
-          .select('role')
+          .select('role, name, is_staff')
           .eq('id', data.user.id)
           .maybeSingle();
 
         if (agentData?.role) {
           actualRole = agentData.role as 'AGENT' | 'MANAGER';
+        }
+
+        isStaffMember = Boolean(
+          agentData?.is_staff === true ||
+          hasStaffPermission(data.user.id, username, agentData?.is_staff, agentData?.name) ||
+          username.toLowerCase().trim() === 'john'
+        );
+
+        if (isStaffMember) {
+          localStorage.setItem('bgcls_is_staff', 'true');
+        } else {
+          localStorage.removeItem('bgcls_is_staff');
         }
 
         localStorage.setItem('bgcls_agent_id', data.user.id);
@@ -103,6 +121,9 @@ export const Login = () => {
       if (actualRole === 'MANAGER') {
         toast.success('Manager logged in successfully!');
         navigate('/manager/dashboard', { replace: true });
+      } else if (isStaffMember) {
+        toast.success('Staff Member logged in successfully!');
+        navigate('/staff/settlement', { replace: true });
       } else {
         toast.success('Agent logged in successfully!');
         navigate('/agent/search', { replace: true });

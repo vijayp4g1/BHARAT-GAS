@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload, Search } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload, Search, Flame, ShieldCheck, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { BulkImportModal } from '../components/BulkImportModal';
@@ -214,6 +214,54 @@ export const ManagerDashboard = () => {
 
       <main className="max-w-6xl w-full mx-auto p-4 sm:p-5 md:p-8 space-y-6 md:space-y-8 mt-2">
         
+        {/* Cylinder Settlement Register (Staff Book) Hero Banner */}
+        <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 rounded-3xl p-5 sm:p-7 text-white shadow-2xl border-2 border-amber-400/40 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-br from-amber-500/20 via-orange-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+          
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black text-xs rounded-full shadow-md tracking-wider uppercase">
+                  <Flame size={14} className="fill-slate-950 text-slate-950" /> Cylinder Settlement Book
+                </span>
+                <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 font-bold text-xs rounded-full">
+                  <ShieldCheck size={14} className="text-emerald-400" /> Staff Granted: John (@john)
+                </span>
+                <span className="px-2.5 py-0.5 bg-white/10 text-slate-300 font-mono text-xs rounded-full">
+                  Default: ₹994 / cylinder
+                </span>
+              </div>
+
+              <div>
+                <h2 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-white flex items-center gap-2">
+                  Daily Delivery Boy Cylinder & Cash Register
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-2xl mt-1 leading-relaxed">
+                  Eliminates physical register notebooks. Records cylinders supplied, cash, BPCL online, UPI, and empty cylinder returns with instant live shortage/excess calculation.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 shrink-0">
+              <Link
+                to="/staff/settlement"
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl shadow-amber-500/25 active:scale-95 transition-all text-sm w-full sm:w-auto"
+              >
+                <Flame size={18} className="fill-slate-950 text-slate-950" />
+                <span>Open Settlement Book</span>
+                <ArrowRight size={16} />
+              </Link>
+              <Link
+                to="/manager/agents"
+                className="flex items-center justify-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold px-4 py-3.5 rounded-2xl border border-white/20 active:scale-95 transition-all text-sm w-full sm:w-auto"
+              >
+                <ShieldCheck size={16} className="text-amber-400" />
+                <span>Staff Access</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+
         {/* Quick Actions Grid */}
         <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
           <Link to="/manager/find-agent" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group bg-gradient-to-br from-amber-500/10 via-white to-white border border-amber-200/80 shadow-sm hover:shadow-md transition-all">
@@ -235,6 +283,18 @@ export const ManagerDashboard = () => {
             <div>
               <h3 className="font-bold text-slate-800 text-sm sm:text-base">Consumers</h3>
               <p className="text-xs text-slate-500 mt-0.5">Manage records</p>
+            </div>
+          </Link>
+          <Link to="/staff/settlement" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group border-2 border-amber-400/40 bg-gradient-to-br from-amber-50 to-orange-50">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-md shadow-amber-500/30">
+              <Flame size={20} className="fill-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-bold text-slate-800 text-sm sm:text-base">Staff Book</h3>
+                <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-1.5 py-0.5 rounded uppercase">Daily</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">Cylinder settlements</p>
             </div>
           </Link>
           <Link to="/manager/agents" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">

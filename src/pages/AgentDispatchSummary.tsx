@@ -266,7 +266,7 @@ export const AgentDispatchSummary: React.FC = () => {
               };
               hasUpdates = true;
               toast.success(
-                `✨ Verified by Name: #${match.consumer_number} (${match.consumer_name})!`,
+                `✨ Verified: #${match.consumer_number} (${match.consumer_name})!`,
                 { id: `reverify-${match.consumer_number}`, duration: 4000 }
               );
             }
@@ -639,8 +639,8 @@ export const AgentDispatchSummary: React.FC = () => {
       setShowSuggestions(false);
       if (match.is_new) {
         toast.success(`🎉 Registered & Added New Customer: #${match.consumer_number} (${match.consumer_name})`);
-      } else if (match.corrected) {
-        toast.success(`✨ Verified by Name: Added #${match.consumer_number} (${match.consumer_name})`);
+      } else if (match.name_verified) {
+        toast.success(`✨ Verified: Added #${match.consumer_number} (${match.consumer_name})`);
       } else {
         toast.success(`Added ${match.consumer_name}`);
       }
@@ -922,8 +922,8 @@ export const AgentDispatchSummary: React.FC = () => {
           return updated;
         });
         toast.success(
-          `✨ Verified! Corrected to #${match.consumer_number} (${match.consumer_name})`,
-          { id: toastId, duration: 4500 }
+          `✨ Verified: #${match.consumer_number} (${match.consumer_name})`,
+          { id: toastId, duration: 4000 }
         );
       } else {
         toast.error(`No database match found for "${item.consumer_name}"`, { id: toastId });
@@ -1074,30 +1074,7 @@ export const AgentDispatchSummary: React.FC = () => {
         return prev;
       }
 
-      // 2. Check if an unverified entry exists with the same name (1st digit was misread/blurred)
-      const unverifiedNameIdx = prev.findIndex(
-        (e) =>
-          !e.found &&
-          e.consumer_name &&
-          scannedItem.consumer_name &&
-          e.consumer_name.trim().toLowerCase() === scannedItem.consumer_name.trim().toLowerCase()
-      );
-      if (unverifiedNameIdx !== -1) {
-        const updated = [...prev];
-        updated[unverifiedNameIdx] = {
-          ...updated[unverifiedNameIdx],
-          consumer_id: scannedItem.consumer_id || updated[unverifiedNameIdx].consumer_id,
-          consumer_number: scannedItem.consumer_number,
-          consumer_name: scannedItem.consumer_name,
-          address: scannedItem.address || updated[unverifiedNameIdx].address,
-          mobile: scannedItem.mobile || updated[unverifiedNameIdx].mobile,
-          found: scannedItem.found,
-          source: scannedItem.found ? 'local' : 'manual',
-        };
-        return updated;
-      }
-
-      // 3. Brand new entry
+      // 2. Brand new entry
       return [
         ...prev,
         {

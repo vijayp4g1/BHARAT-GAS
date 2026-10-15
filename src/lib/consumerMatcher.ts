@@ -32,6 +32,22 @@ export interface MatchResult {
   corrected?: boolean;
   original_number?: string;
   is_new?: boolean;
+  name_verified?: boolean;
+}
+
+/**
+ * Checks if two names have matching significant words
+ */
+export function areNamesSimilar(name1: string, name2: string): boolean {
+  if (!name1 || !name2) return false;
+  const words1 = cleanNameWords(name1);
+  const words2 = cleanNameWords(name2);
+  if (words1.length === 0 || words2.length === 0) return false;
+  return words1.some((w1) =>
+    words2.some(
+      (w2) => w1 === w2 || (w1.length >= 3 && w2.includes(w1)) || (w2.length >= 3 && w1.includes(w2))
+    )
+  );
 }
 
 /**
@@ -230,18 +246,17 @@ export async function registerNewConsumer(
 
 /**
  * Intelligent Consumer Matcher:
- * 1. Tries direct Consumer Number in local Dexie database.
- * 2. Tries direct Consumer Number in remote Supabase (manager_consumer_summary & consumers).
- * 3. If number is blurred/unclear or 1-digit misread, searches by Customer Name in local Dexie without ambiguity.
- * 4. If not found in Dexie, searches by Customer Name in remote Supabase with strict multi-word matching.
- * 5. If customer is NEW (not found in DB), DIRECTLY ADDS THEM to both local & cloud databases!
+ * 1. Checks direct Consumer Number in local Dexie database and verifies name.
+ * 2. Checks direct Consumer Number in remote Supabase (manager_consumer_summary & consumers).
+ * 3. If Consumer Number is provided, it is NEVER replaced or overwritten based on name matching.
+ * 4. If consumer is NEW (not found in DB), registers them under their EXACT consumer number.
+ * 5. Only searches candidates by name if NO consumer number was provided (pure name manual search).
  */
 export async function matchConsumerWithDatabase(
   rawNum: string,
   rawName?: string
 ): Promise<MatchResult> {
   const cleanNum = (rawNum || '').replace(/[^0-9]/g, '');
-  const words = cleanNameWords(rawName || '');
 
   // 1. Direct number match in local Dexie
   if (cleanNum) {
@@ -251,6 +266,7 @@ export async function matchConsumerWithDatabase(
       .first();
 
     if (localByNum) {
+      const isNameVerified = rawName ? areNamesSimilar(rawName, localByNum.consumer_name) : true;
       return {
         consumer_id: localByNum.id,
         consumer_number: localByNum.consumer_number,
@@ -258,6 +274,7 @@ export async function matchConsumerWithDatabase(
         address: localByNum.address || '',
         mobile: localByNum.mobile || '',
         found: true,
+        name_verified: isNameVerified,
       };
     }
   }
@@ -287,6 +304,7 @@ export async function matchConsumerWithDatabase(
         };
         await db.consumers.put(cached).catch(() => {});
 
+        const isNameVerified = rawName ? areNamesSimilar(rawName, remoteByNum.consumer_name) : true;
         return {
           consumer_id: remoteByNum.id,
           consumer_number: remoteByNum.consumer_number,
@@ -294,6 +312,7 @@ export async function matchConsumerWithDatabase(
           address: remoteByNum.address || '',
           mobile: remoteByNum.mobile || '',
           found: true,
+          name_verified: isNameVerified,
         };
       }
     } catch (err) {
@@ -301,95 +320,9 @@ export async function matchConsumerWithDatabase(
     }
   }
 
-  // 3. Number was blurred / misread: Search by Name in Local Dexie
-  if (words.length > 0) {
-    try {
-      const localCandidates = await db.consumers
-        .where('searchWords')
-        .anyOfIgnoreCase(words.map((w) => w.toLowerCase()))
-        .toArray();
-
-      // Deduplicate candidates by consumer_number
-      const candidateMap = new Map<string, Consumer>();
-      for (const cand of localCandidates) {
-        if (!candidateMap.has(cand.consumer_number)) {
-          candidateMap.set(cand.consumer_number, cand);
-        }
-      }
-
-      const deduplicated = Array.from(candidateMap.values());
-      const { best, isConfident } = disambiguateCandidates(deduplicated, cleanNum, words);
-
-      if (best && isConfident) {
-        return {
-          consumer_id: best.id,
-          consumer_number: best.consumer_number,
-          consumer_name: best.consumer_name,
-          address: best.address || '',
-          mobile: best.mobile || '',
-          found: true,
-          corrected: best.consumer_number !== cleanNum,
-          original_number: cleanNum,
-        };
-      }
-    } catch (dexErr) {
-      console.warn('Local name search error:', dexErr);
-    }
-  }
-
-  // 4. Search by Name in Remote Supabase (manager_consumer_summary) with ALL tokens
-  if (words.length > 0 && navigator.onLine) {
-    try {
-      let query = supabase
-        .from('manager_consumer_summary')
-        .select('id, consumer_number, consumer_name, address, mobile');
-
-      // Strictly require ALL words in remote search to prevent loose partial collisions
-      for (const w of words) {
-        query = query.ilike('consumer_name', `%${w}%`);
-      }
-
-      const { data: remoteData } = await query.limit(25);
-
-      if (remoteData && remoteData.length > 0) {
-        const remoteConsumers: Consumer[] = remoteData.map((r: any) => ({
-          id: r.id,
-          consumer_number: r.consumer_number,
-          consumer_name: r.consumer_name,
-          address: r.address || '',
-          mobile: r.mobile || '',
-          verification_status: 'Verified',
-          created_at: new Date().toISOString(),
-          searchWords: [
-            ...r.consumer_name.toLowerCase().split(/\s+/),
-            r.consumer_number.toLowerCase(),
-          ],
-        }));
-
-        const { best, isConfident } = disambiguateCandidates(remoteConsumers, cleanNum, words);
-
-        if (best && isConfident) {
-          // Cache into local Dexie for future offline lookups
-          await db.consumers.put(best).catch(() => {});
-
-          return {
-            consumer_id: best.id,
-            consumer_number: best.consumer_number,
-            consumer_name: best.consumer_name,
-            address: best.address || '',
-            mobile: best.mobile || '',
-            found: true,
-            corrected: best.consumer_number !== cleanNum,
-            original_number: cleanNum,
-          };
-        }
-      }
-    } catch (supErr) {
-      console.warn('Remote name search error:', supErr);
-    }
-  }
-
-  // 5. NEW CUSTOMER: If valid consumer number and not in database, directly add to main database!
+  // 3. IF CONSUMER NUMBER WAS PROVIDED BUT NOT IN DATABASE:
+  // Directly register / add as new customer with their EXACT consumer number!
+  // NEVER auto-correct or change the consumer number based on customer name!
   if (cleanNum && cleanNum.length >= 3 && !DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
     try {
       const newConsumer = await registerNewConsumer(cleanNum, rawName);
@@ -407,7 +340,44 @@ export async function matchConsumerWithDatabase(
     }
   }
 
-  // 6. Fallback if number is invalid (< 3 digits or blacklisted)
+  // 4. ONLY IF NO CONSUMER NUMBER WAS PROVIDED (pure name manual search):
+  if (!cleanNum && rawName) {
+    const words = cleanNameWords(rawName);
+    if (words.length > 0) {
+      try {
+        const localCandidates = await db.consumers
+          .where('searchWords')
+          .anyOfIgnoreCase(words.map((w) => w.toLowerCase()))
+          .toArray();
+
+        const candidateMap = new Map<string, Consumer>();
+        for (const cand of localCandidates) {
+          if (!candidateMap.has(cand.consumer_number)) {
+            candidateMap.set(cand.consumer_number, cand);
+          }
+        }
+
+        const deduplicated = Array.from(candidateMap.values());
+        const { best, isConfident } = disambiguateCandidates(deduplicated, '', words);
+
+        if (best && isConfident) {
+          return {
+            consumer_id: best.id,
+            consumer_number: best.consumer_number,
+            consumer_name: best.consumer_name,
+            address: best.address || '',
+            mobile: best.mobile || '',
+            found: true,
+            name_verified: true,
+          };
+        }
+      } catch (dexErr) {
+        console.warn('Local pure-name search error:', dexErr);
+      }
+    }
+  }
+
+  // 5. Fallback if number is invalid (< 3 digits or blacklisted)
   return {
     consumer_number: cleanNum || 'UNKNOWN',
     consumer_name: rawName?.trim().toUpperCase() || 'Unverified Consumer',

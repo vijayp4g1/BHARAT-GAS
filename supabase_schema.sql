@@ -287,3 +287,37 @@ CREATE TABLE day_end_reports (
 ALTER TABLE day_end_reports ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow authenticated read/write on day_end_reports" ON day_end_reports FOR ALL USING (auth.role() = 'authenticated');
 
+-- 9. Staff Cylinder Settlements (Digital Book for Daily Delivery Boy Cash & Cylinder Settlement)
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_staff BOOLEAN DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS staff_cylinder_settlements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    settlement_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    agent_id UUID REFERENCES agents(id),
+    agent_name TEXT NOT NULL,
+    cylinder_price NUMERIC NOT NULL DEFAULT 994,
+    supplied_cylinders INTEGER NOT NULL DEFAULT 0,
+    cash_cylinders INTEGER NOT NULL DEFAULT 0,
+    online_cylinders INTEGER NOT NULL DEFAULT 0,
+    upi_cylinders INTEGER NOT NULL DEFAULT 0,
+    due_cylinders INTEGER NOT NULL DEFAULT 0,
+    returned_full_cylinders INTEGER NOT NULL DEFAULT 0,
+    empty_cylinders INTEGER NOT NULL DEFAULT 0,
+    expected_cash NUMERIC NOT NULL DEFAULT 0,
+    actual_cash NUMERIC NOT NULL DEFAULT 0,
+    cash_difference NUMERIC NOT NULL DEFAULT 0,
+    online_amount NUMERIC NOT NULL DEFAULT 0,
+    upi_amount NUMERIC NOT NULL DEFAULT 0,
+    total_amount NUMERIC NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'BALANCED',
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(settlement_date, agent_id)
+);
+
+ALTER TABLE staff_cylinder_settlements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow authenticated read/write on staff_cylinder_settlements" 
+ON staff_cylinder_settlements FOR ALL USING (auth.role() = 'authenticated');
+
+

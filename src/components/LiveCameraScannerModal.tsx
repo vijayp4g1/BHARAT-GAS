@@ -323,10 +323,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         `🎉 Registered New Customer #${resolvedNum} (${finalName}) into Database!`,
         { id: 'scan-snap', duration: 4500 }
       );
-    } else if (match.corrected) {
+    } else if (match.name_verified) {
       toast.success(
-        `✨ Verified by Name: #${resolvedNum} (${finalName}) [Corrected from #${match.original_number}]`,
-        { id: 'scan-snap', duration: 4500 }
+        `✨ Verified: #${resolvedNum} (${finalName})`,
+        { id: 'scan-snap' }
       );
     } else {
       toast.success(`✨ Added #${resolvedNum} (${finalName})!`, { id: 'scan-snap' });
