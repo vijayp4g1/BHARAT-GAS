@@ -1051,6 +1051,11 @@ export const AgentDispatchSummary: React.FC = () => {
     mobile?: string;
     found: boolean;
   }) => {
+    if (!scannedItem.found) {
+      toast.error(`Cannot add #${scannedItem.consumer_number}: Not verified in database.`);
+      return;
+    }
+
     setEntries((prev) => {
       // 1. Check if number is already in the list
       const existingIdx = prev.findIndex(

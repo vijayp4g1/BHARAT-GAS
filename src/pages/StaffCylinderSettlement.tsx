@@ -35,12 +35,18 @@ import {
   Sparkles,
   Phone,
   SlidersHorizontal,
-  Layers
+  Layers,
+  Users,
+  UserPlus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { performLogout } from '../lib/auth';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
+import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
+import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
+import { AddDeliveryBoyModal } from '../components/AddDeliveryBoyModal';
+import { ManageDeliveryBoysModal } from '../components/ManageDeliveryBoysModal';
 
 export const StaffCylinderSettlement: React.FC = () => {
   const navigate = useNavigate();
@@ -61,9 +67,11 @@ export const StaffCylinderSettlement: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Available Agents list (delivery boys)
-  const [agents, setAgents] = useState<any[]>([]);
-  const [isLoadingAgents, setIsLoadingAgents] = useState<boolean>(true);
+  // Available Agents list for Cylinder Book page (defaults immediately to official 17 delivery boys)
+  const [agents, setAgents] = useState<any[]>(cylinderBookPreset);
+  const [isLoadingAgents, setIsLoadingAgents] = useState<boolean>(false);
+  const [isAddDeliveryBoyModalOpen, setIsAddDeliveryBoyModalOpen] = useState<boolean>(false);
+  const [isManageDeliveryBoysModalOpen, setIsManageDeliveryBoysModalOpen] = useState<boolean>(false);
 
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
@@ -120,29 +128,21 @@ export const StaffCylinderSettlement: React.FC = () => {
     }
   }, [navigate]);
 
-  // Fetch Delivery Boys (role = AGENT) with phone numbers
+  // Fetch Cylinder Book Delivery Boys (official merged roster)
+  const refreshDeliveryBoys = async () => {
+    setIsLoadingAgents(true);
+    try {
+      const cylinderBoys = await fetchCylinderBookDeliveryBoys();
+      setAgents(cylinderBoys);
+    } catch (err) {
+      console.warn('Failed to load cylinder book delivery boys:', err);
+    } finally {
+      setIsLoadingAgents(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchDeliveryBoys = async () => {
-      setIsLoadingAgents(true);
-      try {
-        const { data, error } = await supabase
-          .from('agents')
-          .select('id, name, username, phone, status, role')
-          .neq('status', 'DELETED')
-          .order('name');
-
-        if (!error && data) {
-          const deliveryAgents = data.filter((a) => a.role === 'AGENT');
-          setAgents(deliveryAgents.length > 0 ? deliveryAgents : data);
-        }
-      } catch (err) {
-        console.warn('Failed to load agents from cloud, trying local cache:', err);
-      } finally {
-        setIsLoadingAgents(false);
-      }
-    };
-
-    fetchDeliveryBoys();
+    refreshDeliveryBoys();
   }, []);
 
   // Fetch settlements for the selected date (Dexie + Supabase sync)
@@ -781,6 +781,30 @@ export const StaffCylinderSettlement: React.FC = () => {
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
+                    setIsManageDeliveryBoysModalOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-slate-200 hover:text-white hover:bg-slate-800 rounded-xl transition-colors text-left"
+                >
+                  <Users size={15} className="text-amber-400" />
+                  <span>Manage Delivery Boys</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsAddDeliveryBoyModalOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-slate-200 hover:text-white hover:bg-slate-800 rounded-xl transition-colors text-left"
+                >
+                  <UserPlus size={15} className="text-emerald-400" />
+                  <span>+ Add New Delivery Boy</span>
+                </button>
+
+                <div className="my-1 border-t border-slate-800"></div>
+
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
                     handleLogout();
                   }}
                   className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors text-left"
@@ -1077,13 +1101,23 @@ export const StaffCylinderSettlement: React.FC = () => {
                 </button>
               </div>
 
-              {/* Desktop Add Settlement Button (Hidden on Mobile, handled by Thumb Bar) */}
+              {/* Desktop Management & Add Settlement Buttons */}
+              <button
+                type="button"
+                onClick={() => setIsManageDeliveryBoysModalOpen(true)}
+                className="hidden md:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all"
+                title="Manage active & inactive delivery boys"
+              >
+                <Users size={15} className="text-amber-400" />
+                <span>Delivery Boys</span>
+              </button>
+
               <button
                 onClick={() => handleOpenNewForm()}
                 className="hidden md:flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:scale-95 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-amber-500/20"
               >
                 <Plus size={16} />
-                <span>Add Delivery Boy</span>
+                <span>+ Record Settlement</span>
               </button>
             </div>
           </div>
@@ -1574,13 +1608,32 @@ export const StaffCylinderSettlement: React.FC = () => {
               
               {/* Step 1: Select Delivery Boy */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-black text-slate-300 uppercase tracking-wider">
-                  1. Select Delivery Boy <span className="text-amber-400">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black text-slate-300 uppercase tracking-wider">
+                    1. Select Delivery Boy <span className="text-amber-400">*</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddDeliveryBoyModalOpen(true)}
+                      className="text-amber-400 hover:text-amber-300 font-black text-xs flex items-center gap-1 transition-colors px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30"
+                    >
+                      <UserPlus size={13} /> + New Boy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsManageDeliveryBoysModalOpen(true)}
+                      className="text-slate-400 hover:text-slate-200 font-bold text-[11px] flex items-center gap-1 transition-colors"
+                      title="Hide or activate delivery boys"
+                    >
+                      <Users size={12} /> Manage / Hide
+                    </button>
+                  </div>
+                </div>
                 
                 {/* Auto-suggest Chips of Active Agents (Quick 1-Tap Select) */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                  {agents.slice(0, 6).map((agent) => (
+                  {agents.map((agent) => (
                     <button
                       key={agent.id}
                       type="button"
@@ -1594,9 +1647,16 @@ export const StaffCylinderSettlement: React.FC = () => {
                       {agent.name.split(' ')[0]}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsAddDeliveryBoyModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black shrink-0 bg-amber-500/10 border border-dashed border-amber-500/40 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 transition-all"
+                  >
+                    <Plus size={13} /> Add Boy
+                  </button>
                 </div>
 
-                {/* Dropdown for All Agents */}
+                {/* Dropdown for All Active Agents */}
                 <select
                   value={selectedAgentId}
                   onChange={(e) => setSelectedAgentId(e.target.value)}
@@ -1987,6 +2047,28 @@ export const StaffCylinderSettlement: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 8. ADD NEW DELIVERY BOY MODAL */}
+      <AddDeliveryBoyModal
+        isOpen={isAddDeliveryBoyModalOpen}
+        onClose={() => setIsAddDeliveryBoyModalOpen(false)}
+        onCreated={(newBoy) => {
+          setAgents((prev) => {
+            const exists = prev.some((a) => a.id === newBoy.id);
+            if (exists) return prev;
+            return [newBoy, ...prev];
+          });
+          setSelectedAgentId(newBoy.id);
+        }}
+      />
+
+      {/* 9. MANAGE DELIVERY BOYS MODAL */}
+      <ManageDeliveryBoysModal
+        isOpen={isManageDeliveryBoysModalOpen}
+        onClose={() => setIsManageDeliveryBoysModalOpen(false)}
+        onOpenAddModal={() => setIsAddDeliveryBoyModalOpen(true)}
+        onListUpdated={() => refreshDeliveryBoys()}
+      />
 
     </div>
   );

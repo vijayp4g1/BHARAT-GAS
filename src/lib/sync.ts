@@ -384,7 +384,7 @@ export async function syncOfflineData() {
   }
 }
 
-export const MASTER_DATA_VERSION = 'v3_clean_customers';
+export const MASTER_DATA_VERSION = 'v5_oct15_consumers';
 
 let activeSyncPromise: Promise<{ syncedCount: number; updated: boolean }> | null = null;
 const progressListeners = new Set<(progressPct: number, statusText: string) => void>();

@@ -1,0 +1,138 @@
+[
+  {
+    "id": "fa7cfcf4-bbbc-4473-9728-106dc27b7b76",
+    "name": "ANAND",
+    "username": "anand",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "91b8087b-6e84-43cd-b5cd-055f067495b7",
+    "name": "ESHWAR",
+    "username": "eshwar",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "df6edd53-416a-4b0e-993b-714bff1ca73f",
+    "name": "HANUMANTH-V",
+    "username": "hanumanth_v",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "c329ece7-9c14-473f-8932-269060303ab2",
+    "name": "KADALI NAGARAJU",
+    "username": "nagaraju01",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "bbc70d66-3deb-45ce-9d6c-e71d06b819f5",
+    "name": "MANIKANTA",
+    "username": "mani",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "10700029-c5b9-49b0-b650-875b4ecf91a3",
+    "name": "NAGARAJU",
+    "username": "nagaraju",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "1ad65a45-b082-40cf-94a7-4fc5d96b073c",
+    "name": "NAVEEN",
+    "username": "naveen",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "22ddc21d-cec8-4459-a248-3d49ba41f86a",
+    "name": "NIRANJAN",
+    "username": "niranjan",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "893216f0-42ce-44e4-b9ed-89ebfa310ff4",
+    "name": "RAJU",
+    "username": "raju",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "5be41264-2dc9-4a43-a3e6-6e5e5278b283",
+    "name": "RAMESH",
+    "username": "ramesh",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "0fb0da91-a579-479a-9ec5-7f3601e209cf",
+    "name": "S.SRINU",
+    "username": "srinu",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "6ad297bc-f90a-4af5-861d-0dce0da93744",
+    "name": "SHIVA KISHORE",
+    "username": "shiva_kishore",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "636fcd3b-a7ba-4d2d-aedf-e9cf842f6231",
+    "name": "SRIPAL",
+    "username": "sripal",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "5416cdd3-00ce-4e79-aa67-453129b7b4fc",
+    "name": "SURENDER J GUTTA",
+    "username": "surender",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "343da764-608f-45e1-9efa-18af7510762a",
+    "name": "TIRUPATHI",
+    "username": "thirupathi",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "3e335bed-4ee6-4f0f-9a43-ef9ef7bccd42",
+    "name": "VIJAY ADDURI",
+    "username": "vijay_adduri",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  },
+  {
+    "id": "df4b059a-b05c-4e2e-be3c-8ba60b7f37d6",
+    "name": "WAJEED",
+    "username": "wajeed",
+    "phone": null,
+    "status": "ACTIVE",
+    "role": "AGENT"
+  }
+]

@@ -265,11 +265,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return false;
     }
 
-    // Match with local Dexie or remote Supabase, checking number and name!
+    // Match with local Dexie or remote Supabase, checking number, name, and 8/6/0 variants!
     const match = await matchConsumerWithDatabase(cleanNum, extractedName);
+
+    // STRICT DATABASE VERIFICATION GUARD:
+    // If consumer is not verified in the database, DO NOT add them!
+    if (!match.found) {
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      setAlreadyAddedNotice(`⚠️ #${cleanNum} not found in database! Please check receipt.`);
+      toast.error(`⚠️ #${cleanNum} not found in agency database. Check paper memo.`, {
+        id: 'scan-snap',
+        duration: 4000,
+      });
+      setStatusText(`Consumer #${cleanNum} not found in database. Check bill or type manually.`);
+      return false;
+    }
+
     const resolvedNum = match.consumer_number;
     const finalName = match.consumer_name;
-    const finalAddress = match.address || 'Scanned via Gemini AI';
+    const finalAddress = match.address || 'Verified in Agency Database';
     const finalMobile = match.mobile || '';
 
     // Anti-spam cooldown (5 seconds for the same number)
@@ -292,7 +306,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return true;
     }
 
-    // INSTANT ADDITION TO UI (0ms delay - no blocking on network!)
+    // INSTANT ADDITION TO UI FOR VERIFIED CONSUMER
     scannedSetRef.current.add(resolvedNum.toLowerCase());
     scannedSetRef.current.add(cleanNum.toLowerCase());
     setAlreadyAddedNotice(null);
@@ -315,12 +329,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       consumer_name: finalName,
       address: finalAddress,
       mobile: finalMobile,
-      found: match.found,
+      found: true,
     });
 
-    if (match.is_new) {
+    if (match.corrected) {
       toast.success(
-        `🎉 Registered New Customer #${resolvedNum} (${finalName}) into Database!`,
+        `✨ Verified: #${resolvedNum} (${finalName}) [Auto-corrected dot-matrix 8/6 from #${match.original_number}]`,
         { id: 'scan-snap', duration: 4500 }
       );
     } else if (match.name_verified) {
@@ -346,7 +360,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 800;
+    const maxDim = 1600;
     let targetW = video.videoWidth;
     let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
@@ -363,7 +377,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     canvas.height = targetH;
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas.toDataURL('image/jpeg', 0.70);
+    return canvas.toDataURL('image/jpeg', 0.88);
   };
 
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)

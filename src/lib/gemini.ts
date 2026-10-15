@@ -12,7 +12,7 @@ export interface GeminiOcrResult {
  */
 async function resizeAndCompressImage(
   imageSource: File | Blob | string,
-  maxDimension: number = 800
+  maxDimension: number = 1600
 ): Promise<{ data: string; mimeType: string }> {
   // If it is already a base64 data URL, extract directly to preserve full speed
   if (typeof imageSource === 'string' && imageSource.startsWith('data:image/')) {
@@ -53,8 +53,8 @@ async function resizeAndCompressImage(
 
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Convert to lightweight high-clarity JPEG for lightning fast upload (~35KB)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.70);
+      // Convert to high-clarity JPEG for pin-sharp dot-matrix digit clarity
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       const base64Data = dataUrl.split(',')[1];
       resolve({
         data: base64Data,
@@ -109,11 +109,25 @@ export async function scanBillWithGemini(
       },
     };
 
-    const promptText = `Extract from this Bharatgas bill:
-1. "consumerNumber": digits after "Cons No:" or "Consumer No:".
-2. "consumerName": customer name printed below consumer number.
-Strictly omit distributor code (169624).
-JSON: {"consumerNumber": "<digits>", "consumerName": "<name>"}`;
+    const promptText = `You are a high-accuracy OCR assistant for Indian Bharatgas (BPCL) LPG delivery receipts and cash memos.
+Carefully examine the receipt image:
+1. "consumerNumber": The consumer number printed next to or under "Cons No:", "Consumer No:", or "Cons. No."
+   CRITICAL DOT-MATRIX PRINT INSTRUCTIONS:
+   - Dot-matrix printers often print digits with faint or separated pin dots.
+   - Pay extreme attention to distinguishing '8' vs '6' vs '0':
+     * An '8' has BOTH upper and lower closed circular loops with a middle cross-bar.
+     * A '6' has an open upper-right stem and only ONE bottom loop.
+     * A '0' is a single hollow oval with NO middle cross-bar.
+     * If the digit has a middle horizontal cross-bar or two stacked loops, it is strictly an '8' (eight), NOT a '6' or '0'.
+   - Read the exact printed digits without hallucinating or skipping digits.
+2. "consumerName": The customer's full name printed directly under "Cons No:" or under "Details of Receiver:".
+3. Strictly ignore:
+   - Distributor code (e.g. 169624)
+   - Telephone/mobile numbers (e.g. 1800..., 7718..., or 10 digits starting with 6-9)
+   - Date, time, cash memo/voucher numbers, or amounts.
+
+Return ONLY a valid JSON object matching this schema:
+{"consumerNumber": "<exact_digits>", "consumerName": "<exact_customer_name>"}`;
 
     const requestBody = {
       contents: [

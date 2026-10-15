@@ -7,7 +7,7 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VI
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY || 'PLACEHOLDER');
 
-const CSV_PATH = 'customers data/ListOfConsumers (2).csv';
+const CSV_PATH = 'customers data/ListOfConsumers (3).csv';
 
 async function runMerge() {
   console.log('====================================================');
