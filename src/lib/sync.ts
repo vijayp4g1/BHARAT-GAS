@@ -377,6 +377,50 @@ export async function syncOfflineData() {
       );
     }
 
+    // 4. Parallel Batch Sync Staff Cylinder Settlements (Godown Ledger)
+    const unsyncedSettlements = await db.staff_cylinder_settlements
+      .filter((s) => s.synced === false)
+      .toArray();
+
+    if (unsyncedSettlements.length > 0) {
+      await Promise.all(
+        unsyncedSettlements.map(async (s) => {
+          const { error } = await supabase
+            .from('staff_cylinder_settlements')
+            .upsert(
+              {
+                id: s.id,
+                settlement_date: s.settlement_date,
+                agent_id: s.agent_id,
+                agent_name: s.agent_name,
+                cylinder_price: s.cylinder_price,
+                supplied_cylinders: s.supplied_cylinders,
+                cash_cylinders: s.cash_cylinders,
+                online_cylinders: s.online_cylinders,
+                upi_cylinders: s.upi_cylinders,
+                due_cylinders: s.due_cylinders,
+                returned_full_cylinders: s.returned_full_cylinders,
+                empty_cylinders: s.empty_cylinders,
+                expected_cash: s.expected_cash,
+                actual_cash: s.actual_cash,
+                cash_difference: s.cash_difference,
+                online_amount: s.online_amount,
+                upi_amount: s.upi_amount,
+                total_amount: s.total_amount,
+                status: s.status,
+                notes: s.notes,
+                updated_at: s.updated_at || new Date().toISOString(),
+              },
+              { onConflict: 'settlement_date, agent_id' }
+            );
+
+          if (!error) {
+            await db.staff_cylinder_settlements.update(s.id, { synced: true });
+          }
+        })
+      );
+    }
+
     // After uploading local changes, pull latest cloud updates
     await pullLatestCloudData();
   } catch (error) {
@@ -404,7 +448,7 @@ export async function autoSyncMasterConsumers(options?: {
 
   const broadcastProgress = (pct: number, text: string) => {
     progressListeners.forEach((listener) => {
-      try { listener(pct, text); } catch (_) {}
+      try { listener(pct, text); } catch {}
     });
     window.dispatchEvent(
       new CustomEvent('bgcls-sync-progress', { detail: { progressPct: pct, statusText: text } })

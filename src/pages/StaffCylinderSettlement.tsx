@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import db, { type StaffCylinderSettlement as SettlementRecord } from '../lib/db';
@@ -6,7 +6,6 @@ import {
   ArrowLeft, 
   Plus, 
   Calendar, 
-  DollarSign, 
   Flame, 
   Truck, 
   QrCode, 
@@ -28,14 +27,11 @@ import {
   Search,
   MoreVertical,
   MessageCircle,
-  Check,
   ChevronDown,
   ChevronUp,
   AlertCircle,
   Sparkles,
-  Phone,
   SlidersHorizontal,
-  Layers,
   Users,
   UserPlus
 } from 'lucide-react';
@@ -69,9 +65,11 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Available Agents list for Cylinder Book page (defaults immediately to official 17 delivery boys)
   const [agents, setAgents] = useState<any[]>(cylinderBookPreset);
-  const [isLoadingAgents, setIsLoadingAgents] = useState<boolean>(false);
   const [isAddDeliveryBoyModalOpen, setIsAddDeliveryBoyModalOpen] = useState<boolean>(false);
   const [isManageDeliveryBoysModalOpen, setIsManageDeliveryBoysModalOpen] = useState<boolean>(false);
+
+  // Realtime channel reference for instant multi-staff broadcast
+  const syncChannelRef = useRef<any>(null);
 
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
@@ -88,7 +86,6 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Form Fields for Fast Single-Page Modal
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
-  const [agentSearchQuery, setAgentSearchQuery] = useState<string>('');
   const [suppliedCylinders, setSuppliedCylinders] = useState<number | ''>(40);
   const [cashCylinders, setCashCylinders] = useState<number | ''>(20);
   const [onlineCylinders, setOnlineCylinders] = useState<number | ''>(10);
@@ -129,24 +126,21 @@ export const StaffCylinderSettlement: React.FC = () => {
   }, [navigate]);
 
   // Fetch Cylinder Book Delivery Boys (official merged roster)
-  const refreshDeliveryBoys = async () => {
-    setIsLoadingAgents(true);
+  const refreshDeliveryBoys = useCallback(async () => {
     try {
       const cylinderBoys = await fetchCylinderBookDeliveryBoys();
       setAgents(cylinderBoys);
     } catch (err) {
       console.warn('Failed to load cylinder book delivery boys:', err);
-    } finally {
-      setIsLoadingAgents(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshDeliveryBoys();
-  }, []);
+  }, [refreshDeliveryBoys]);
 
   // Fetch settlements for the selected date (Dexie + Supabase sync)
-  const fetchSettlements = async (date: string) => {
+  const fetchSettlements = useCallback(async (date: string) => {
     setIsLoadingSettlements(true);
     try {
       // 1. Load from local Dexie database
@@ -165,33 +159,52 @@ export const StaffCylinderSettlement: React.FC = () => {
             .select('*')
             .eq('settlement_date', date);
 
-          if (!error && remoteData && remoteData.length > 0) {
-            await db.staff_cylinder_settlements.bulkPut(
-              remoteData.map((r: any) => ({
-                id: r.id,
-                settlement_date: r.settlement_date,
-                agent_id: r.agent_id,
-                agent_name: r.agent_name,
-                cylinder_price: Number(r.cylinder_price || cylinderRate),
-                supplied_cylinders: Number(r.supplied_cylinders || 0),
-                cash_cylinders: Number(r.cash_cylinders || 0),
-                online_cylinders: Number(r.online_cylinders || 0),
-                upi_cylinders: Number(r.upi_cylinders || 0),
-                due_cylinders: Number(r.due_cylinders || 0),
-                returned_full_cylinders: Number(r.returned_full_cylinders || 0),
-                empty_cylinders: Number(r.empty_cylinders || 0),
-                expected_cash: Number(r.expected_cash || 0),
-                actual_cash: Number(r.actual_cash || 0),
-                cash_difference: Number(r.cash_difference || 0),
-                online_amount: Number(r.online_amount || 0),
-                upi_amount: Number(r.upi_amount || 0),
-                total_amount: Number(r.total_amount || 0),
-                status: r.status,
-                notes: r.notes || '',
-                created_at: r.created_at,
-                synced: true,
-              }))
-            );
+          if (!error && remoteData) {
+            // Auto-sync agency cylinder rate from latest database record
+            if (remoteData.length > 0 && remoteData[0].cylinder_price) {
+              const serverRate = Number(remoteData[0].cylinder_price);
+              if (serverRate > 0 && serverRate !== cylinderRate) {
+                setCylinderRate(serverRate);
+                localStorage.setItem('bgcls_cylinder_rate', String(serverRate));
+              }
+            }
+
+            // Remove any local synced records that were deleted on another device
+            const remoteIds = new Set(remoteData.map((r: any) => r.id));
+            for (const loc of localRecords) {
+              if (loc.synced && !remoteIds.has(loc.id)) {
+                await db.staff_cylinder_settlements.delete(loc.id);
+              }
+            }
+
+            if (remoteData.length > 0) {
+              await db.staff_cylinder_settlements.bulkPut(
+                remoteData.map((r: any) => ({
+                  id: r.id,
+                  settlement_date: r.settlement_date,
+                  agent_id: r.agent_id,
+                  agent_name: r.agent_name,
+                  cylinder_price: Number(r.cylinder_price || cylinderRate),
+                  supplied_cylinders: Number(r.supplied_cylinders || 0),
+                  cash_cylinders: Number(r.cash_cylinders || 0),
+                  online_cylinders: Number(r.online_cylinders || 0),
+                  upi_cylinders: Number(r.upi_cylinders || 0),
+                  due_cylinders: Number(r.due_cylinders || 0),
+                  returned_full_cylinders: Number(r.returned_full_cylinders || 0),
+                  empty_cylinders: Number(r.empty_cylinders || 0),
+                  expected_cash: Number(r.expected_cash || 0),
+                  actual_cash: Number(r.actual_cash || 0),
+                  cash_difference: Number(r.cash_difference || 0),
+                  online_amount: Number(r.online_amount || 0),
+                  upi_amount: Number(r.upi_amount || 0),
+                  total_amount: Number(r.total_amount || 0),
+                  status: r.status,
+                  notes: r.notes || '',
+                  created_at: r.created_at,
+                  synced: true,
+                }))
+              );
+            }
 
             const merged = await db.staff_cylinder_settlements
               .where('settlement_date')
@@ -199,18 +212,71 @@ export const StaffCylinderSettlement: React.FC = () => {
               .toArray();
             setSettlements(merged);
           }
-        } catch (_) {}
+        } catch {}
       }
     } catch (err) {
       console.error('Error fetching settlements:', err);
     } finally {
       setIsLoadingSettlements(false);
     }
-  };
+  }, [cylinderRate]);
 
   useEffect(() => {
     fetchSettlements(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, fetchSettlements]);
+
+  // Realtime Broadcast & Instant Multi-Staff Sync Listener
+  useEffect(() => {
+    const channel = supabase.channel('staff_book_sync', {
+      config: { broadcast: { self: false } },
+    });
+
+    channel
+      .on('broadcast', { event: 'settlement_changed' }, async ({ payload }) => {
+        if (!payload) return;
+        if (payload.settlement_date === selectedDate) {
+          if (payload.action === 'SAVE' && payload.record) {
+            await db.staff_cylinder_settlements.put(payload.record);
+          } else if (payload.action === 'DELETE' && payload.id) {
+            await db.staff_cylinder_settlements.delete(payload.id);
+          }
+          await fetchSettlements(selectedDate);
+          const senderName = payload.sender || 'Staff member';
+          const boyName = payload.record?.agent_name ? ` for ${payload.record.agent_name}` : '';
+          toast(`⚡ ${senderName} updated settlement${boyName}!`, {
+            icon: '⛽',
+            position: 'top-right',
+            duration: 3500,
+          });
+        }
+      })
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
+        () => {
+          fetchSettlements(selectedDate);
+        }
+      )
+      .subscribe();
+
+    syncChannelRef.current = channel;
+
+    // Auto re-sync when switching back to tab / unlocking phone
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSettlements(selectedDate);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedDate, fetchSettlements]);
 
   // Save cylinder rate
   const handleSaveRate = (newRate: number) => {
@@ -349,21 +415,42 @@ export const StaffCylinderSettlement: React.FC = () => {
     });
   }, [settlements, searchQuery, statusFilter]);
 
+  // Select an agent and automatically check if they already have an existing settlement for this date
+  const handleSelectAgent = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    const existing = settlements.find((s) => s.agent_id === agentId);
+
+    if (existing) {
+      setEditingId(existing.id);
+      setSuppliedCylinders(existing.supplied_cylinders);
+      setCashCylinders(existing.cash_cylinders);
+      setOnlineCylinders(existing.online_cylinders);
+      setUpiCylinders(existing.upi_cylinders);
+      setDueCylinders(existing.due_cylinders);
+      setReturnedFullCylinders(existing.returned_full_cylinders);
+      setEmptyCylinders(existing.empty_cylinders);
+      setActualCashInput(existing.actual_cash);
+      setNotes(existing.notes || '');
+      setShowAdvancedFields(Boolean(existing.due_cylinders || existing.returned_full_cylinders));
+    } else {
+      setEditingId(null);
+      setSuppliedCylinders(40);
+      setCashCylinders(20);
+      setOnlineCylinders(10);
+      setUpiCylinders(10);
+      setDueCylinders(0);
+      setReturnedFullCylinders(0);
+      setEmptyCylinders(40);
+      setActualCashInput(20 * cylinderRate);
+      setNotes('');
+      setShowAdvancedFields(false);
+    }
+  };
+
   // Open Speed Entry Modal
   const handleOpenNewForm = (preselectedAgentId?: string) => {
-    setEditingId(null);
-    setSelectedAgentId(preselectedAgentId || agents[0]?.id || '');
-    setAgentSearchQuery('');
-    setSuppliedCylinders(40);
-    setCashCylinders(20);
-    setOnlineCylinders(10);
-    setUpiCylinders(10);
-    setDueCylinders(0);
-    setReturnedFullCylinders(0);
-    setEmptyCylinders(40);
-    setActualCashInput(20 * cylinderRate);
-    setNotes('');
-    setShowAdvancedFields(false);
+    const targetAgentId = preselectedAgentId || agents[0]?.id || '';
+    handleSelectAgent(targetAgentId);
     setIsFormOpen(true);
   };
 
@@ -371,7 +458,6 @@ export const StaffCylinderSettlement: React.FC = () => {
   const handleEdit = (item: SettlementRecord) => {
     setEditingId(item.id);
     setSelectedAgentId(item.agent_id);
-    setAgentSearchQuery('');
     setSuppliedCylinders(item.supplied_cylinders);
     setCashCylinders(item.cash_cylinders);
     setOnlineCylinders(item.online_cylinders);
@@ -394,16 +480,30 @@ export const StaffCylinderSettlement: React.FC = () => {
       if (navigator.onLine) {
         try {
           await supabase.from('staff_cylinder_settlements').delete().eq('id', id);
-        } catch (_) {}
+        } catch {}
       }
       setSettlements((prev) => prev.filter((s) => s.id !== id));
       toast.success(`Removed settlement for ${name}`);
-    } catch (err) {
+
+      // Broadcast deletion event to other connected staff/managers instantly
+      try {
+        syncChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'settlement_changed',
+          payload: {
+            action: 'DELETE',
+            settlement_date: selectedDate,
+            id,
+            sender: staffUserName,
+          },
+        });
+      } catch {}
+    } catch {
       toast.error('Failed to delete settlement');
     }
   };
 
-  // Save Settlement (Dexie + Supabase)
+  // Save Settlement (Dexie + Supabase + Realtime Broadcast)
   const handleSaveSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -416,7 +516,17 @@ export const StaffCylinderSettlement: React.FC = () => {
     const agentName = selectedAgent?.name || 'Delivery Boy';
 
     setIsSaving(true);
-    const recordId = editingId || crypto.randomUUID();
+    // Safe ID Resolution: If already settled for this date, reuse existing ID to prevent unique constraint conflicts
+    let recordId = editingId;
+    if (!recordId) {
+      const existing = settlements.find((s) => s.agent_id === selectedAgentId);
+      if (existing) {
+        recordId = existing.id;
+      } else {
+        recordId = crypto.randomUUID();
+      }
+    }
+
     const nowIso = new Date().toISOString();
 
     const record: SettlementRecord = {
@@ -449,43 +559,60 @@ export const StaffCylinderSettlement: React.FC = () => {
       // 1. Save in local Dexie IndexedDB
       await db.staff_cylinder_settlements.put(record);
 
-      // 2. Sync to Supabase
+      // 2. Sync to Supabase with safe onConflict upsert
       if (navigator.onLine) {
         try {
-          const { error } = await supabase.from('staff_cylinder_settlements').upsert({
-            id: record.id,
-            settlement_date: record.settlement_date,
-            agent_id: record.agent_id,
-            agent_name: record.agent_name,
-            cylinder_price: record.cylinder_price,
-            supplied_cylinders: record.supplied_cylinders,
-            cash_cylinders: record.cash_cylinders,
-            online_cylinders: record.online_cylinders,
-            upi_cylinders: record.upi_cylinders,
-            due_cylinders: record.due_cylinders,
-            returned_full_cylinders: record.returned_full_cylinders,
-            empty_cylinders: record.empty_cylinders,
-            expected_cash: record.expected_cash,
-            actual_cash: record.actual_cash,
-            cash_difference: record.cash_difference,
-            online_amount: record.online_amount,
-            upi_amount: record.upi_amount,
-            total_amount: record.total_amount,
-            status: record.status,
-            notes: record.notes,
-            updated_at: nowIso,
-          });
+          const { error } = await supabase.from('staff_cylinder_settlements').upsert(
+            {
+              id: record.id,
+              settlement_date: record.settlement_date,
+              agent_id: record.agent_id,
+              agent_name: record.agent_name,
+              cylinder_price: record.cylinder_price,
+              supplied_cylinders: record.supplied_cylinders,
+              cash_cylinders: record.cash_cylinders,
+              online_cylinders: record.online_cylinders,
+              upi_cylinders: record.upi_cylinders,
+              due_cylinders: record.due_cylinders,
+              returned_full_cylinders: record.returned_full_cylinders,
+              empty_cylinders: record.empty_cylinders,
+              expected_cash: record.expected_cash,
+              actual_cash: record.actual_cash,
+              cash_difference: record.cash_difference,
+              online_amount: record.online_amount,
+              upi_amount: record.upi_amount,
+              total_amount: record.total_amount,
+              status: record.status,
+              notes: record.notes,
+              updated_at: nowIso,
+            },
+            { onConflict: 'settlement_date, agent_id' }
+          );
 
           if (!error) {
             record.synced = true;
             await db.staff_cylinder_settlements.update(record.id, { synced: true });
           }
-        } catch (_) {}
+        } catch {}
       }
 
       await fetchSettlements(selectedDate);
       setIsFormOpen(false);
       toast.success(`Settlement saved for ${agentName}!`);
+
+      // 3. Instant Realtime Broadcast to other devices
+      try {
+        syncChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'settlement_changed',
+          payload: {
+            action: 'SAVE',
+            settlement_date: selectedDate,
+            record: { ...record, synced: true },
+            sender: staffUserName,
+          },
+        });
+      } catch {}
     } catch (err: any) {
       console.error('Save error:', err);
       toast.error('Failed to save settlement');
@@ -1633,20 +1760,30 @@ export const StaffCylinderSettlement: React.FC = () => {
                 
                 {/* Auto-suggest Chips of Active Agents (Quick 1-Tap Select) */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                  {agents.map((agent) => (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      onClick={() => setSelectedAgentId(agent.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border ${
-                        selectedAgentId === agent.id
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-md'
-                          : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
-                      }`}
-                    >
-                      {agent.name.split(' ')[0]}
-                    </button>
-                  ))}
+                  {agents.map((agent) => {
+                    const isAlreadySettled = settlements.some((s) => s.agent_id === agent.id);
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => handleSelectAgent(agent.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border flex items-center gap-1 ${
+                          selectedAgentId === agent.id
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-md'
+                            : isAlreadySettled
+                            ? 'bg-slate-850 text-emerald-300 border-emerald-500/30 hover:bg-slate-800'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+                        }`}
+                      >
+                        <span>{agent.name.split(' ')[0]}</span>
+                        {isAlreadySettled && (
+                          <span className={`text-[10px] ${selectedAgentId === agent.id ? 'text-slate-950 font-black' : 'text-emerald-400 font-bold'}`}>
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() => setIsAddDeliveryBoyModalOpen(true)}
@@ -1659,17 +1796,33 @@ export const StaffCylinderSettlement: React.FC = () => {
                 {/* Dropdown for All Active Agents */}
                 <select
                   value={selectedAgentId}
-                  onChange={(e) => setSelectedAgentId(e.target.value)}
+                  onChange={(e) => handleSelectAgent(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-bold text-sm focus:border-amber-500 focus:outline-none"
                   required
                 >
                   <option value="" disabled>-- Choose Delivery Boy --</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name} {agent.phone ? `(${agent.phone})` : `@${agent.username}`}
-                    </option>
-                  ))}
+                  {agents.map((agent) => {
+                    const isAlreadySettled = settlements.some((s) => s.agent_id === agent.id);
+                    return (
+                      <option key={agent.id} value={agent.id}>
+                        {isAlreadySettled ? '✓ ' : ''}{agent.name} {agent.phone ? `(${agent.phone})` : `@${agent.username}`} {isAlreadySettled ? '[Already Settled Today]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+
+                {/* Status Banner when Editing Existing Settlement */}
+                {editingId && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-amber-300 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Edit3 size={13} className="text-amber-400" />
+                      <span>Settlement already recorded for today — modifying entry</span>
+                    </span>
+                    <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded-md uppercase tracking-wider text-amber-200">
+                      Modifying
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Step 2: Cylinders Supplied (Load) */}
@@ -1816,7 +1969,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                     <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-800">
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">
-                          Due / Credit Cylinders
+                          Due / Credit Cylinders {numDue > 0 && <span className="text-amber-400">(₹{dueAmount.toLocaleString('en-IN')})</span>}
                         </label>
                         <input
                           type="number"
