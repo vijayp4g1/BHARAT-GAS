@@ -32,7 +32,8 @@ import {
   CheckCircle2,
   Sparkles,
   Clock,
-  Globe
+  Globe,
+  Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -56,6 +57,7 @@ import {
 } from '../lib/bpclReportService';
 import { BpclReportModal } from '../components/BpclReportModal';
 import { BpclBillsView } from '../components/BpclBillsView';
+import { ExportOnlineBillsModal } from '../components/ExportOnlineBillsModal';
 
 export type ItemEntry = DayEndEntry;
 
@@ -127,6 +129,14 @@ export const StaffDayEndSummary: React.FC = () => {
   const [bpclReportsMap, setBpclReportsMap] = useState<Record<string, BpclReportData>>({});
   const [activeBpclReport, setActiveBpclReport] = useState<BpclReportData | null>(null);
   const [isBpclModalOpen, setIsBpclModalOpen] = useState<boolean>(false);
+  const [isExportOnlineModalOpen, setIsExportOnlineModalOpen] = useState<boolean>(false);
+
+  // Total online bills count across all delivery boys for this date
+  const totalRosterOnlineCount = useMemo(() => {
+    return Object.values(bpclReportsMap).reduce((acc, rep) => {
+      return acc + (rep?.online_bills?.length || 0);
+    }, 0);
+  }, [bpclReportsMap]);
 
   // Floating Action Dock Minimized state
   const [isFloatingDockMinimized, setIsFloatingDockMinimized] = useState<boolean>(false);
@@ -1540,14 +1550,57 @@ export const StaffDayEndSummary: React.FC = () => {
                 </h2>
                 <p className="text-[11px] text-slate-500">Every staff member sees live scanned bills here</p>
               </div>
-              <button
-                onClick={() => loadRosterData(reportDate)}
-                disabled={isLoadingRoster}
-                className="text-indigo-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRoster ? 'animate-spin' : ''}`} /> Refresh
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsExportOnlineModalOpen(true)}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all"
+                  title="Print or Export All Online Bills"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Online Bills ({totalRosterOnlineCount})</span>
+                </button>
+                <button
+                  onClick={() => loadRosterData(reportDate)}
+                  disabled={isLoadingRoster}
+                  className="text-slate-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1 px-2 py-1"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRoster ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              </div>
             </div>
+
+            {/* Export All Online Bills Big Xerox Banner */}
+            <button
+              type="button"
+              onClick={() => setIsExportOnlineModalOpen(true)}
+              className="w-full mb-3 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-indigo-700/20 border-2 border-indigo-400/40 flex items-center justify-between gap-2.5 transition-all"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-950 text-indigo-300 flex items-center justify-center font-black shrink-0 shadow-md border border-indigo-400/30">
+                  <Printer className="w-5 h-5 text-indigo-300 animate-pulse" />
+                </div>
+                <div className="min-w-0 text-left">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9px] font-black uppercase bg-slate-950 text-amber-300 px-1.5 py-0.2 rounded font-mono">
+                      XEROX PRINT
+                    </span>
+                    <h3 className="text-xs font-black uppercase text-white truncate">
+                      Export All Online Bills
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-indigo-100 font-medium truncate mt-0.5">
+                    Print single submission sheet for all delivery boys ({deliveryBoys.length} boys)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="bg-amber-400 text-slate-950 text-xs font-black px-2.5 py-1 rounded-xl shadow-sm">
+                  {totalRosterOnlineCount} Online Bills
+                </span>
+                <span className="text-indigo-200 text-sm">&rarr;</span>
+              </div>
+            </button>
 
             {/* Total Scams Alert Banner in Roster */}
             {totalRosterScamsCount > 0 && (
@@ -1903,6 +1956,7 @@ export const StaffDayEndSummary: React.FC = () => {
             onOpenPasteModal={() => setIsBpclModalOpen(true)}
             onToggleCheckedDone={handleToggleActiveCheckedDone}
             onAddBillToScanned={handleAddPendingBillToScanned}
+            onOpenExportAllOnline={() => setIsExportOnlineModalOpen(true)}
             onReportUpdated={(newRep) => {
               setActiveBpclReport(newRep);
               const norm = (newRep.agent_name || '').trim().toUpperCase();
@@ -2412,6 +2466,17 @@ export const StaffDayEndSummary: React.FC = () => {
             const norm = (newRep.agent_name || '').trim().toUpperCase();
             setBpclReportsMap((prev) => ({ ...prev, [norm]: newRep }));
           }}
+        />
+      )}
+
+      {/* Export All Online Bills Sheet Modal */}
+      {isExportOnlineModalOpen && (
+        <ExportOnlineBillsModal
+          isOpen={isExportOnlineModalOpen}
+          onClose={() => setIsExportOnlineModalOpen(false)}
+          reportDate={reportDate}
+          deliveryBoys={deliveryBoys}
+          bpclReportsMap={bpclReportsMap}
         />
       )}
 

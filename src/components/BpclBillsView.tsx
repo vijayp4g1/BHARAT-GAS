@@ -14,7 +14,8 @@ import {
   CheckCheck,
   UserCheck,
   Loader2,
-  ChevronDown
+  ChevronDown,
+  Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
@@ -36,6 +37,7 @@ interface BpclBillsViewProps {
   onToggleCheckedDone: () => void;
   onAddBillToScanned?: (bill: BpclBillItem) => void;
   onReportUpdated?: (report: BpclReportData) => void;
+  onOpenExportAllOnline?: () => void;
 }
 
 export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
@@ -47,6 +49,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   onToggleCheckedDone,
   onAddBillToScanned,
   onReportUpdated,
+  onOpenExportAllOnline,
 }) => {
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ONLINE'>('PENDING');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -454,15 +457,29 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={handleCopyAllCsv}
-                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
-                title="Copy numbers as CSV"
-              >
-                <Copy className="w-3 h-3" />
-                <span>Copy CSV</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCopyAllCsv}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-colors"
+                  title="Copy numbers as CSV"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy CSV</span>
+                </button>
+
+                {onOpenExportAllOnline && (
+                  <button
+                    type="button"
+                    onClick={onOpenExportAllOnline}
+                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-[11px] font-black flex items-center gap-1 transition-colors"
+                    title="Print or Export all delivery boys online bills"
+                  >
+                    <Printer className="w-3 h-3 text-indigo-600" />
+                    <span>Print All</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
