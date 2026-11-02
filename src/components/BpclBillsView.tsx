@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Clock, 
   Globe, 
@@ -10,11 +10,21 @@ import {
   CheckCircle2, 
   Search, 
   X, 
-  FileText 
+  Trash2,
+  CheckCheck,
+  UserCheck,
+  Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { BpclBillItem, BpclReportData } from '../lib/bpclReportService';
+import { 
+  deleteBpclBill, 
+  addBpclBillManually, 
+  type BpclBillItem, 
+  type BpclReportData 
+} from '../lib/bpclReportService';
 import type { DayEndEntry } from '../lib/dayEndService';
+import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
+import db from '../lib/db';
 
 interface BpclBillsViewProps {
   report: BpclReportData | null;
@@ -24,6 +34,7 @@ interface BpclBillsViewProps {
   onOpenPasteModal: () => void;
   onToggleCheckedDone: () => void;
   onAddBillToScanned?: (bill: BpclBillItem) => void;
+  onReportUpdated?: (report: BpclReportData) => void;
 }
 
 export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
@@ -34,14 +45,67 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   onOpenPasteModal,
   onToggleCheckedDone,
   onAddBillToScanned,
+  onReportUpdated,
 }) => {
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ONLINE'>('PENDING');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Manual Add Modal State
+  const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
+  const [manualType, setManualType] = useState<'PENDING' | 'ONLINE'>('PENDING');
+  const [manualConsNo, setManualConsNo] = useState<string>('');
+  const [manualName, setManualName] = useState<string>('');
+  const [manualAddress, setManualAddress] = useState<string>('');
+  const [manualMemo, setManualMemo] = useState<string>('');
+  const [manualOrder, setManualOrder] = useState<string>('');
+  const [manualDate, setManualDate] = useState<string>(reportDate);
+  const [manualRefillType, setManualRefillType] = useState<string>('PayNBook Apps');
+  const [isSearchingDb, setIsSearchingDb] = useState<boolean>(false);
+  const [isDbMatched, setIsDbMatched] = useState<boolean>(false);
+  const [isSubmittingManual, setIsSubmittingManual] = useState<boolean>(false);
+
   const pendingBills = report?.pending_bills || [];
   const onlineBills = report?.online_bills || [];
   const isCheckedDone = report?.checked_done ?? false;
+
+  // Auto-search 33k database when consumer number changes in manual modal
+  useEffect(() => {
+    let active = true;
+    const clean = manualConsNo.trim();
+    if (clean.length < 3) {
+      setIsDbMatched(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingDb(true);
+      try {
+        const found = await matchConsumerWithDatabase(clean);
+        if (!active) return;
+        if (found && found.found) {
+          setIsDbMatched(true);
+          if (found.consumer_name && !manualName) {
+            setManualName(found.consumer_name);
+          }
+          if (found.address) {
+            setManualAddress(found.address);
+          }
+        } else {
+          setIsDbMatched(false);
+        }
+      } catch (_) {
+        if (active) setIsDbMatched(false);
+      } finally {
+        if (active) setIsSearchingDb(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [manualConsNo, manualName]);
 
   // Set of scanned consumer numbers (for cross-checking payment conflicts)
   const scannedCashSet = new Set(
@@ -82,6 +146,102 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
     toast.success(`Copied ${activeBills.length} ${activeTab.toLowerCase()} consumer numbers!`);
   };
 
+  // Delete a bill from the pending or online list
+  const handleDeleteBill = async (bill: BpclBillItem) => {
+    const confirmMsg = `Delete bill #${bill.consumer_number} (${bill.consumer_name || 'Consumer'}) from ${bill.type.toLowerCase()} bills?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const updated = await deleteBpclBill(
+        reportDate,
+        agentName,
+        bill.consumer_number,
+        bill.type,
+        report?.agent_id
+      );
+      if (onReportUpdated) {
+        onReportUpdated(updated);
+      }
+      toast.success(`Deleted #${bill.consumer_number} from ${bill.type.toLowerCase()} list`);
+    } catch {
+      toast.error('Failed to delete bill');
+    }
+  };
+
+  // 1-Click "Delivered & Clear" for a Pending Bill:
+  // Adds it to completed scanned deliveries and immediately removes it from pending bills!
+  const handleDeliveredAndClear = async (bill: BpclBillItem) => {
+    try {
+      if (onAddBillToScanned) {
+        onAddBillToScanned(bill);
+      }
+      const updated = await deleteBpclBill(
+        reportDate,
+        agentName,
+        bill.consumer_number,
+        'PENDING',
+        report?.agent_id
+      );
+      if (onReportUpdated) {
+        onReportUpdated(updated);
+      }
+      toast.success(`Cleared #${bill.consumer_number} & added to Completed Deliveries!`);
+    } catch {
+      toast.error('Failed to clear bill');
+    }
+  };
+
+  // Submit Manual Add Form
+  const handleSubmitManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCons = manualConsNo.trim();
+    if (!cleanCons) {
+      toast.error('Please enter a consumer number');
+      return;
+    }
+
+    setIsSubmittingManual(true);
+    try {
+      const newBill: BpclBillItem = {
+        consumer_number: cleanCons,
+        consumer_name: manualName.trim() || 'Consumer',
+        cash_memo: manualMemo.trim() || undefined,
+        order_no: manualOrder.trim() || undefined,
+        book_date: manualDate.trim() || reportDate,
+        refill_type: manualType === 'ONLINE' ? (manualRefillType.trim() || 'PayNBook Apps') : undefined,
+        status: manualType === 'PENDING' ? 'Delivery Pending' : 'Online Bill (Delivery Done)',
+        type: manualType,
+      };
+
+      const updated = await addBpclBillManually(
+        reportDate,
+        agentName,
+        newBill,
+        report?.agent_id
+      );
+
+      if (onReportUpdated) {
+        onReportUpdated(updated);
+      }
+
+      toast.success(`Added #${cleanCons} to ${manualType.toLowerCase()} bills!`);
+      // Reset form and close
+      setManualConsNo('');
+      setManualName('');
+      setManualAddress('');
+      setManualMemo('');
+      setManualOrder('');
+      setIsDbMatched(false);
+      setIsManualModalOpen(false);
+      setActiveTab(manualType);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to add bill manually');
+    } finally {
+      setIsSubmittingManual(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-200 space-y-3.5">
       {/* Header Verification & Status Bar */}
@@ -96,8 +256,8 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                 BPCL AI Verification Status
               </h3>
               {isCheckedDone ? (
-                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Bills Checked Done
+                <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                  <CheckCircle2 className="w-3 h-3 text-white" /> Bills Checked Done
                 </span>
               ) : (
                 <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">
@@ -131,11 +291,24 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
 
           <button
             type="button"
+            onClick={() => {
+              setManualType(activeTab);
+              setIsManualModalOpen(true);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 transition-all"
+            title="Manually add a single pending or online bill"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Add Bill</span>
+          </button>
+
+          <button
+            type="button"
             onClick={onOpenPasteModal}
-            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black flex items-center gap-1 shadow-md shadow-purple-600/20 active:scale-95 transition-all"
+            className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black flex items-center gap-1 shadow-md shadow-purple-600/20 active:scale-95 transition-all"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{report ? 'Update Report' : '+ Paste Report'}</span>
+            <span>{report ? 'Update' : '+ Paste'}</span>
           </button>
         </div>
       </div>
@@ -223,16 +396,29 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                 ? `No ${activeTab === 'PENDING' ? 'delivery pending' : 'online PayNBook'} bills recorded for this date.`
                 : 'No bills match your search filter.'}
             </p>
-            {activeBills.length === 0 && (
+            <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
               <button
                 type="button"
-                onClick={onOpenPasteModal}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 text-white font-bold text-xs shadow-sm hover:bg-purple-700 transition-colors"
+                onClick={() => {
+                  setManualType(activeTab);
+                  setIsManualModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-sm hover:bg-blue-700 transition-colors"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Paste BPCL Status Report</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Add {activeTab === 'PENDING' ? 'Pending' : 'Online'} Bill</span>
               </button>
-            )}
+              {activeBills.length === 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenPasteModal}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 text-white font-bold text-xs shadow-sm hover:bg-purple-700 transition-colors"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Paste Report</span>
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           filteredBills.map((bill, index) => {
@@ -318,25 +504,235 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     )}
                   </div>
 
-                  {/* Action for Pending: 1-click Add to Scanned Deliveries */}
-                  {activeTab === 'PENDING' && onAddBillToScanned && (
+                  {/* Actions Bar for Individual Bill */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Action for Pending: 1-Click Delivered & Clear */}
+                    {activeTab === 'PENDING' && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeliveredAndClear(bill)}
+                        className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] flex items-center gap-1 active:scale-95 transition-all shadow-xs"
+                        title="Mark Delivered & Remove from Pending"
+                      >
+                        <CheckCheck className="w-3 h-3" />
+                        <span>Delivered & Clear</span>
+                      </button>
+                    )}
+
+                    {/* Delete / Remove Bill Button */}
                     <button
                       type="button"
-                      onClick={() => onAddBillToScanned(bill)}
-                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 active:scale-95 transition-all shadow-xs shrink-0"
-                      title="Add to scanned bills if delivered"
+                      onClick={() => handleDeleteBill(bill)}
+                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-rose-100 text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-300 transition-colors"
+                      title="Delete this bill"
                     >
-                      <Plus className="w-3 h-3" />
-                      <span>Add Bill</span>
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* MANUAL ADD BILL MODAL (EASY MANUAL ENTRY WITH 33K DATABASE AUTO-MATCH)     */}
+      {/* ========================================================================= */}
+      {isManualModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[110] flex items-center justify-center p-3 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/90">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-500/30">
+                  <Plus className="w-4 h-4 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight">
+                    Add Bill Manually
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    Add single pending or online bill for {agentName}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsManualModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center hover:bg-slate-700 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSubmitManual} className="p-4 space-y-3.5 overflow-y-auto max-h-[75vh]">
+              {/* Type Switcher */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Bill Category
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setManualType('PENDING')}
+                    className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      manualType === 'PENDING'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>⚠️ Delivery Pending</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManualType('ONLINE')}
+                    className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      manualType === 'ONLINE'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20'
+                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                    }`}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>🌐 Online (PayNBook)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Consumer Number Input with live 33k database indicator */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Consumer Number *
+                  </label>
+                  {isSearchingDb ? (
+                    <span className="text-[10px] text-blue-400 font-bold flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Searching 33k DB...
+                    </span>
+                  ) : isDbMatched ? (
+                    <span className="text-[10px] text-emerald-400 font-black flex items-center gap-0.5">
+                      <UserCheck className="w-3 h-3" /> Auto-matched in Database!
+                    </span>
+                  ) : null}
+                </div>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. 173 or 12384"
+                  value={manualConsNo}
+                  onChange={(e) => setManualConsNo(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Customer Name */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Customer Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. B LALITHA"
+                  value={manualName}
+                  onChange={(e) => setManualName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                />
+                {manualAddress && (
+                  <p className="text-[10px] text-slate-400 truncate mt-1">
+                    📍 {manualAddress}
+                  </p>
+                )}
+              </div>
+
+              {/* Cash Memo & Order No */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Cash Memo No
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 115694"
+                    value={manualMemo}
+                    onChange={(e) => setManualMemo(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Order No
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 104110"
+                    value={manualOrder}
+                    onChange={(e) => setManualOrder(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Book Date & Refill Type */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Book Date
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="DD/MM/YYYY"
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Refill Type
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="PayNBook Apps"
+                    value={manualRefillType}
+                    onChange={(e) => setManualRefillType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsManualModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingManual || !manualConsNo.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-xs shadow-md shadow-blue-600/30 flex items-center justify-center gap-1.5 transition-all"
+                >
+                  {isSubmittingManual ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Plus className="w-4 h-4 stroke-[3]" />
+                  )}
+                  <span>Add to {manualType === 'PENDING' ? 'Pending' : 'Online'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-

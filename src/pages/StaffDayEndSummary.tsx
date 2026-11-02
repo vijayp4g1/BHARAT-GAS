@@ -704,6 +704,24 @@ export const StaffDayEndSummary: React.FC = () => {
       })
       .subscribe();
 
+    // Listen to realtime BPCL AI Status Report updates from other devices
+    const bpclChannel = supabase.channel('bgcls_bpcl_channel');
+    bpclChannel
+      .on('broadcast', { event: 'bpcl_report_updated' }, (payload) => {
+        if (payload?.payload?.dateStr === reportDate) {
+          fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
+            setBpclReportsMap(updatedMap);
+            if (selectedBoyRef.current) {
+              const norm = selectedBoyRef.current.name.trim().toUpperCase();
+              if (updatedMap[norm]) {
+                setActiveBpclReport(updatedMap[norm]);
+              }
+            }
+          });
+        }
+      })
+      .subscribe();
+
     const handleLocalUpdate = (e: any) => {
       if (e?.detail?.report_date === reportDate) {
         loadRosterData(reportDate);
@@ -711,9 +729,26 @@ export const StaffDayEndSummary: React.FC = () => {
     };
     window.addEventListener('bgcls-day-end-updated', handleLocalUpdate);
 
+    const handleBpclLocalUpdate = (e: any) => {
+      if (e?.detail?.dateStr === reportDate) {
+        fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
+          setBpclReportsMap(updatedMap);
+          if (selectedBoyRef.current) {
+            const norm = selectedBoyRef.current.name.trim().toUpperCase();
+            if (updatedMap[norm]) {
+              setActiveBpclReport(updatedMap[norm]);
+            }
+          }
+        });
+      }
+    };
+    window.addEventListener('bgcls-bpcl-updated', handleBpclLocalUpdate);
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(bpclChannel);
       window.removeEventListener('bgcls-day-end-updated', handleLocalUpdate);
+      window.removeEventListener('bgcls-bpcl-updated', handleBpclLocalUpdate);
     };
   }, [reportDate, selectedBoy, loadRosterData, loadBillsForSelectedBoy]);
 
@@ -1542,147 +1577,181 @@ export const StaffDayEndSummary: React.FC = () => {
                   const pendingCount = bpcl?.pending_bills?.length || 0;
                   const onlineCount = bpcl?.online_bills?.length || 0;
 
+                  const cardStyle = hasScams
+                    ? 'bg-rose-50/95 border-2 border-rose-400 hover:bg-rose-100/90 shadow-sm shadow-rose-500/10'
+                    : isCheckedDone
+                    ? pendingCount > 0
+                      ? 'bg-gradient-to-r from-amber-50/95 via-orange-50/80 to-amber-50/95 border-2 border-amber-400 shadow-md shadow-amber-500/15 ring-1 ring-amber-300 hover:bg-amber-100/90'
+                      : 'bg-gradient-to-r from-emerald-50/90 via-teal-50/80 to-emerald-50/90 border-2 border-emerald-500 shadow-sm shadow-emerald-500/10 hover:border-emerald-600 hover:bg-emerald-100/90'
+                    : hasBills
+                    ? 'bg-slate-50/90 border border-slate-300 hover:bg-slate-100/90'
+                    : 'bg-slate-50/60 border border-slate-200 hover:bg-slate-100';
+
+                  const avatarStyle = hasScams
+                    ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-md'
+                    : isCheckedDone
+                    ? pendingCount > 0
+                      ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 font-black shadow-md'
+                      : 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-black shadow-md'
+                    : hasBills
+                    ? 'bg-slate-600 text-white font-bold'
+                    : 'bg-slate-200 text-slate-600';
+
                   return (
                     <div
                       key={boy.id || boy.name}
                       onClick={() => handleSelectBoy(boy)}
-                      className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                        hasScams
-                          ? 'bg-rose-50/90 border-2 border-rose-400 hover:bg-rose-100/90 shadow-sm shadow-rose-500/10'
-                          : hasBills
-                          ? 'bg-emerald-50/60 border-emerald-200 hover:bg-emerald-50'
-                          : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100'
-                      }`}
+                      className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 ${cardStyle}`}
                     >
-                      <div className="min-w-0 flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${
-                          hasScams
-                            ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-md'
-                            : hasBills
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-200 text-slate-600'
-                        }`}>
-                          {boy.name.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h3 className="font-bold text-sm text-slate-900">{boy.name}</h3>
-                            {hasBills ? (
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
-                                hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
-                              }`}>
-                                {summary.total_deliveries} Bills Scanned
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
-                                0 Bills
-                              </span>
-                            )}
-
-                            {/* Bills Checked Done Badge on Roster */}
-                            {isCheckedDone ? (
-                              <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Bills Checked Done
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
-                                  const updated = await fetchAllBpclReportsForDate(reportDate);
-                                  setBpclReportsMap(updated);
-                                  toast.success(`Marked bills checked done for ${boy.name}`);
-                                }}
-                                className="text-[10px] font-bold bg-slate-100 hover:bg-emerald-50 text-slate-500 hover:text-emerald-700 border border-slate-200 hover:border-emerald-300 px-2 py-0.5 rounded-full transition-all"
-                                title="Click to mark bills checked done"
-                              >
-                                ⚪ Mark Checked
-                              </button>
-                            )}
-
-                            {/* Pending Bills Counter Badge */}
-                            {pendingCount > 0 && (
-                              <span className="text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                                ⚠️ {pendingCount} Pending
-                              </span>
-                            )}
-
-                            {/* Online Bills Counter Badge */}
-                            {onlineCount > 0 && (
-                              <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                                🌐 {onlineCount} Online
-                              </span>
-                            )}
-
-                            {hasScams && (
-                              <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs animate-pulse flex items-center gap-1">
-                                <ShieldAlert className="w-3 h-3" /> {scamInfo.scamCount} SCAM BILL{scamInfo.scamCount > 1 ? 'S' : ''}
-                              </span>
-                            )}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm ${avatarStyle}`}>
+                            {boy.name.charAt(0)}
                           </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h3 className="font-bold text-sm text-slate-900">{boy.name}</h3>
+                              {hasBills ? (
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
+                                  hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
+                                }`}>
+                                  {summary.total_deliveries} Bills Scanned
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                                  0 Bills
+                                </span>
+                              )}
 
-                          {hasBills ? (
-                            <div>
-                              <div className="flex items-center gap-2 mt-1 flex-wrap text-[11px] font-medium text-slate-600">
-                                <span>Std: <b>{summary.domestic_14kg}</b></span>
-                                {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
-                                <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
-                                <span className="text-blue-700 font-bold">UPI: {summary.upi_count}</span>
-                                {summary.due_count > 0 && <span className="text-rose-600 font-bold">Due: {summary.due_count}</span>}
-                              </div>
+                              {/* Bills Checked Done Badge on Roster */}
+                              {isCheckedDone ? (
+                                <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <CheckCircle2 className="w-3 h-3 text-white" /> Bills Checked Done
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
+                                    const updated = await fetchAllBpclReportsForDate(reportDate);
+                                    setBpclReportsMap(updated);
+                                    toast.success(`Marked bills checked done for ${boy.name}`);
+                                  }}
+                                  className="text-[10px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 px-2 py-0.5 rounded-full transition-all shadow-2xs"
+                                  title="Click to mark bills checked done"
+                                >
+                                  ⚪ Mark Checked
+                                </button>
+                              )}
+
+                              {/* Pending Bills Counter Badge */}
+                              {pendingCount > 0 && (
+                                <span className="text-[10px] font-black bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs">
+                                  ⚠️ {pendingCount} Pending
+                                </span>
+                              )}
+
+                              {/* Online Bills Counter Badge */}
+                              {onlineCount > 0 && (
+                                <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                  🌐 {onlineCount} Online
+                                </span>
+                              )}
+
                               {hasScams && (
-                                <div className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100/90 px-2 py-0.5 rounded-lg border border-rose-300 w-fit">
-                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-bounce" />
-                                  <span>
-                                    🚨 {scamInfo.scamCount} duplicate bill already given by{' '}
-                                    <span className="font-black underline uppercase text-rose-950">
-                                      {scamInfo.duplicateWith.join(', ') || 'another agent'}
-                                    </span>!
-                                  </span>
-                                </div>
+                                <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs animate-pulse flex items-center gap-1">
+                                  <ShieldAlert className="w-3 h-3" /> {scamInfo.scamCount} SCAM BILL{scamInfo.scamCount > 1 ? 'S' : ''}
+                                </span>
                               )}
                             </div>
-                          ) : (
-                            <p className="text-[11px] text-slate-400 mt-0.5">No bills recorded yet for this date</p>
-                          )}
+
+                            {hasBills ? (
+                              <div>
+                                <div className="flex items-center gap-2 mt-1 flex-wrap text-[11px] font-medium text-slate-600">
+                                  <span>Std: <b>{summary.domestic_14kg}</b></span>
+                                  {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
+                                  <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
+                                  <span className="text-blue-700 font-bold">UPI: {summary.upi_count}</span>
+                                  {summary.due_count > 0 && <span className="text-rose-600 font-bold">Due: {summary.due_count}</span>}
+                                </div>
+                                {hasScams && (
+                                  <div className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100/90 px-2 py-0.5 rounded-lg border border-rose-300 w-fit">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-bounce" />
+                                    <span>
+                                      🚨 {scamInfo.scamCount} duplicate bill already given by{' '}
+                                      <span className="font-black underline uppercase text-rose-950">
+                                        {scamInfo.duplicateWith.join(', ') || 'another agent'}
+                                      </span>!
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-400 mt-0.5">No bills recorded yet for this date</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedBoy(boy);
+                              selectedBoyRef.current = boy;
+                              const norm = boy.name.trim().toUpperCase();
+                              setActiveBpclReport(bpclReportsMap[norm] || null);
+                              setIsBpclModalOpen(true);
+                            }}
+                            className={`px-2 py-1.5 rounded-xl border transition-all active:scale-95 flex items-center gap-1 shadow-xs ${
+                              isCheckedDone
+                                ? 'bg-purple-100 hover:bg-purple-200 text-purple-800 border-purple-300'
+                                : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
+                            }`}
+                            title="Add / Paste BPCL AI Status Report"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="text-[10px] font-bold hidden sm:inline">AI Check</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectBoy(boy);
+                            }}
+                            className={`font-bold px-3 py-1.5 rounded-xl text-xs border shadow-xs flex items-center gap-1 transition-all ${
+                              hasScams
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-sm shadow-rose-600/30'
+                                : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
+                            }`}
+                          >
+                            {hasScams ? 'Inspect Scam' : hasBills ? 'View / Edit' : 'Scan Bills'}
+                            <ChevronRight className={`w-3.5 h-3.5 ${hasScams ? 'text-white' : 'text-blue-500'}`} />
+                          </button>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedBoy(boy);
-                            selectedBoyRef.current = boy;
-                            const norm = boy.name.trim().toUpperCase();
-                            setActiveBpclReport(bpclReportsMap[norm] || null);
-                            setIsBpclModalOpen(true);
-                          }}
-                          className="px-2 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-all active:scale-95 flex items-center gap-1 shadow-xs"
-                          title="Add / Paste BPCL AI Status Report"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                          <span className="text-[10px] font-bold hidden sm:inline">AI Check</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSelectBoy(boy);
-                          }}
-                          className={`font-bold px-3 py-1.5 rounded-xl text-xs border shadow-xs flex items-center gap-1 transition-all ${
-                            hasScams
-                              ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-sm shadow-rose-600/30'
-                              : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
-                          }`}
-                        >
-                          {hasScams ? 'Inspect Scam' : hasBills ? 'View / Edit' : 'Scan Bills'}
-                          <ChevronRight className={`w-3.5 h-3.5 ${hasScams ? 'text-white' : 'text-blue-500'}`} />
-                        </button>
-                      </div>
+                      {/* BIG HIGH-VISIBILITY ALERT FOR PENDING BILLS */}
+                      {pendingCount > 0 && (
+                        <div className="mt-1 p-2 sm:p-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-orange-500 text-slate-950 font-black text-xs rounded-xl flex items-center justify-between shadow-md shadow-amber-500/25 border border-amber-300 animate-pulse">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-base leading-none">🚨</span>
+                            <div className="min-w-0 text-left">
+                              <div className="text-[11px] font-black uppercase tracking-tight truncate">
+                                {pendingCount} PENDING BILL{pendingCount > 1 ? 'S' : ''} DETECTED!
+                              </div>
+                              <div className="text-[9px] font-bold text-amber-950/85 -mt-0.5 truncate">
+                                Action required: deliver or clear pending bills
+                              </div>
+                            </div>
+                          </div>
+                          <span className="bg-slate-950 text-amber-300 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase shrink-0 flex items-center gap-1 shadow-sm">
+                            <span>View</span> &rarr;
+                          </span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1815,6 +1884,11 @@ export const StaffDayEndSummary: React.FC = () => {
             onOpenPasteModal={() => setIsBpclModalOpen(true)}
             onToggleCheckedDone={handleToggleActiveCheckedDone}
             onAddBillToScanned={handleAddPendingBillToScanned}
+            onReportUpdated={(newRep) => {
+              setActiveBpclReport(newRep);
+              const norm = (newRep.agent_name || '').trim().toUpperCase();
+              setBpclReportsMap((prev) => ({ ...prev, [norm]: newRep }));
+            }}
           />
 
           {/* Quick Search & Bulk Paste Tabs */}

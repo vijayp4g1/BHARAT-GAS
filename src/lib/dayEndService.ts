@@ -1,6 +1,11 @@
 import { supabase } from './supabase';
+import { createClient } from '@supabase/supabase-js';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
+
+const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
+const adminClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : supabase;
 
 export interface DayEndEntry {
   consumer_id?: string;
@@ -104,7 +109,7 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
 
   // 2. Fallback: Check staff_cylinder_settlements for this date
   try {
-    const { data: settlements, error: setErr } = await supabase
+    const { data: settlements, error: setErr } = await adminClient
       .from('staff_cylinder_settlements')
       .select('agent_name, agent_id, cash_cylinders, upi_cylinders, due_cylinders, notes, updated_at')
       .eq('settlement_date', dateStr);
@@ -214,7 +219,7 @@ export async function fetchDayEndReportForAgent(
 
   // 2. Check staff_cylinder_settlements notes fallback
   try {
-    let sQuery = supabase.from('staff_cylinder_settlements').select('*').eq('settlement_date', dateStr);
+    let sQuery = adminClient.from('staff_cylinder_settlements').select('*').eq('settlement_date', dateStr);
     if (agentId) {
       sQuery = sQuery.eq('agent_id', agentId);
     } else {
@@ -357,22 +362,46 @@ export async function saveDayEndReportToDatabase(payload: {
   }
 
   // 3. Dual-persist to staff_cylinder_settlements notes & counters
-  if (payload.agent_id) {
+  if (payload.agent_id || payload.agent_name) {
     try {
       const serialJson = `__BGCLS_SCANNED_BILLS__${JSON.stringify(payload.entries)}`;
-      const { data: existingSet } = await supabase
+      
+      let query = adminClient
         .from('staff_cylinder_settlements')
         .select('id, notes, supplied_cylinders, empty_cylinders')
-        .eq('settlement_date', payload.report_date)
-        .eq('agent_id', payload.agent_id)
-        .maybeSingle();
+        .eq('settlement_date', payload.report_date);
+
+      if (payload.agent_id) {
+        query = query.or(`agent_id.eq.${payload.agent_id},agent_name.ilike.${payload.agent_name.trim()}`);
+      } else {
+        query = query.ilike('agent_name', payload.agent_name.trim());
+      }
+
+      const { data: existingSet } = await query.maybeSingle();
+
+      // Retrieve any BPCL Report from existing notes OR local cache so it is NEVER lost!
+      let bpclPart = '';
+      if (existingSet && (existingSet.notes || '').includes('__BGCLS_BPCL_REPORT__')) {
+        bpclPart = '\n__BGCLS_BPCL_REPORT__' + (existingSet.notes || '').split('__BGCLS_BPCL_REPORT__')[1];
+      } else {
+        // Fallback: check local storage cache for this agent and date
+        try {
+          const norm = payload.agent_name.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+          const rawLocal = localStorage.getItem(`bgcls_bpcl_report_${payload.report_date}_${norm}`);
+          if (rawLocal) {
+            bpclPart = '\n__BGCLS_BPCL_REPORT__' + rawLocal;
+          }
+        } catch (_) {}
+      }
+
+      let baseNote = (existingSet?.notes || '')
+        .split('__BGCLS_SCANNED_BILLS__')[0]
+        .split('__BGCLS_BPCL_REPORT__')[0]
+        .trim();
+      const combinedNote = `${baseNote ? baseNote + '\n' : ''}${serialJson}${bpclPart}`;
 
       if (existingSet) {
-        // Clean existing note text
-        let baseNote = (existingSet.notes || '').split('__BGCLS_SCANNED_BILLS__')[0].trim();
-        const combinedNote = baseNote ? `${baseNote}\n${serialJson}` : serialJson;
-
-        await supabase
+        await adminClient
           .from('staff_cylinder_settlements')
           .update({
             notes: combinedNote,
@@ -387,31 +416,28 @@ export async function saveDayEndReportToDatabase(payload: {
         savedCloud = true;
       } else {
         // Create settlement row if not existing yet
-        await supabase
+        await adminClient
           .from('staff_cylinder_settlements')
-          .upsert(
-            {
-              settlement_date: payload.report_date,
-              agent_id: payload.agent_id,
-              agent_name: payload.agent_name,
-              cylinder_price: 994,
-              supplied_cylinders: payload.entries.length,
-              cash_cylinders: cashCount,
-              upi_cylinders: upiCount,
-              due_cylinders: dueCount,
-              empty_cylinders: emptiesCollected,
-              expected_cash: cashCount * 994,
-              actual_cash: cashCount * 994,
-              cash_difference: 0,
-              online_amount: 0,
-              upi_amount: upiCount * 994,
-              total_amount: (cashCount + upiCount) * 994,
-              status: 'BALANCED',
-              notes: serialJson,
-              updated_at: nowIso,
-            },
-            { onConflict: 'settlement_date, agent_id' }
-          );
+          .insert({
+            settlement_date: payload.report_date,
+            agent_id: payload.agent_id || null,
+            agent_name: payload.agent_name,
+            cylinder_price: 994,
+            supplied_cylinders: payload.entries.length,
+            cash_cylinders: cashCount,
+            upi_cylinders: upiCount,
+            due_cylinders: dueCount,
+            empty_cylinders: emptiesCollected,
+            expected_cash: cashCount * 994,
+            actual_cash: cashCount * 994,
+            cash_difference: 0,
+            online_amount: 0,
+            upi_amount: upiCount * 994,
+            total_amount: (cashCount + upiCount) * 994,
+            status: 'BALANCED',
+            notes: combinedNote,
+            updated_at: nowIso,
+          });
         savedCloud = true;
       }
     } catch (settleErr) {

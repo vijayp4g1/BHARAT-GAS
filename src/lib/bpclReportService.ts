@@ -357,11 +357,132 @@ export async function saveBpclReportToCloud(payload: {
       });
     } catch (_) {}
 
+    // Dispatch local DOM event for immediate UI update on current device
+    try {
+      window.dispatchEvent(
+        new CustomEvent('bgcls-bpcl-updated', {
+          detail: {
+            dateStr: payload.dateStr,
+            agentName: normName,
+            reportData,
+          },
+        })
+      );
+    } catch (_) {}
+
     return true;
   } catch (err) {
     console.warn('Failed to save BPCL report to cloud:', err);
     return false;
   }
+}
+
+/**
+ * Add a single BPCL bill manually (Pending or Online)
+ */
+export async function addBpclBillManually(
+  dateStr: string,
+  agentName: string,
+  bill: BpclBillItem,
+  agentId?: string
+): Promise<BpclReportData> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: true,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const updatedPending = [...current.pending_bills];
+  const updatedOnline = [...current.online_bills];
+
+  if (bill.type === 'PENDING') {
+    // Remove if already exists to avoid duplicates, then prepend
+    const idx = updatedPending.findIndex(
+      (b) => b.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase()
+    );
+    if (idx >= 0) updatedPending.splice(idx, 1);
+    updatedPending.unshift(bill);
+  } else {
+    const idx = updatedOnline.findIndex(
+      (b) => b.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase()
+    );
+    if (idx >= 0) updatedOnline.splice(idx, 1);
+    updatedOnline.unshift(bill);
+  }
+
+  const updatedReport: BpclReportData = {
+    ...current,
+    checked_done: true,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    updated_at: new Date().toISOString(),
+  };
+
+  await saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: true,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+
+  return updatedReport;
+}
+
+/**
+ * Delete a single BPCL bill (Pending or Online)
+ */
+export async function deleteBpclBill(
+  dateStr: string,
+  agentName: string,
+  consumerNumber: string,
+  billType: 'PENDING' | 'ONLINE',
+  agentId?: string
+): Promise<BpclReportData> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: true,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const cleanNum = consumerNumber.trim().toLowerCase();
+  const updatedPending = current.pending_bills.filter(
+    (b) => b.consumer_number.trim().toLowerCase() !== cleanNum
+  );
+  const updatedOnline = current.online_bills.filter(
+    (b) => b.consumer_number.trim().toLowerCase() !== cleanNum
+  );
+
+  const updatedReport: BpclReportData = {
+    ...current,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    updated_at: new Date().toISOString(),
+  };
+
+  await saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: current.checked_done,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+
+  return updatedReport;
 }
 
 /**

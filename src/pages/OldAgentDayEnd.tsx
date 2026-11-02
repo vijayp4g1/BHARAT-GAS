@@ -1533,6 +1533,7 @@ export const OldAgentDayEnd: React.FC = () => {
           onOpenPasteModal={() => setIsBpclModalOpen(true)}
           onToggleCheckedDone={handleToggleCheckedDone}
           onAddBillToScanned={handleAddPendingBillToScanned}
+          onReportUpdated={(newRep) => setBpclReport(newRep)}
         />
       </div>
 
