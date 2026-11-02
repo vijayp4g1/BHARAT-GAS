@@ -3,7 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 
-import { isCurrentStaffOrManager } from '../lib/staffAuth';
+import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
 import toast from 'react-hot-toast';
 
 export const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode, allowedRole?: 'AGENT' | 'MANAGER' | 'STAFF' }) => {
@@ -23,6 +23,14 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
 
       // 2. Check Role if required
       if (allowedRole) {
+        // If checking a STAFF-only route, live verify staff permission against cloud
+        if (allowedRole === 'STAFF') {
+          const liveStaff = await refreshCurrentStaffPermission();
+          if (liveStaff) {
+            localStorage.setItem('bgcls_is_staff', 'true');
+          }
+        }
+
         const cachedRole = localStorage.getItem('bgcls_user_role');
         if (cachedRole) {
           setUserRole(cachedRole);

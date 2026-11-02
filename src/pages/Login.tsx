@@ -5,7 +5,7 @@ import db from '../lib/db';
 import { Loader2, User, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFastAuthSession } from '../lib/auth';
-import { hasStaffPermission } from '../lib/staffAuth';
+import { hasStaffPermission, refreshCurrentStaffPermission } from '../lib/staffAuth';
 
 export const Login = () => {
   const [role, setRole] = useState<'AGENT' | 'MANAGER'>('AGENT');
@@ -32,8 +32,8 @@ export const Login = () => {
       if (!isMounted) return;
 
       if (authSession) {
-        const isStaff = localStorage.getItem('bgcls_is_staff') === 'true';
-        // Instant redirect without delay or login screen flash
+        // Live verify staff permission against database so newly granted staff members get instant access
+        const isStaff = await refreshCurrentStaffPermission();
         if (authSession.role === 'MANAGER') {
           navigate('/manager/dashboard', { replace: true });
         } else if (isStaff) {
@@ -92,20 +92,31 @@ export const Login = () => {
       let isStaffMember = false;
 
       if (data?.user?.id) {
-        const { data: agentData } = await supabase
+        let { data: agentData } = await supabase
           .from('agents')
-          .select('role, name, is_staff')
+          .select('role, name, is_staff, username')
           .eq('id', data.user.id)
           .maybeSingle();
+
+        if (!agentData && username) {
+          const { data: byUser } = await supabase
+            .from('agents')
+            .select('role, name, is_staff, username')
+            .ilike('username', username.trim())
+            .maybeSingle();
+          if (byUser) agentData = byUser;
+        }
 
         if (agentData?.role) {
           actualRole = agentData.role as 'AGENT' | 'MANAGER';
         }
 
+        const cleanUser = username.toLowerCase().trim();
         isStaffMember = Boolean(
           agentData?.is_staff === true ||
           hasStaffPermission(data.user.id, username, agentData?.is_staff, agentData?.name) ||
-          username.toLowerCase().trim() === 'john'
+          cleanUser === 'john' ||
+          cleanUser === 'ganesh'
         );
 
         if (isStaffMember) {

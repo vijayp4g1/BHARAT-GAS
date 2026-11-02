@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Search, Compass, Map, ClipboardCheck, Flame } from 'lucide-react';
-import { isCurrentStaffOrManager } from '../lib/staffAuth';
+import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
 
 
 export const AgentBottomNav = () => {
-  const isStaff = localStorage.getItem('bgcls_is_staff') === 'true' || isCurrentStaffOrManager();
+  const [isStaff, setIsStaff] = useState<boolean>(
+    () => localStorage.getItem('bgcls_is_staff') === 'true' || isCurrentStaffOrManager()
+  );
+
+  useEffect(() => {
+    refreshCurrentStaffPermission().then((liveStaff) => {
+      setIsStaff(liveStaff);
+    });
+  }, []);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe z-50 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
