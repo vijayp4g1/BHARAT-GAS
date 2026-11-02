@@ -1380,9 +1380,11 @@ export const StaffDayEndSummary: React.FC = () => {
   }, [deliveryBoys, boySearchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-2xl mx-auto font-sans">
-      {/* Top Header Card */}
-      <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
+    <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-2xl mx-auto font-sans print:p-0 print:m-0 print:bg-white print:max-w-none print:pb-0 print:min-h-0">
+      {/* Day End Page Main Content - Strictly Hidden on Print */}
+      <div className="day-end-main-page print:hidden">
+        {/* Top Header Card */}
+        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
         {/* Header Title & Date Picker */}
         <div className="flex items-center justify-between mb-3 gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -2440,33 +2442,38 @@ export const StaffDayEndSummary: React.FC = () => {
           </div>
         )
       )}
+      </div>
 
       {/* Live Camera Scanner Modal */}
-      <LiveCameraScannerModal
-        isOpen={isLiveScannerOpen}
-        onClose={() => setIsLiveScannerOpen(false)}
-        onConsumerScanned={handleConsumerAutoScanned}
-        existingNumbers={entries.map((e) => e.consumer_number)}
-        claimedByOtherAgents={crossAgentClaimedMap}
-        agentName={selectedBoy?.name}
-        agentId={selectedBoy?.id}
-      />
+      <div className="print:hidden">
+        <LiveCameraScannerModal
+          isOpen={isLiveScannerOpen}
+          onClose={() => setIsLiveScannerOpen(false)}
+          onConsumerScanned={handleConsumerAutoScanned}
+          existingNumbers={entries.map((e) => e.consumer_number)}
+          claimedByOtherAgents={crossAgentClaimedMap}
+          agentName={selectedBoy?.name}
+          agentId={selectedBoy?.id}
+        />
+      </div>
 
       {/* BPCL AI Status Report Paste & Parse Modal */}
       {isBpclModalOpen && (
-        <BpclReportModal
-          isOpen={isBpclModalOpen}
-          onClose={() => setIsBpclModalOpen(false)}
-          agentName={selectedBoy ? selectedBoy.name : 'Delivery Boy'}
-          agentId={selectedBoy?.id}
-          reportDate={reportDate}
-          existingReport={activeBpclReport}
-          onSaved={(newRep) => {
-            setActiveBpclReport(newRep);
-            const norm = (newRep.agent_name || '').trim().toUpperCase();
-            setBpclReportsMap((prev) => ({ ...prev, [norm]: newRep }));
-          }}
-        />
+        <div className="print:hidden">
+          <BpclReportModal
+            isOpen={isBpclModalOpen}
+            onClose={() => setIsBpclModalOpen(false)}
+            agentName={selectedBoy ? selectedBoy.name : 'Delivery Boy'}
+            agentId={selectedBoy?.id}
+            reportDate={reportDate}
+            existingReport={activeBpclReport}
+            onSaved={(newRep) => {
+              setActiveBpclReport(newRep);
+              const norm = (newRep.agent_name || '').trim().toUpperCase();
+              setBpclReportsMap((prev) => ({ ...prev, [norm]: newRep }));
+            }}
+          />
+        </div>
       )}
 
       {/* Export All Online Bills Sheet Modal */}
@@ -2480,7 +2487,9 @@ export const StaffDayEndSummary: React.FC = () => {
         />
       )}
 
-      <AgentBottomNav />
+      <div className="print:hidden">
+        <AgentBottomNav />
+      </div>
     </div>
   );
 };

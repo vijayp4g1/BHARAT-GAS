@@ -73,7 +73,12 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
 
   // Print Xerox sheet
   const handlePrint = () => {
+    const originalTitle = document.title;
+    document.title = `Siddhartha Bharat Gas - Online Bills (${formattedDate})`;
     window.print();
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 1000);
   };
 
   // Copy CSV of all consumer numbers
@@ -125,14 +130,81 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
       { wch: 25 },
     ];
 
-    XLSX.writeFile(workbook, `BharatGas_Online_Bills_${reportDate}.xlsx`);
+    XLSX.writeFile(workbook, `Siddhartha_BharatGas_Online_Bills_${reportDate}.xlsx`);
     toast.success('Downloaded Excel spreadsheet!');
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[120] flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static print:z-auto">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[120] flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:z-auto print:block print:w-full">
+      {/* Dedicated Print Stylesheet: Strictly hides Day End background page and ensures clean Xerox copy */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 8mm 10mm 8mm 10mm;
+          }
+          /* Strictly hide Day End page, navigation bars, docks and non-print controls */
+          .day-end-main-page,
+          .print\\:hidden,
+          nav,
+          header,
+          footer,
+          .agent-bottom-nav {
+            display: none !important;
+          }
+          /* Body reset for clean paper Xerox */
+          body, html {
+            background: #ffffff !important;
+            color: #000000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            min-height: auto !important;
+          }
+          .print-modal-container {
+            position: static !important;
+            inset: auto !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            max-height: none !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+          }
+          .print-sheet-content {
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+          }
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .signature-section {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
       {/* Container Card */}
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100 max-h-[92vh] my-auto print:max-h-none print:shadow-none print:border-none print:bg-white print:text-black print:rounded-none">
+      <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100 max-h-[92vh] my-auto print-modal-container print:max-h-none print:shadow-none print:border-none print:bg-white print:text-black print:rounded-none">
         
         {/* ========================================================================= */}
         {/* NON-PRINT HEADER & ACTION CONTROLS (HIDDEN DURING PRINT)                  */}
@@ -250,12 +322,12 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
         {/* ========================================================================= */}
         {/* PRINTABLE XEROX SHEET CONTAINER                                          */}
         {/* ========================================================================= */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white text-slate-950 print:p-0 print:overflow-visible font-sans">
+        <div id="printable-online-bills-sheet" className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white text-slate-950 print-sheet-content print:p-0 print:overflow-visible font-sans">
           
           {/* Official Agency Letterhead Header */}
           <div className="border-b-2 border-black pb-3 mb-4 text-center">
             <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-black">
-              BHARAT GAS CONSUMER LOCATION
+              SIDDHARTHA BHARAT GAS
             </h1>
             <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wide text-slate-800 mt-0.5">
               DAILY ONLINE BILLS (PAYNBOOK APPS) SUBMISSION REPORT
@@ -400,21 +472,21 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           )}
 
           {/* Official Signatures Section for Office / Xerox Submission */}
-          <div className="mt-8 pt-4 border-t-2 border-black grid grid-cols-3 gap-4 text-center text-xs">
+          <div className="mt-8 pt-4 border-t-2 border-black grid grid-cols-3 gap-4 text-center text-xs signature-section print:mt-5 print:pt-3">
             <div>
-              <p className="font-bold text-slate-800 mb-8">Prepared By (Staff):</p>
+              <p className="font-bold text-slate-800 mb-8 print:mb-5">Prepared By (Staff):</p>
               <div className="border-t border-dotted border-black pt-1">
                 <span className="font-mono text-[10px] text-slate-600">Signature & Date</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-8">Verified By (Manager):</p>
+              <p className="font-bold text-slate-800 mb-8 print:mb-5">Verified By (Manager):</p>
               <div className="border-t border-dotted border-black pt-1">
                 <span className="font-mono text-[10px] text-slate-600">Signature & Seal</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-8">Submitted To (BPCL Office):</p>
+              <p className="font-bold text-slate-800 mb-8 print:mb-5">Submitted To (BPCL Office):</p>
               <div className="border-t border-dotted border-black pt-1">
                 <span className="font-mono text-[10px] text-slate-600">Officer Signature & Stamp</span>
               </div>
@@ -422,8 +494,8 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           </div>
 
           {/* Bottom Generation Timestamp */}
-          <div className="mt-6 text-[10px] text-slate-500 flex items-center justify-between border-t border-slate-200 pt-2 font-mono">
-            <span>Bharat Gas Consumer Location (BGCLS) System</span>
+          <div className="mt-6 text-[10px] text-slate-500 flex items-center justify-between border-t border-slate-200 pt-2 font-mono print:mt-4">
+            <span>Siddhartha Bharat Gas</span>
             <span>Printed / Generated: {new Date().toLocaleString()}</span>
           </div>
         </div>
@@ -431,3 +503,4 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     </div>
   );
 };
+
