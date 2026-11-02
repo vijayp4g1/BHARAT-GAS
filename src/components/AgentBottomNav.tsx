@@ -5,6 +5,8 @@ import { isCurrentStaffOrManager } from '../lib/staffAuth';
 
 
 export const AgentBottomNav = () => {
+  const isStaff = localStorage.getItem('bgcls_is_staff') === 'true' || isCurrentStaffOrManager();
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe z-50 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)]">
       <div className="flex items-center justify-around p-1.5 sm:p-2 max-w-lg mx-auto">
@@ -60,7 +62,7 @@ export const AgentBottomNav = () => {
         </NavLink>
 
         <NavLink 
-          to="/agent/dispatch" 
+          to={isStaff ? "/staff/day-end" : "/agent/dispatch"} 
           className={({ isActive }) => `
             flex flex-col items-center py-1 px-2.5 rounded-xl transition-all
             ${isActive 
@@ -76,7 +78,7 @@ export const AgentBottomNav = () => {
           )}
         </NavLink>
 
-        {(localStorage.getItem('bgcls_is_staff') === 'true' || isCurrentStaffOrManager()) && (
+        {isStaff && (
           <NavLink 
             to="/staff/settlement" 
             className={({ isActive }) => `

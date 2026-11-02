@@ -244,7 +244,7 @@ export const ManagerDashboard = () => {
 
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 shrink-0">
               <Link
-                to="/agent/dispatch"
+                to="/staff/day-end"
                 className="flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold px-4 py-3.5 rounded-2xl border border-emerald-400/30 active:scale-95 transition-all text-sm w-full sm:w-auto"
               >
                 <Receipt size={16} className="text-emerald-400" />
@@ -283,7 +283,7 @@ export const ManagerDashboard = () => {
               <p className="text-xs text-slate-500 mt-0.5">By colony/village</p>
             </div>
           </Link>
-          <Link to="/agent/dispatch" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50 to-teal-50">
+          <Link to="/staff/day-end" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50 to-teal-50">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-md shadow-emerald-500/30">
               <Receipt size={20} />
             </div>

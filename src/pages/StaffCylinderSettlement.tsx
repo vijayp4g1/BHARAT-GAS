@@ -859,7 +859,7 @@ export const StaffCylinderSettlement: React.FC = () => {
             {isMenuOpen && (
               <div className="absolute right-0 top-12 w-56 bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
                 <Link
-                  to="/agent/dispatch"
+                  to="/staff/day-end"
                   onClick={() => setIsMenuOpen(false)}
                   className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-emerald-300 hover:text-white hover:bg-emerald-500/20 rounded-xl transition-colors text-left"
                 >

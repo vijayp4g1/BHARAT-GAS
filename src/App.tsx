@@ -18,6 +18,7 @@ import { ManagerConsumers } from './pages/ManagerConsumers';
 import { ManagerConsumerProfile } from './pages/ManagerConsumerProfile';
 import { FindDeliveryAgent } from './pages/FindDeliveryAgent';
 import { StaffCylinderSettlement } from './pages/StaffCylinderSettlement';
+import { StaffDayEndSummary } from './pages/StaffDayEndSummary';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
@@ -56,6 +57,9 @@ function App() {
         {/* Staff Cylinder Settlement (Strictly for Authorized Staff and Owners/Managers) */}
         <Route path="/staff/settlement" element={
           <ProtectedRoute allowedRole="STAFF"><StaffCylinderSettlement /></ProtectedRoute>
+        } />
+        <Route path="/staff/day-end" element={
+          <ProtectedRoute allowedRole="STAFF"><StaffDayEndSummary /></ProtectedRoute>
         } />
 
         {/* Agent Routes */}
