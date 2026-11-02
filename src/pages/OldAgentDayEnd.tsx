@@ -442,6 +442,9 @@ export const OldAgentDayEnd: React.FC = () => {
     setIsBoyDropdownOpen(false);
     setBoySearchQuery('');
     setListSearchQuery('');
+    setRawInput('');
+    setSingleInput('');
+    setShowSuggestions(false);
     setHasUnsavedChanges(false);
 
     // Instant local draft check for snappy UX

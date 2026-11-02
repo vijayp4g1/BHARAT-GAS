@@ -222,26 +222,45 @@ export async function fetchDayEndReportForAgent(
     }
 
     const { data: sData } = await sQuery.maybeSingle();
-    if (sData && sData.notes && sData.notes.includes('__BGCLS_SCANNED_BILLS__')) {
-      const rawJson = sData.notes.split('__BGCLS_SCANNED_BILLS__')[1];
-      const parsed = JSON.parse(rawJson);
-      if (Array.isArray(parsed)) {
-        return {
-          report_date: dateStr,
-          agent_id: sData.agent_id,
-          agent_name: sData.agent_name,
-          total_deliveries: parsed.length,
-          domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
-          composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
-          commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
-          empties_collected: parsed.filter((e: any) => e.empty_collected).length,
-          cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
-          upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
-          due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
-          entries: parsed,
-          updated_at: sData.updated_at,
-        };
+    if (sData) {
+      if (sData.notes && sData.notes.includes('__BGCLS_SCANNED_BILLS__')) {
+        const rawJson = sData.notes.split('__BGCLS_SCANNED_BILLS__')[1];
+        const parsed = JSON.parse(rawJson);
+        if (Array.isArray(parsed)) {
+          return {
+            report_date: dateStr,
+            agent_id: sData.agent_id,
+            agent_name: sData.agent_name,
+            total_deliveries: parsed.length,
+            domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
+            composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
+            commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
+            empties_collected: parsed.filter((e: any) => e.empty_collected).length,
+            cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
+            upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
+            due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
+            entries: parsed,
+            updated_at: sData.updated_at,
+          };
+        }
       }
+
+      // If settlement record exists in cloud with 0 bills, return explicit 0 deliveries
+      return {
+        report_date: dateStr,
+        agent_id: sData.agent_id,
+        agent_name: sData.agent_name,
+        total_deliveries: 0,
+        domestic_14kg: 0,
+        composite_10kg: 0,
+        commercial_19kg: 0,
+        empties_collected: 0,
+        cash_count: 0,
+        upi_count: 0,
+        due_count: 0,
+        entries: [],
+        updated_at: sData.updated_at,
+      };
     }
   } catch (_) {}
 

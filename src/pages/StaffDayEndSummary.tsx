@@ -102,6 +102,7 @@ export const StaffDayEndSummary: React.FC = () => {
   const reportDateRef = useRef<string>(reportDate);
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeBoyIdentityRef = useRef<string | null>(selectedBoy ? selectedBoy.name.trim().toUpperCase() : null);
 
   // Anti-Fraud / Double-Bill Scam Detection:
   // Map of consumer_number -> { agentName, date, consumerName } for all bills already submitted by OTHER delivery boys
@@ -365,9 +366,18 @@ export const StaffDayEndSummary: React.FC = () => {
   const loadBillsForSelectedBoy = useCallback(async (boy: DeliveryBoy, dateStr: string) => {
     try {
       const normName = boy.name.trim().toUpperCase();
-      const draftKey = getWorkingDraftKey(dateStr, normName);
 
-      // 1. Check local working draft first
+      // 1. Fetch cloud summary first
+      const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
+      const cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
+
+      // Guard against race conditions when user switches boys quickly
+      if (selectedBoyRef.current?.name.trim().toUpperCase() !== normName) {
+        return;
+      }
+
+      // 2. Check local working draft
+      const draftKey = getWorkingDraftKey(dateStr, normName);
       let draftEntries: ItemEntry[] = [];
       try {
         const rawDraft = localStorage.getItem(draftKey);
@@ -379,34 +389,107 @@ export const StaffDayEndSummary: React.FC = () => {
         }
       } catch (_) {}
 
-      // 2. Fetch cloud summary
-      const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
-      const cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
-
-      // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
-      if (draftEntries.length > 0 || cloudEntries.length > 0) {
-        const mergedMap = new Map<string, ItemEntry>();
-        // Add cloud entries first
-        cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
-        // Merge draft entries (preserves newly scanned items that haven't reached cloud yet)
-        draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
-
-        const finalEntries = Array.from(mergedMap.values());
-        setEntries(finalEntries);
-
+      // 3. Resolution:
+      if (cloudEntries.length > 0) {
+        setEntries(cloudEntries);
         if (summary?.updated_at) {
           setLastSavedTime(new Date(summary.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
-        setHasUnsavedChanges(draftEntries.length > cloudEntries.length);
+        setHasUnsavedChanges(false);
+        try {
+          localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: Date.now() }));
+        } catch (_) {}
+      } else if (summary && summary.total_deliveries === 0) {
+        // Cloud officially confirms 0 deliveries for this boy:
+        // Never load stale/leaked drafts for boys with 0 bills!
+        setEntries([]);
+        setLastSavedTime(null);
+        setHasUnsavedChanges(false);
+        try {
+          localStorage.removeItem(draftKey);
+        } catch (_) {}
+      } else if (draftEntries.length > 0) {
+        // Cross-contamination safeguard: if every entry in draft belongs to another delivery boy, purge it!
+        const allClaimedByOther = draftEntries.every(
+          (e) => crossAgentClaimedMap[e.consumer_number.toLowerCase()]
+        );
+        if (allClaimedByOther && draftEntries.length > 3) {
+          setEntries([]);
+          setHasUnsavedChanges(false);
+          try {
+            localStorage.removeItem(draftKey);
+          } catch (_) {}
+        } else {
+          setEntries(draftEntries);
+          setHasUnsavedChanges(true);
+        }
       } else {
         setEntries([]);
         setLastSavedTime(null);
         setHasUnsavedChanges(false);
       }
+
+      activeBoyIdentityRef.current = normName;
     } catch (err) {
       console.warn('Failed to load bills for boy:', err);
     }
-  }, []);
+  }, [crossAgentClaimedMap]);
+
+  // 3b. Switch or Select Active Delivery Boy cleanly with ZERO cross-contamination
+  const handleSelectBoy = useCallback(async (targetBoy: DeliveryBoy) => {
+    const targetNorm = targetBoy.name.trim().toUpperCase();
+
+    // If clicking the boy that is already active and loaded, just ensure tab is SCAN
+    if (
+      selectedBoy?.name.trim().toUpperCase() === targetNorm &&
+      activeBoyIdentityRef.current === targetNorm
+    ) {
+      setActiveTab('SCAN');
+      setIsBoyDropdownOpen(false);
+      setBoySearchQuery('');
+      return;
+    }
+
+    // 1. Cancel any pending auto-saves immediately
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    // 2. If the current outgoing boy has unsaved changes, flush them for the OUTGOING boy
+    const outgoingBoy = selectedBoyRef.current;
+    if (outgoingBoy && hasUnsavedChanges && entriesRef.current.length > 0) {
+      const outgoingNorm = outgoingBoy.name.trim().toUpperCase();
+      const outgoingDraftKey = getWorkingDraftKey(reportDate, outgoingNorm);
+      try {
+        localStorage.setItem(outgoingDraftKey, JSON.stringify({
+          entries: entriesRef.current,
+          timestamp: Date.now(),
+        }));
+      } catch (_) {}
+    }
+
+    // 3. Clear all temporary form inputs and filters
+    setRawInput('');
+    setSingleInput('');
+    setListSearchQuery('');
+    setShowSuggestions(false);
+    setHasUnsavedChanges(false);
+
+    // 4. CRITICAL: Immediately clear entries in React state so the previous boy's numbers NEVER bleed into the new boy!
+    activeBoyIdentityRef.current = targetNorm;
+    setEntries([]); // Reset immediately!
+
+    // 5. Update selected boy state
+    setSelectedBoy(targetBoy);
+    selectedBoyRef.current = targetBoy;
+    setIsBoyDropdownOpen(false);
+    setBoySearchQuery('');
+    setActiveTab('SCAN');
+
+    // 6. Fetch authoritative bills for the target boy
+    await loadBillsForSelectedBoy(targetBoy, reportDate);
+  }, [selectedBoy, hasUnsavedChanges, reportDate, loadBillsForSelectedBoy]);
 
   // App Switch / Background / Pagehide Emergency Flush:
   // Ensures bills are immediately persisted when the user switches to WhatsApp or another app!
@@ -418,6 +501,8 @@ export const StaffDayEndSummary: React.FC = () => {
 
       if (boy && currentEntries.length > 0) {
         const normName = boy.name.trim().toUpperCase();
+        if (activeBoyIdentityRef.current !== normName) return;
+
         const draftKey = getWorkingDraftKey(currentDate, normName);
         try {
           localStorage.setItem(draftKey, JSON.stringify({
@@ -451,6 +536,9 @@ export const StaffDayEndSummary: React.FC = () => {
   useEffect(() => {
     if (!selectedBoy) return;
     const normName = selectedBoy.name.trim().toUpperCase();
+    // SAFETY GUARD: Never write entries to disk if they belong to another boy or are mid-switch!
+    if (activeBoyIdentityRef.current !== normName) return;
+
     const draftKey = getWorkingDraftKey(reportDate, normName);
     try {
       localStorage.setItem(draftKey, JSON.stringify({
@@ -463,6 +551,9 @@ export const StaffDayEndSummary: React.FC = () => {
   // Debounced background auto-save to cloud database whenever entries change with unsaved edits
   useEffect(() => {
     if (!selectedBoy || !hasUnsavedChanges || entries.length === 0) return;
+    const normName = selectedBoy.name.trim().toUpperCase();
+    // SAFETY GUARD: Do not auto-save if entries belong to another boy!
+    if (activeBoyIdentityRef.current !== normName) return;
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
@@ -495,7 +586,7 @@ export const StaffDayEndSummary: React.FC = () => {
     if (selectedBoy) {
       loadBillsForSelectedBoy(selectedBoy, reportDate);
     }
-  }, [selectedBoy, reportDate, loadBillsForSelectedBoy]);
+  }, [reportDate, loadBillsForSelectedBoy]);
 
   // 4. Real-time Multi-Staff Sync Listener
   useEffect(() => {
@@ -1252,12 +1343,7 @@ export const StaffDayEndSummary: React.FC = () => {
                   return (
                     <div
                       key={boy.id || boy.name}
-                      onClick={() => {
-                        setSelectedBoy(boy);
-                        setIsBoyDropdownOpen(false);
-                        setBoySearchQuery('');
-                        setActiveTab('SCAN');
-                      }}
+                      onClick={() => handleSelectBoy(boy)}
                       className={`p-2 rounded-xl cursor-pointer flex items-center justify-between text-xs transition-colors ${
                         isSelected ? 'bg-amber-400 text-slate-950 font-bold' : 'hover:bg-slate-800 text-slate-200'
                       }`}
@@ -1354,10 +1440,7 @@ export const StaffDayEndSummary: React.FC = () => {
                   return (
                     <div
                       key={boy.id || boy.name}
-                      onClick={() => {
-                        setSelectedBoy(boy);
-                        setActiveTab('SCAN');
-                      }}
+                      onClick={() => handleSelectBoy(boy)}
                       className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                         hasScams
                           ? 'bg-rose-50/90 border-2 border-rose-400 hover:bg-rose-100/90 shadow-sm shadow-rose-500/10'
@@ -1427,6 +1510,10 @@ export const StaffDayEndSummary: React.FC = () => {
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectBoy(boy);
+                          }}
                           className={`font-bold px-3 py-1.5 rounded-xl text-xs border shadow-xs flex items-center gap-1 transition-all ${
                             hasScams
                               ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-sm shadow-rose-600/30'
