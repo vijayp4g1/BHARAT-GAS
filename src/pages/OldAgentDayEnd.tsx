@@ -21,16 +21,25 @@ import {
   Camera,
   Layers,
   Database,
-  RotateCcw
+  RotateCcw,
+  ChevronDown,
+  Users,
+  ShieldAlert,
+  AlertTriangle,
+  Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 import { 
+  getDayEndDeliveryBoys,
+  fetchAllDayEndReportsForDate,
   fetchDayEndReportForAgent, 
   saveDayEndReportToDatabase, 
-  type DayEndEntry 
+  type DayEndEntry,
+  type DayEndReportSummary
 } from '../lib/dayEndService';
+import type { DeliveryBoy } from '../lib/agentService';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -39,12 +48,13 @@ export interface ItemEntry {
   address?: string;
   mobile?: string;
   found: boolean;
-  source?: 'local' | 'remote' | 'manual' | 'route';
+  source?: 'local' | 'remote' | 'manual' | 'route' | 'camera';
   cylinder_type: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM';
   payment_mode: 'CASH' | 'UPI' | 'DUE';
   empty_collected: boolean;
   dispatch_item_id?: string;
   scanned_at?: string;
+  duplicate_of_agent?: string;
 }
 
 interface Supervisor {
@@ -128,8 +138,17 @@ export const OldAgentDayEnd: React.FC = () => {
     }
   };
 
-  // Agent State (strictly locked to the currently logged-in delivery agent)
+  // Delivery Boys Roster & Selection State
+  const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
+  const [selectedBoy, setSelectedBoy] = useState<DeliveryBoy | null>(null);
+  const [isBoyDropdownOpen, setIsBoyDropdownOpen] = useState<boolean>(false);
+  const [boySearchQuery, setBoySearchQuery] = useState<string>('');
+  const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
+
+  // Agent State (can be switched to any delivery boy from the list)
   const [agentName, setAgentName] = useState<string>(() => {
+    const lastSelected = localStorage.getItem('bgcls_day_end_selected_boy_name');
+    if (lastSelected) return lastSelected;
     const savedName = localStorage.getItem('bgcls_agent_name');
     if (savedName) return savedName;
     const username = localStorage.getItem('bgcls_remember_username');
@@ -167,6 +186,49 @@ export const OldAgentDayEnd: React.FC = () => {
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Anti-fraud cross-agent claimed map for detecting duplicate bills
+  const crossAgentClaimedMap = useMemo(() => {
+    const map: Record<string, { agentName: string; date: string; consumerName?: string }> = {};
+    if (!rosterSummaries) return map;
+
+    const currentAgentName = (selectedBoy?.name || agentName || '').trim().toUpperCase();
+    const currentAgentId = selectedBoy?.id || agentId || '';
+
+    Object.values(rosterSummaries).forEach((report) => {
+      const reportAgentName = (report.agent_name || '').trim().toUpperCase();
+      const reportAgentId = report.agent_id || '';
+
+      if (reportAgentName === currentAgentName || (currentAgentId && reportAgentId === currentAgentId)) {
+        return;
+      }
+
+      if (Array.isArray(report.entries)) {
+        report.entries.forEach((entry) => {
+          if (entry.consumer_number) {
+            const clean = entry.consumer_number.trim().toLowerCase();
+            map[clean] = {
+              agentName: report.agent_name,
+              date: report.report_date,
+              consumerName: entry.consumer_name,
+            };
+          }
+        });
+      }
+    });
+
+    return map;
+  }, [rosterSummaries, selectedBoy, agentName, agentId]);
+
+  // Count how many bills in the current list are double-bills from other delivery boys
+  const duplicateScamCount = useMemo(() => {
+    return entries.filter((e) => {
+      const claimant = e.duplicate_of_agent
+        ? { agentName: e.duplicate_of_agent }
+        : crossAgentClaimedMap[e.consumer_number.toLowerCase()];
+      return !!claimant;
+    }).length;
+  }, [entries, crossAgentClaimedMap]);
+
   // Supervisor Contact (Optional WhatsApp share)
   const [supervisorPhone, setSupervisorPhone] = useState<string>(() => {
     return localStorage.getItem('bgcls_supervisor_phone') || '917337487571';
@@ -192,29 +254,36 @@ export const OldAgentDayEnd: React.FC = () => {
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Resolve Logged-in Agent Name
+  // 1. Load Delivery Boys and initial selection
   useEffect(() => {
-    const resolveAgent = async () => {
+    let isMounted = true;
+    const initBoys = async () => {
       try {
+        const boys = await getDayEndDeliveryBoys();
+        if (!isMounted || !boys || boys.length === 0) return;
+        setDeliveryBoys(boys);
+
+        const lastSelected = localStorage.getItem('bgcls_day_end_selected_boy_name');
         const currentAgentId = localStorage.getItem('bgcls_agent_id');
-        if (currentAgentId && currentAgentId !== 'agent_default') {
-          const { data } = await supabase
-            .from('agents')
-            .select('id, name, username')
-            .eq('id', currentAgentId)
-            .maybeSingle();
-          if (data?.name) {
-            setAgentName(data.name);
-            localStorage.setItem('bgcls_agent_name', data.name);
-          }
-        } else {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            const userName = user.user_metadata?.name || user.email?.split('@')[0] || '';
-            if (userName) {
-              setAgentName(userName.toUpperCase());
-            }
-          }
+        const currentName = localStorage.getItem('bgcls_agent_name');
+        const currentUsername = localStorage.getItem('bgcls_remember_username');
+
+        let matched = boys.find((b) => lastSelected && b.name.toUpperCase() === lastSelected.toUpperCase());
+        if (!matched && currentName) {
+          matched = boys.find((b) => b.name.toUpperCase() === currentName.toUpperCase());
+        }
+        if (!matched && currentUsername) {
+          matched = boys.find((b) => b.username.toLowerCase() === currentUsername.toLowerCase());
+        }
+        if (!matched && currentAgentId && currentAgentId !== 'agent_default') {
+          matched = boys.find((b) => b.id === currentAgentId);
+        }
+
+        const chosen = matched || boys[0];
+        if (chosen) {
+          setSelectedBoy(chosen);
+          setAgentName(chosen.name);
+          setAgentId(chosen.id);
         }
 
         // Fetch supervisors list for optional WhatsApp share
@@ -222,7 +291,7 @@ export const OldAgentDayEnd: React.FC = () => {
           .from('agents')
           .select('id, name, username, phone')
           .eq('role', 'MANAGER');
-        if (managers && managers.length > 0) {
+        if (managers && managers.length > 0 && isMounted) {
           setSupervisorsList(managers);
         }
       } catch (err) {
@@ -230,8 +299,83 @@ export const OldAgentDayEnd: React.FC = () => {
       }
     };
 
-    resolveAgent();
+    initBoys();
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  // 1b. Fetch all delivery boy reports for cross-agent double-bill scam detection
+  useEffect(() => {
+    let isMounted = true;
+    const loadRoster = async () => {
+      try {
+        const reports = await fetchAllDayEndReportsForDate(reportDate);
+        if (isMounted) {
+          setRosterSummaries(reports || {});
+        }
+      } catch (e) {
+        console.warn('Error loading roster reports:', e);
+      }
+    };
+    loadRoster();
+    return () => {
+      isMounted = false;
+    };
+  }, [reportDate]);
+
+  // Switch Active Delivery Boy
+  const handleSwitchBoy = async (boy: DeliveryBoy) => {
+    if (selectedBoy?.name.toUpperCase() === boy.name.toUpperCase()) {
+      setIsBoyDropdownOpen(false);
+      return;
+    }
+
+    // Auto-save any unsaved changes for the outgoing delivery boy
+    if (hasUnsavedChanges && entries.length > 0) {
+      try {
+        await saveDayEndReportToDatabase({
+          report_date: reportDate,
+          agent_id: agentId !== 'agent_default' ? agentId : undefined,
+          agent_name: agentName,
+          entries: entries as any,
+          supervisor_phone: supervisorPhone,
+        });
+      } catch (e) {
+        console.warn('Auto-save before switch notice:', e);
+      }
+    }
+
+    setSelectedBoy(boy);
+    setAgentName(boy.name);
+    setAgentId(boy.id);
+    localStorage.setItem('bgcls_day_end_selected_boy_name', boy.name);
+    setIsBoyDropdownOpen(false);
+    setBoySearchQuery('');
+    setListSearchQuery('');
+    setHasUnsavedChanges(false);
+
+    // Instant local draft check for snappy UX
+    const norm = boy.name.trim().toUpperCase();
+    const draftKey = getWorkingDraftKey(reportDate, norm);
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.entries)) {
+          setEntries(normalizeStoredEntries(parsed.entries));
+        } else {
+          setEntries([]);
+        }
+      } else {
+        setEntries([]);
+      }
+    } catch {
+      setEntries([]);
+    }
+
+    toast.success(`Active boy: ${boy.name}`);
+  };
 
   // 2. Fetch Saved Bills from Database for active date & agent (with resilient Local Working Draft protection)
   useEffect(() => {
@@ -582,6 +726,11 @@ export const OldAgentDayEnd: React.FC = () => {
       return;
     }
 
+    const claimant = crossAgentClaimedMap[consumer.consumer_number.toLowerCase()];
+    if (claimant) {
+      toast.error(`🚨 SCAM ALERT: #${consumer.consumer_number} was already claimed by ${claimant.agentName} today!`);
+    }
+
     const newEntry: ItemEntry = {
       consumer_id: consumer.id,
       consumer_number: consumer.consumer_number,
@@ -594,6 +743,7 @@ export const OldAgentDayEnd: React.FC = () => {
       payment_mode: 'CASH',
       empty_collected: true,
       scanned_at: new Date().toISOString(),
+      duplicate_of_agent: claimant ? claimant.agentName : undefined,
     };
 
     setEntries((prev) => [newEntry, ...prev]);
@@ -624,6 +774,11 @@ export const OldAgentDayEnd: React.FC = () => {
       }
     }
 
+    const claimant = crossAgentClaimedMap[cleanInput.toLowerCase()];
+    if (claimant) {
+      toast.error(`🚨 SCAM ALERT: #${cleanInput} was already claimed by ${claimant.agentName} today!`);
+    }
+
     const match = await matchConsumerWithDatabase(cleanInput, cleanInput);
 
     if (match.found) {
@@ -644,6 +799,7 @@ export const OldAgentDayEnd: React.FC = () => {
         payment_mode: 'CASH',
         empty_collected: true,
         scanned_at: new Date().toISOString(),
+        duplicate_of_agent: claimant ? claimant.agentName : undefined,
       };
 
       setEntries((prev) => [newEntry, ...prev]);
@@ -662,6 +818,7 @@ export const OldAgentDayEnd: React.FC = () => {
         payment_mode: 'CASH',
         empty_collected: true,
         scanned_at: new Date().toISOString(),
+        duplicate_of_agent: claimant ? claimant.agentName : undefined,
       };
 
       setEntries((prev) => [newEntry, ...prev]);
@@ -693,6 +850,7 @@ export const OldAgentDayEnd: React.FC = () => {
           continue;
         }
 
+        const claimant = crossAgentClaimedMap[token.toLowerCase()];
         const match = await matchConsumerWithDatabase(token, token);
         if (match.found) {
           toAdd.push({
@@ -707,6 +865,7 @@ export const OldAgentDayEnd: React.FC = () => {
             payment_mode: 'CASH',
             empty_collected: true,
             scanned_at: new Date().toISOString(),
+            duplicate_of_agent: claimant ? claimant.agentName : undefined,
           });
           existingSet.add(match.consumer_number.toLowerCase());
         } else {
@@ -719,6 +878,7 @@ export const OldAgentDayEnd: React.FC = () => {
             payment_mode: 'CASH',
             empty_collected: true,
             scanned_at: new Date().toISOString(),
+            duplicate_of_agent: claimant ? claimant.agentName : undefined,
           });
           existingSet.add(token.toLowerCase());
         }
@@ -748,6 +908,11 @@ export const OldAgentDayEnd: React.FC = () => {
     found: boolean;
     cylinder_type?: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM';
   }) => {
+    const claimant = crossAgentClaimedMap[scannedItem.consumer_number.toLowerCase()];
+    if (claimant) {
+      toast.error(`🚨 SCAM ALERT: #${scannedItem.consumer_number} was already claimed by ${claimant.agentName} today!`);
+    }
+
     setEntries((prev) => {
       const existingIdx = prev.findIndex(
         (e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase()
@@ -778,11 +943,12 @@ export const OldAgentDayEnd: React.FC = () => {
           address: scannedItem.address,
           mobile: scannedItem.mobile,
           found: scannedItem.found,
-          source: scannedItem.found ? 'local' : 'manual',
+          source: 'camera',
           cylinder_type: scannedItem.cylinder_type || '14.2KG_STD',
           payment_mode: 'CASH',
           empty_collected: true,
           scanned_at: new Date().toISOString(),
+          duplicate_of_agent: claimant ? claimant.agentName : undefined,
         },
         ...prev,
       ];
@@ -899,6 +1065,15 @@ export const OldAgentDayEnd: React.FC = () => {
     };
   }, [entries]);
 
+  // Filtered delivery boys for dropdown/modal
+  const filteredDeliveryBoys = useMemo(() => {
+    if (!boySearchQuery.trim()) return deliveryBoys;
+    const q = boySearchQuery.trim().toLowerCase();
+    return deliveryBoys.filter(
+      (b) => b.name.toLowerCase().includes(q) || (b.username && b.username.toLowerCase().includes(q))
+    );
+  }, [deliveryBoys, boySearchQuery]);
+
   return (
     <div className="min-h-screen bg-slate-100 pb-36 pt-3 px-3 max-w-xl mx-auto font-sans">
       {/* Sleek Mobile Compact Header */}
@@ -918,9 +1093,18 @@ export const OldAgentDayEnd: React.FC = () => {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight leading-tight">Day End Report</h1>
-              <p className="text-[11px] text-blue-200 font-medium flex items-center gap-1">
-                <span>👤 Agent: <strong className="text-amber-300 font-bold uppercase">{agentName}</strong></span>
-              </p>
+              <button
+                type="button"
+                onClick={() => setIsBoyDropdownOpen(true)}
+                className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/40 text-[11px] font-bold text-amber-300 transition-all active:scale-95"
+                title="Tap to switch Delivery Boy"
+              >
+                <span className="text-blue-200 font-normal">👤 Boy:</span>
+                <span className="text-white font-black uppercase tracking-wide truncate max-w-[120px]">
+                  {selectedBoy ? selectedBoy.name : agentName}
+                </span>
+                <ChevronDown className="w-3 h-3 text-amber-400 shrink-0" />
+              </button>
             </div>
           </div>
 
@@ -928,6 +1112,48 @@ export const OldAgentDayEnd: React.FC = () => {
             <span className="bg-amber-400 text-slate-950 text-xs font-black px-2.5 py-1 rounded-full shadow-sm">
               {entries.length} Deliveries
             </span>
+          </div>
+        </div>
+
+        {/* Delivery Boy Selector Row */}
+        <div className="bg-white/10 rounded-2xl p-2.5 flex items-center justify-between gap-2 border border-white/10 mb-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 shadow-sm">
+              {selectedBoy ? selectedBoy.name.charAt(0) : (agentName ? agentName.charAt(0) : '👤')}
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] text-blue-200 uppercase font-semibold tracking-wider block leading-tight">Delivery Boy</span>
+              <span className="font-black text-white text-xs uppercase truncate block">
+                {selectedBoy ? selectedBoy.name : agentName}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Quick Dropdown select for 1-tap picking on mobile */}
+            <select
+              value={selectedBoy?.name || agentName}
+              onChange={(e) => {
+                const found = deliveryBoys.find((b) => b.name === e.target.value);
+                if (found) handleSwitchBoy(found);
+              }}
+              className="bg-slate-900 text-amber-300 border border-amber-400/50 text-xs font-black px-2 py-1.5 rounded-xl focus:outline-none cursor-pointer max-w-[130px] uppercase shadow-sm"
+            >
+              {deliveryBoys.map((boy) => (
+                <option key={boy.id || boy.name} value={boy.name} className="bg-slate-900 text-white font-bold py-1">
+                  {boy.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setIsBoyDropdownOpen(true)}
+              className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-sm transition-all"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>List</span>
+            </button>
           </div>
         </div>
 
@@ -1028,6 +1254,30 @@ export const OldAgentDayEnd: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Anti-Fraud Double Bill Scam Alert Banner */}
+      {duplicateScamCount > 0 && (
+        <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-lg border border-rose-300/30 animate-pulse">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-5 h-5 text-amber-300 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-xs font-black uppercase tracking-wide truncate">
+                  {duplicateScamCount} Double Bill Scam{duplicateScamCount > 1 ? 's' : ''} Detected!
+                </h3>
+                <p className="text-[10px] text-rose-100 truncate">
+                  This bill was already claimed by another delivery boy today!
+                </p>
+              </div>
+            </div>
+            <span className="bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-white/20 shrink-0">
+              SCAM ALERT
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Gemini AI Receipt Scanner Banner */}
       <div className="mb-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-2xl p-3 shadow-md shadow-amber-500/20 text-white flex items-center justify-between gap-2 border border-amber-300/30">
@@ -1276,11 +1526,16 @@ export const OldAgentDayEnd: React.FC = () => {
           <div className="space-y-2 max-h-[460px] overflow-y-auto pr-0.5">
             {displayedEntries.map((item, index) => {
               const origIndex = entries.findIndex((e) => e.consumer_number === item.consumer_number);
+              const claimantAgent = item.duplicate_of_agent || crossAgentClaimedMap[item.consumer_number.toLowerCase()]?.agentName;
 
               return (
                 <div
                   key={`${item.consumer_number}-${index}`}
-                  className="p-2.5 rounded-2xl bg-slate-50/80 border border-slate-200/80 hover:bg-slate-100/80 transition-colors"
+                  className={`p-2.5 rounded-2xl transition-colors ${
+                    claimantAgent
+                      ? 'bg-rose-50/90 border border-rose-300 shadow-sm'
+                      : 'bg-slate-50/80 border border-slate-200/80 hover:bg-slate-100/80'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div className="min-w-0 flex-1">
@@ -1296,9 +1551,22 @@ export const OldAgentDayEnd: React.FC = () => {
                             Unverified
                           </span>
                         )}
+                        {claimantAgent && (
+                          <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded flex items-center gap-0.5 shadow-sm">
+                            <ShieldAlert className="w-2.5 h-2.5" /> SCAM DUPLICATE
+                          </span>
+                        )}
                       </div>
                       {item.address && (
                         <p className="text-[10px] text-slate-500 truncate mt-0.5">{item.address}</p>
+                      )}
+                      {claimantAgent && (
+                        <div className="mt-1.5 p-1.5 bg-rose-100/90 border border-rose-300 rounded-xl flex items-center gap-1.5 text-[10px] text-rose-900 font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>
+                            🚨 Duplicate bill already given by <strong className="uppercase underline text-rose-950 font-black">{claimantAgent}</strong>!
+                          </span>
+                        </div>
                       )}
                     </div>
 
@@ -1453,6 +1721,115 @@ export const OldAgentDayEnd: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Delivery Boy Selection Modal */}
+      {isBoyDropdownOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            {/* Modal Header */}
+            <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center font-bold text-xs border border-amber-400/30">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Select Delivery Boy</h3>
+                  <p className="text-[10px] text-slate-400">Choose who to scan or save bills for</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBoyDropdownOpen(false);
+                  setBoySearchQuery('');
+                }}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="p-2.5 border-b border-slate-800 bg-slate-900">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={boySearchQuery}
+                  onChange={(e) => setBoySearchQuery(e.target.value)}
+                  placeholder="Filter delivery boy name..."
+                  autoFocus
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Delivery Boys List */}
+            <div className="p-2.5 overflow-y-auto space-y-1.5 flex-1 divide-y divide-slate-800/40">
+              {filteredDeliveryBoys.map((boy) => {
+                const isSelected =
+                  (selectedBoy?.name.toUpperCase() === boy.name.toUpperCase()) ||
+                  (agentName.toUpperCase() === boy.name.toUpperCase());
+                const boySummary = rosterSummaries[boy.name.trim().toUpperCase()];
+                const count = boySummary?.total_deliveries || 0;
+
+                return (
+                  <button
+                    key={boy.id || boy.name}
+                    type="button"
+                    onClick={() => handleSwitchBoy(boy)}
+                    className={`w-full p-2.5 rounded-2xl flex items-center justify-between text-left transition-all active:scale-[0.99] ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-md'
+                        : 'hover:bg-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
+                          isSelected ? 'bg-slate-950 text-amber-300' : 'bg-white/10 text-white'
+                        }`}
+                      >
+                        {boy.name.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs font-black block uppercase truncate">{boy.name}</span>
+                        <span className={`text-[10px] block ${isSelected ? 'text-slate-800' : 'text-slate-400'}`}>
+                          {boy.username ? `@${boy.username}` : 'Delivery Agent'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {count > 0 && (
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isSelected ? 'bg-slate-950 text-amber-300' : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {count} bills
+                        </span>
+                      )}
+                      {isSelected ? (
+                        <span className="bg-slate-950 text-amber-400 p-1 rounded-full">
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 text-xs">Select &rarr;</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+              {filteredDeliveryBoys.length === 0 && (
+                <div className="py-8 text-center text-slate-400 text-xs">
+                  No delivery boy matches "{boySearchQuery}"
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Gemini AI Live Scanner Modal */}
       <LiveCameraScannerModal
