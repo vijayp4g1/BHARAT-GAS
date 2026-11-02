@@ -22,6 +22,8 @@ import {
   Users, 
   Save, 
   ChevronDown, 
+  ChevronUp,
+  Minus,
   RefreshCw,
   ArrowLeft,
   AlertTriangle,
@@ -125,6 +127,16 @@ export const StaffDayEndSummary: React.FC = () => {
   const [bpclReportsMap, setBpclReportsMap] = useState<Record<string, BpclReportData>>({});
   const [activeBpclReport, setActiveBpclReport] = useState<BpclReportData | null>(null);
   const [isBpclModalOpen, setIsBpclModalOpen] = useState<boolean>(false);
+
+  // Floating Action Dock Minimized state
+  const [isFloatingDockMinimized, setIsFloatingDockMinimized] = useState<boolean>(false);
+
+  // Serial Number (#1..#17) for active selected delivery boy
+  const selectedBoyIndex = useMemo(() => {
+    if (!selectedBoy) return null;
+    const idx = deliveryBoys.findIndex((b) => b.name === selectedBoy.name || b.id === selectedBoy.id);
+    return idx !== -1 ? idx + 1 : null;
+  }, [selectedBoy, deliveryBoys]);
 
   // Synchronous State Refs for Lifecycle Flush (survives app switching & tab kill)
   const entriesRef = useRef<ItemEntry[]>(entries);
@@ -479,7 +491,7 @@ export const StaffDayEndSummary: React.FC = () => {
   const handleSelectBoy = useCallback(async (targetBoy: DeliveryBoy) => {
     const targetNorm = targetBoy.name.trim().toUpperCase();
 
-    // If clicking the boy that is already active and loaded, just ensure tab is SCAN
+    // If clicking the boy that is already active and loaded, just ensure tab is SCAN and BPCL report is synced
     if (
       selectedBoy?.name.trim().toUpperCase() === targetNorm &&
       activeBoyIdentityRef.current === targetNorm
@@ -487,6 +499,7 @@ export const StaffDayEndSummary: React.FC = () => {
       setActiveTab('SCAN');
       setIsBoyDropdownOpen(false);
       setBoySearchQuery('');
+      setActiveBpclReport(bpclReportsMap[targetNorm] || null);
       return;
     }
 
@@ -1357,7 +1370,7 @@ export const StaffDayEndSummary: React.FC = () => {
   }, [deliveryBoys, boySearchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-44 pt-3 px-3 max-w-2xl mx-auto font-sans">
+    <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-2xl mx-auto font-sans">
       {/* Top Header Card */}
       <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
         {/* Header Title & Date Picker */}
@@ -1434,7 +1447,7 @@ export const StaffDayEndSummary: React.FC = () => {
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-2.5 border border-white/15 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-7 h-7 rounded-lg bg-amber-400/30 flex items-center justify-center text-amber-300 font-black text-xs shrink-0">
-                {selectedBoy ? selectedBoy.name.charAt(0) : '?'}
+                {selectedBoyIndex ? `#${selectedBoyIndex}` : '?'}
               </div>
               <div className="min-w-0">
                 <span className="text-[10px] text-blue-200 block">Active Delivery Boy</span>
@@ -1773,7 +1786,7 @@ export const StaffDayEndSummary: React.FC = () => {
           <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 font-black flex items-center justify-center text-xs">
-                {selectedBoy.name.charAt(0)}
+                #{selectedBoyIndex || 1}
               </span>
               <div>
                 <h2 className="text-xs font-black text-slate-900 leading-tight">
@@ -2131,7 +2144,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 <p className="text-[11px] text-slate-400 mt-0.5">Use the Camera Scanner or Quick Search above</p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">
+              <div className="space-y-2 pr-0.5">
                 {displayedEntries.map((item, index) => {
                   const originalIndex = entries.findIndex((e) => e.consumer_number === item.consumer_number);
                   const otherClaimant = item.duplicate_of_agent
@@ -2275,64 +2288,100 @@ export const StaffDayEndSummary: React.FC = () => {
       {/* FLOATING ACTION DOCK: DIRECT DATABASE SAVE (PRIMARY)                       */}
       {/* ========================================================================= */}
       {activeTab === 'SCAN' && selectedBoy && (
-        <div className="fixed bottom-[68px] left-3 right-3 z-40 max-w-2xl mx-auto">
-          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 p-2.5 rounded-2xl shadow-2xl flex gap-2 items-center">
-            {/* Primary Action: Save to Database */}
-            <button
-              onClick={handleSaveToDatabase}
-              disabled={isSavingDb || (entries.length === 0 && !hasUnsavedChanges)}
-              className={`flex-1 active:scale-98 text-white py-3 px-4 rounded-xl font-black text-xs sm:text-sm disabled:opacity-40 transition-all flex items-center justify-center gap-2 shadow-lg ${
-                hasUnsavedChanges
-                  ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/30 animate-pulse'
-                  : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
-              }`}
-            >
-              {isSavingDb ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Saving to Database...
-                </>
-              ) : hasUnsavedChanges ? (
-                <>
-                  <Save className="w-4 h-4" /> Save Changes ({entries.length} Bills) to Database
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" /> Save {entries.length} Bills to Database
-                </>
-              )}
-            </button>
+        isFloatingDockMinimized ? (
+          <button
+            type="button"
+            onClick={() => setIsFloatingDockMinimized(false)}
+            className={`fixed bottom-[74px] right-3 z-40 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 font-black text-xs backdrop-blur-md border transition-all active:scale-95 ${
+              hasUnsavedChanges
+                ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-300 animate-pulse shadow-amber-500/30'
+                : 'bg-slate-900/95 text-emerald-400 border-slate-700 shadow-slate-950/40'
+            }`}
+            title="Expand Save Dock"
+          >
+            {hasUnsavedChanges ? (
+              <>
+                <Save className="w-3.5 h-3.5 text-slate-950" />
+                <span>Save ({entries.length})</span>
+              </>
+            ) : (
+              <>
+                <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{entries.length} Saved</span>
+              </>
+            )}
+            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+        ) : (
+          <div className="fixed bottom-[68px] left-3 right-3 z-40 max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 p-2 sm:p-2.5 rounded-2xl shadow-2xl flex gap-1.5 sm:gap-2 items-center">
+              {/* Primary Action: Save to Database */}
+              <button
+                onClick={handleSaveToDatabase}
+                disabled={isSavingDb || (entries.length === 0 && !hasUnsavedChanges)}
+                className={`flex-1 active:scale-98 text-white py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl font-black text-xs sm:text-sm disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg ${
+                  hasUnsavedChanges
+                    ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/30 animate-pulse'
+                    : 'bg-emerald-700/90 hover:bg-emerald-600 text-white shadow-emerald-700/20'
+                }`}
+              >
+                {isSavingDb ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Saving to Database...
+                  </>
+                ) : hasUnsavedChanges ? (
+                  <>
+                    <Save className="w-4 h-4" /> Save Changes ({entries.length} Bills)
+                  </>
+                ) : (
+                  <>
+                    <CheckCheck className="w-4 h-4 text-emerald-300" /> Saved ({entries.length} Bills in Database)
+                  </>
+                )}
+              </button>
 
-            {/* Quick Camera Scanner Button in Floating Dock */}
-            <button
-              type="button"
-              onClick={() => setIsLiveScannerOpen(true)}
-              className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-95 text-slate-950 p-3 rounded-xl transition-all flex items-center justify-center shrink-0 font-black shadow-md shadow-amber-400/30"
-              title="Open Gemini AI Camera Scanner"
-            >
-              <Camera className="w-4 h-4 text-slate-950" />
-            </button>
+              {/* Quick Camera Scanner Button in Floating Dock */}
+              <button
+                type="button"
+                onClick={() => setIsLiveScannerOpen(true)}
+                className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-95 text-slate-950 p-2.5 sm:p-3 rounded-xl transition-all flex items-center justify-center shrink-0 font-black shadow-md shadow-amber-400/30"
+                title="Open Gemini AI Camera Scanner"
+              >
+                <Camera className="w-4 h-4 text-slate-950" />
+              </button>
 
-            {/* Secondary Option: WhatsApp Share (Optional) */}
-            <button
-              onClick={handleShareWhatsApp}
-              disabled={entries.length === 0}
-              className="bg-white/10 hover:bg-white/20 active:scale-98 text-white p-3 rounded-xl disabled:opacity-40 transition-all flex items-center justify-center shrink-0 border border-white/10"
-              title="Share WhatsApp copy (Optional)"
-            >
-              <Send className="w-4 h-4 text-emerald-400" />
-            </button>
+              {/* Secondary Option: WhatsApp Share (Optional) */}
+              <button
+                onClick={handleShareWhatsApp}
+                disabled={entries.length === 0}
+                className="bg-white/10 hover:bg-white/20 active:scale-98 text-white p-2.5 sm:p-3 rounded-xl disabled:opacity-40 transition-all flex items-center justify-center shrink-0 border border-white/10"
+                title="Share WhatsApp copy (Optional)"
+              >
+                <Send className="w-4 h-4 text-emerald-400" />
+              </button>
 
-            {/* Secondary Option: Copy CSV */}
-            <button
-              onClick={handleCopyCsvNumbers}
-              disabled={entries.length === 0}
-              className="bg-white/10 hover:bg-white/20 active:scale-98 text-white p-3 rounded-xl disabled:opacity-40 transition-all flex items-center justify-center shrink-0 border border-white/10"
-              title="Copy CSV Numbers"
-            >
-              {copiedCsv ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-300" />}
-            </button>
+              {/* Secondary Option: Copy CSV */}
+              <button
+                onClick={handleCopyCsvNumbers}
+                disabled={entries.length === 0}
+                className="bg-white/10 hover:bg-white/20 active:scale-98 text-white p-2.5 sm:p-3 rounded-xl disabled:opacity-40 transition-all flex items-center justify-center shrink-0 border border-white/10"
+                title="Copy CSV Numbers"
+              >
+                {copiedCsv ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-300" />}
+              </button>
+
+              {/* Minimize Dock Button */}
+              <button
+                type="button"
+                onClick={() => setIsFloatingDockMinimized(true)}
+                className="bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white p-2 sm:p-2.5 rounded-xl transition-all flex items-center justify-center shrink-0 border border-white/5"
+                title="Minimize save dock to view bills"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Live Camera Scanner Modal */}

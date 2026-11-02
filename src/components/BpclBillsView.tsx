@@ -13,7 +13,8 @@ import {
   Trash2,
   CheckCheck,
   UserCheck,
-  Loader2
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
@@ -68,6 +69,19 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   const pendingBills = report?.pending_bills || [];
   const onlineBills = report?.online_bills || [];
   const isCheckedDone = report?.checked_done ?? false;
+
+  // Collapsible Accordion State:
+  // Starts expanded if pending bills exist, or collapsed if all clear/empty
+  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
+    return (report?.pending_bills?.length ?? 0) > 0;
+  });
+
+  // Auto-expand if new pending bills arrive
+  useEffect(() => {
+    if (pendingBills.length > 0) {
+      setIsExpanded(true);
+    }
+  }, [pendingBills.length]);
 
   // Auto-search 33k database when consumer number changes in manual modal
   useEffect(() => {
@@ -243,21 +257,21 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-200 space-y-3.5">
+    <div className="bg-white rounded-3xl p-3.5 shadow-sm border border-slate-200 space-y-3 transition-all">
       {/* Header Verification & Status Bar */}
-      <div className="flex items-center justify-between gap-2 flex-wrap pb-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+      <div className="flex items-center justify-between gap-2 flex-wrap pb-2.5 border-b border-slate-100">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold shrink-0">
             <Sparkles className="w-4 h-4 text-purple-600" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <h3 className="text-xs font-black uppercase text-slate-800 tracking-tight">
-                BPCL AI Verification Status
+              <h3 className="text-xs font-black uppercase text-slate-800 tracking-tight truncate">
+                BPCL AI Verification
               </h3>
               {isCheckedDone ? (
                 <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                  <CheckCircle2 className="w-3 h-3 text-white" /> Bills Checked Done
+                  <CheckCircle2 className="w-3 h-3 text-white" /> Checked Done
                 </span>
               ) : (
                 <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">
@@ -265,16 +279,16 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-slate-500">
+            <p className="text-[10px] text-slate-500 truncate">
               {report?.updated_at 
-                ? `Last updated: ${new Date(report.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
+                ? `Updated: ${new Date(report.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
                 : 'No report loaded yet for today'}
             </p>
           </div>
         </div>
 
         {/* Header Action Buttons */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
           <button
             type="button"
             onClick={onToggleCheckedDone}
@@ -299,7 +313,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
             title="Manually add a single pending or online bill"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>+ Add Bill</span>
+            <span className="hidden sm:inline">+ Add Bill</span>
           </button>
 
           <button
@@ -310,85 +324,150 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
             <Sparkles className="w-3.5 h-3.5" />
             <span>{report ? 'Update' : '+ Paste'}</span>
           </button>
-        </div>
-      </div>
 
-      {/* Sub Tabs: Pending Deliveries vs Online PayNBook */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('PENDING')}
-          className={`flex-1 py-2 px-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
-            activeTab === 'PENDING'
-              ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/20'
-              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-          }`}
-        >
-          <Clock className="w-3.5 h-3.5" />
-          <span>Pending Deliveries</span>
-          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-            activeTab === 'PENDING' ? 'bg-amber-900/40 text-amber-100' : 'bg-slate-200 text-slate-700'
-          }`}>
-            {pendingBills.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('ONLINE')}
-          className={`flex-1 py-2 px-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
-            activeTab === 'ONLINE'
-              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20'
-              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-          }`}
-        >
-          <Globe className="w-3.5 h-3.5" />
-          <span>Online (PayNBook)</span>
-          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-            activeTab === 'ONLINE' ? 'bg-indigo-900/40 text-indigo-100' : 'bg-slate-200 text-slate-700'
-          }`}>
-            {onlineBills.length}
-          </span>
-        </button>
-      </div>
-
-      {/* Filter and Quick Copy Toolbar */}
-      {activeBills.length > 0 && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`Search ${activeTab.toLowerCase()} by consumer or name...`}
-              className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-slate-800 placeholder:text-slate-400"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
+          {/* Collapsible Accordion Toggle */}
           <button
             type="button"
-            onClick={handleCopyAllCsv}
-            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
-            title="Copy numbers as CSV"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 transition-all active:scale-95 border ${
+              isExpanded
+                ? 'bg-slate-800 text-white border-slate-700 shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200'
+            }`}
+            title={isExpanded ? 'Collapse bill details' : 'Expand bill details'}
           >
-            <Copy className="w-3 h-3" />
-            <span>Copy CSV</span>
+            <span>{isExpanded ? 'Hide' : 'View'}</span>
+            <span className="text-[10px] opacity-80">({pendingBills.length + onlineBills.length})</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Bills Cards List */}
-      <div className="space-y-2 max-h-96 overflow-y-auto pr-0.5">
+      {/* Quick Summary Pill Bar (Always visible) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('PENDING');
+            setIsExpanded(true);
+          }}
+          className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all ${
+            pendingBills.length > 0
+              ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300 shadow-xs ring-1 ring-amber-300/50'
+              : 'bg-slate-50 text-slate-500 border-slate-200'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-600" />
+          <span>Pending: <b>{pendingBills.length}</b></span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('ONLINE');
+            setIsExpanded(true);
+          }}
+          className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all ${
+            onlineBills.length > 0
+              ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border-indigo-200 shadow-xs'
+              : 'bg-slate-50 text-slate-500 border-slate-200'
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Online (PayNBook): <b>{onlineBills.length}</b></span>
+        </button>
+
+        {!isExpanded && (
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="text-[11px] font-bold text-purple-600 hover:text-purple-700 ml-auto flex items-center gap-0.5"
+          >
+            <span>Tap to show details</span>
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Accordion Body: Tabs, Filter & Bills List */}
+      {isExpanded && (
+        <div className="space-y-3 pt-1 border-t border-slate-100">
+          {/* Sub Tabs: Pending Deliveries vs Online PayNBook */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('PENDING')}
+              className={`flex-1 py-2 px-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                activeTab === 'PENDING'
+                  ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-500/20'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Pending Deliveries</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeTab === 'PENDING' ? 'bg-amber-900/40 text-amber-100' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {pendingBills.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('ONLINE')}
+              className={`flex-1 py-2 px-3 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                activeTab === 'ONLINE'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Online (PayNBook)</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeTab === 'ONLINE' ? 'bg-indigo-900/40 text-indigo-100' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {onlineBills.length}
+              </span>
+            </button>
+          </div>
+
+          {/* Filter and Quick Copy Toolbar */}
+          {activeBills.length > 0 && (
+            <div className="flex items-center justify-between gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={`Search ${activeTab.toLowerCase()} by consumer or name...`}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-slate-800 placeholder:text-slate-400"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopyAllCsv}
+                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors"
+                title="Copy numbers as CSV"
+              >
+                <Copy className="w-3 h-3" />
+                <span>Copy CSV</span>
+              </button>
+            </div>
+          )}
+
+          {/* Bills Cards List */}
+          <div className="space-y-2 max-h-96 overflow-y-auto overscroll-contain pr-0.5">
         {filteredBills.length === 0 ? (
           <div className="p-6 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-2">
             <p className="text-xs text-slate-500 font-medium">
@@ -535,6 +614,8 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
           })
         )}
       </div>
+    </div>
+  )}
 
       {/* ========================================================================= */}
       {/* MANUAL ADD BILL MODAL (EASY MANUAL ENTRY WITH 33K DATABASE AUTO-MATCH)     */}
