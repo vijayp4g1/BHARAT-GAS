@@ -1467,7 +1467,7 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                {filteredBoys.map((boy) => {
+                {filteredBoys.map((boy, idx) => {
                   const normName = boy.name.trim().toUpperCase();
                   const summary = rosterSummaries[normName];
                   const billCount = summary?.total_deliveries || 0;
@@ -1484,12 +1484,12 @@ export const StaffDayEndSummary: React.FC = () => {
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-[10px] ${
-                          hasScams ? 'bg-rose-600 text-white' : 'bg-white/10'
+                        <span className={`min-w-[24px] h-6 px-1 rounded-md flex items-center justify-center font-black text-[10px] ${
+                          hasScams ? 'bg-rose-600 text-white' : isSelected ? 'bg-slate-950 text-amber-300' : 'bg-white/15 text-amber-300'
                         }`}>
-                          {boy.name.charAt(0)}
+                          #{idx + 1}
                         </span>
-                        <span>{boy.name}</span>
+                        <span className="font-bold">{boy.name}</span>
                         {hasScams && (
                           <span className="text-[9px] bg-rose-600 text-white font-black px-1.5 py-0.2 rounded-full animate-pulse">
                             🚨 {scamInfo.scamCount} SCAM
@@ -1565,7 +1565,7 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {deliveryBoys.map((boy) => {
+                {deliveryBoys.map((boy, index) => {
                   const normName = boy.name.trim().toUpperCase();
                   const summary = rosterSummaries[normName];
                   const hasBills = summary && summary.total_deliveries > 0;
@@ -1577,25 +1577,27 @@ export const StaffDayEndSummary: React.FC = () => {
                   const pendingCount = bpcl?.pending_bills?.length || 0;
                   const onlineCount = bpcl?.online_bills?.length || 0;
 
+                  // 1. Scanned bills of delivery boys should be green as before!
+                  // 2. Checked done with pending bills -> amber warning with big alert banner
+                  // 3. Checked done with 0 pending bills -> verified emerald/teal
+                  // 4. Zero bills recorded -> clean neutral slate
                   const cardStyle = hasScams
                     ? 'bg-rose-50/95 border-2 border-rose-400 hover:bg-rose-100/90 shadow-sm shadow-rose-500/10'
-                    : isCheckedDone
-                    ? pendingCount > 0
-                      ? 'bg-gradient-to-r from-amber-50/95 via-orange-50/80 to-amber-50/95 border-2 border-amber-400 shadow-md shadow-amber-500/15 ring-1 ring-amber-300 hover:bg-amber-100/90'
-                      : 'bg-gradient-to-r from-emerald-50/90 via-teal-50/80 to-emerald-50/90 border-2 border-emerald-500 shadow-sm shadow-emerald-500/10 hover:border-emerald-600 hover:bg-emerald-100/90'
+                    : isCheckedDone && pendingCount > 0
+                    ? 'bg-gradient-to-r from-amber-50/95 via-orange-50/80 to-amber-50/95 border-2 border-amber-400 shadow-md shadow-amber-500/15 ring-1 ring-amber-300 hover:bg-amber-100/90'
+                    : isCheckedDone && pendingCount === 0
+                    ? 'bg-gradient-to-r from-emerald-50/90 via-teal-50/80 to-emerald-50/90 border-2 border-emerald-500 shadow-sm shadow-emerald-500/10 hover:border-emerald-600 hover:bg-emerald-100/90'
                     : hasBills
-                    ? 'bg-slate-50/90 border border-slate-300 hover:bg-slate-100/90'
-                    : 'bg-slate-50/60 border border-slate-200 hover:bg-slate-100';
+                    ? 'bg-emerald-50/60 border-2 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 shadow-xs'
+                    : 'bg-slate-50/70 border border-slate-200 hover:bg-slate-100';
 
                   const avatarStyle = hasScams
                     ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-md'
-                    : isCheckedDone
-                    ? pendingCount > 0
-                      ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 font-black shadow-md'
-                      : 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-black shadow-md'
+                    : isCheckedDone && pendingCount > 0
+                    ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 font-black shadow-md'
                     : hasBills
-                    ? 'bg-slate-600 text-white font-bold'
-                    : 'bg-slate-200 text-slate-600';
+                    ? 'bg-emerald-600 text-white font-black shadow-sm'
+                    : 'bg-slate-200 text-slate-600 font-bold';
 
                   return (
                     <div
@@ -1605,12 +1607,20 @@ export const StaffDayEndSummary: React.FC = () => {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm ${avatarStyle}`}>
-                            {boy.name.charAt(0)}
+                          {/* Avatar with Name First Letter Alphabet & Serial Number */}
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm relative ${avatarStyle}`}>
+                            <span>{boy.name.charAt(0)}</span>
+                            {/* Serial Number at first letter alphabet */}
+                            <span className="absolute -top-1.5 -left-1.5 px-1 min-w-[16px] h-4 bg-slate-950 text-amber-300 rounded-md text-[9px] font-black flex items-center justify-center border border-white/80 shadow-xs">
+                              {index + 1}
+                            </span>
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <h3 className="font-bold text-sm text-slate-900">{boy.name}</h3>
+                              <h3 className="font-bold text-sm text-slate-900">
+                                <span className="text-slate-400 font-mono text-xs font-black mr-1">#{index + 1}</span>
+                                {boy.name}
+                              </h3>
                               {hasBills ? (
                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
                                   hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
