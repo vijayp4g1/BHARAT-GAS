@@ -1607,20 +1607,13 @@ export const StaffDayEndSummary: React.FC = () => {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex items-center gap-3">
-                          {/* Avatar with Name First Letter Alphabet & Serial Number */}
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm relative ${avatarStyle}`}>
-                            <span>{boy.name.charAt(0)}</span>
-                            {/* Serial Number at first letter alphabet */}
-                            <span className="absolute -top-1.5 -left-1.5 px-1 min-w-[16px] h-4 bg-slate-950 text-amber-300 rounded-md text-[9px] font-black flex items-center justify-center border border-white/80 shadow-xs">
-                              {index + 1}
-                            </span>
+                          {/* Serial Number in Place of A, E, H */}
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm ${avatarStyle}`}>
+                            {index + 1}
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <h3 className="font-bold text-sm text-slate-900">
-                                <span className="text-slate-400 font-mono text-xs font-black mr-1">#{index + 1}</span>
-                                {boy.name}
-                              </h3>
+                              <h3 className="font-bold text-sm text-slate-900">{boy.name}</h3>
                               {hasBills ? (
                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
                                   hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
