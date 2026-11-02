@@ -27,7 +27,10 @@ import {
   ShieldAlert,
   AlertTriangle,
   Check,
-  Lock
+  Lock,
+  Sparkles,
+  Clock,
+  Globe
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -47,6 +50,14 @@ import {
   fetchAgentDeliveryBoyAssignments,
   resolveCurrentAgentDeliveryBoy 
 } from '../lib/agentAssignmentService';
+import { 
+  fetchBpclReport, 
+  toggleBillsCheckedDone, 
+  type BpclReportData, 
+  type BpclBillItem 
+} from '../lib/bpclReportService';
+import { BpclReportModal } from '../components/BpclReportModal';
+import { BpclBillsView } from '../components/BpclBillsView';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -156,6 +167,10 @@ export const OldAgentDayEnd: React.FC = () => {
   const [isStaffOrManager, setIsStaffOrManager] = useState<boolean>(() => isCurrentStaffOrManager());
   const [assignedRoute, setAssignedRoute] = useState<string | null>(() => getAgentAssignedDeliveryBoy());
   const [isAccessChecking, setIsAccessChecking] = useState<boolean>(true);
+
+  // BPCL AI Status Report & "Bills Checked Done" state
+  const [bpclReport, setBpclReport] = useState<BpclReportData | null>(null);
+  const [isBpclModalOpen, setIsBpclModalOpen] = useState<boolean>(false);
 
   // Agent State (can be switched to any delivery boy from the list)
   const [agentName, setAgentName] = useState<string>(() => {
@@ -418,6 +433,63 @@ export const OldAgentDayEnd: React.FC = () => {
       isMounted = false;
     };
   }, [reportDate]);
+
+  // 1c. Fetch BPCL AI Status Report for the active delivery boy
+  useEffect(() => {
+    let isMounted = true;
+    const name = selectedBoy ? selectedBoy.name : agentName;
+    if (!name || name === 'Delivery Agent') return;
+
+    fetchBpclReport(reportDate, name, selectedBoy?.id || agentId).then((rep) => {
+      if (isMounted) setBpclReport(rep);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [reportDate, selectedBoy, agentName, agentId]);
+
+  // Toggle "Bills Checked Done"
+  const handleToggleCheckedDone = async () => {
+    const name = selectedBoy ? selectedBoy.name : agentName;
+    if (!name || name === 'Delivery Agent') return;
+
+    const currentStatus = bpclReport?.checked_done ?? false;
+    const nextStatus = !currentStatus;
+
+    await toggleBillsCheckedDone(reportDate, name, selectedBoy?.id || agentId, nextStatus);
+    const updated = await fetchBpclReport(reportDate, name, selectedBoy?.id || agentId);
+    setBpclReport(updated);
+    toast.success(nextStatus ? `Marked bills as Checked Done!` : `Unmarked Checked Done`);
+  };
+
+  // 1-click Add a Pending BPCL Bill into Completed Deliveries
+  const handleAddPendingBillToScanned = async (bill: BpclBillItem) => {
+    if (entries.some((e) => e.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase())) {
+      toast('This consumer is already in Completed Deliveries', { icon: 'ℹ️' });
+      return;
+    }
+
+    const match = await matchConsumerWithDatabase(bill.consumer_number, bill.consumer_name);
+    const newEntry: ItemEntry = {
+      consumer_id: match.consumer_id,
+      consumer_number: match.consumer_number || bill.consumer_number,
+      consumer_name: match.consumer_name || bill.consumer_name || 'Consumer',
+      address: match.address || '',
+      mobile: match.mobile || '',
+      found: match.found,
+      source: 'manual',
+      cylinder_type: '14.2KG_STD',
+      payment_mode: 'CASH',
+      empty_collected: true,
+      scanned_at: new Date().toISOString(),
+    };
+
+    const next = [newEntry, ...entries];
+    setEntries(next);
+    setHasUnsavedChanges(true);
+    toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
+  };
 
   // Switch Active Delivery Boy
   const handleSwitchBoy = async (boy: DeliveryBoy) => {
@@ -1451,6 +1523,19 @@ export const OldAgentDayEnd: React.FC = () => {
         </div>
       </div>
 
+      {/* BPCL AI Verification: Pending & Online Bills Viewer */}
+      <div className="mb-3">
+        <BpclBillsView
+          report={bpclReport}
+          agentName={selectedBoy ? selectedBoy.name : agentName}
+          reportDate={reportDate}
+          scannedEntries={entries}
+          onOpenPasteModal={() => setIsBpclModalOpen(true)}
+          onToggleCheckedDone={handleToggleCheckedDone}
+          onAddBillToScanned={handleAddPendingBillToScanned}
+        />
+      </div>
+
       {/* Input Mode Selector */}
       <div className="bg-slate-200/80 p-1 rounded-2xl mb-2.5 flex text-xs font-bold text-slate-600">
         <button
@@ -1960,6 +2045,21 @@ export const OldAgentDayEnd: React.FC = () => {
         agentName={agentName}
         agentId={agentId}
       />
+
+      {/* BPCL AI Status Report Modal */}
+      {isBpclModalOpen && (
+        <BpclReportModal
+          isOpen={isBpclModalOpen}
+          onClose={() => setIsBpclModalOpen(false)}
+          agentName={selectedBoy ? selectedBoy.name : agentName}
+          agentId={selectedBoy?.id || agentId}
+          reportDate={reportDate}
+          existingReport={bpclReport}
+          onSaved={(newRep) => {
+            setBpclReport(newRep);
+          }}
+        />
+      )}
 
       <AgentBottomNav />
     </div>
