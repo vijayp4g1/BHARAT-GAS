@@ -42,20 +42,37 @@ export async function fetchAgentDeliveryBoyAssignments(): Promise<AgentAssignmen
   const map: AgentAssignmentMap = { ...getLocalAssignments() };
 
   try {
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('entity_id, action_type, timestamp')
-      .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
-      .order('timestamp', { ascending: true });
+    const [{ data: auditData }, { data: agentsData }] = await Promise.all([
+      adminClient
+        .from('audit_logs')
+        .select('entity_id, action_type, timestamp')
+        .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
+        .order('timestamp', { ascending: true }),
+      adminClient
+        .from('agents')
+        .select('id, username')
+    ]);
 
-    if (!error && Array.isArray(data)) {
-      data.forEach((row) => {
+    const idToUsername: Record<string, string> = {};
+    if (Array.isArray(agentsData)) {
+      agentsData.forEach((a) => {
+        if (a.id && a.username) {
+          idToUsername[a.id] = a.username.toLowerCase().trim();
+        }
+      });
+    }
+
+    if (Array.isArray(auditData)) {
+      auditData.forEach((row) => {
         if (!row.entity_id || !row.action_type) return;
         const boyName = row.action_type.replace('ASSIGN_DELIVERY_BOY:', '').trim().toUpperCase();
+        const username = idToUsername[row.entity_id];
         if (boyName === 'UNASSIGNED' || boyName === 'NONE' || !boyName) {
           delete map[row.entity_id];
+          if (username) delete map[username];
         } else {
           map[row.entity_id] = boyName;
+          if (username) map[username] = boyName;
         }
       });
       setLocalAssignments(map);
@@ -193,17 +210,39 @@ export async function resolveCurrentAgentDeliveryBoy(): Promise<{
   isStaffOrManager: boolean;
   assignedBoy: string | null;
 }> {
-  // 1. Refresh staff permission
+  // 1. Authoritative check for Staff / Manager
   const isStaff = await refreshCurrentStaffPermission();
   if (isStaff) {
     return { isStaffOrManager: true, assignedBoy: 'ALL' };
   }
 
-  // 2. Fetch latest assignments from Supabase audit_logs
+  // 2. Non-staff agent: Check Supabase auth session metadata directly
+  let sessionUserId: string | null = null;
+  let sessionUsername: string | null = null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      sessionUserId = user.id;
+      sessionUsername = user.email ? user.email.replace('@bgcls.local', '').trim().toLowerCase() : null;
+      const metaBoy = user.user_metadata?.assigned_delivery_boy;
+      if (metaBoy && typeof metaBoy === 'string') {
+        const norm = metaBoy.trim().toUpperCase();
+        localStorage.setItem('bgcls_assigned_delivery_boy', norm);
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to get user metadata for delivery boy route:', e);
+  }
+
+  // 3. Fetch latest assignments from Supabase audit_logs
   await fetchAgentDeliveryBoyAssignments();
 
-  // 3. Resolve assigned delivery boy
-  const assignedBoy = getAgentAssignedDeliveryBoy();
+  // 4. Resolve assigned delivery boy using all identifiers
+  const assignedBoy = getAgentAssignedDeliveryBoy(sessionUserId, sessionUsername);
+  if (assignedBoy && assignedBoy !== 'ALL') {
+    localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy);
+  }
+
   return {
     isStaffOrManager: false,
     assignedBoy,

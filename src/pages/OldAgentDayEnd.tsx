@@ -159,11 +159,15 @@ export const OldAgentDayEnd: React.FC = () => {
 
   // Agent State (can be switched to any delivery boy from the list)
   const [agentName, setAgentName] = useState<string>(() => {
+    if (!isCurrentStaffOrManager()) {
+      const assigned = localStorage.getItem('bgcls_assigned_delivery_boy');
+      if (assigned) return assigned.trim().toUpperCase();
+    }
     const lastSelected = localStorage.getItem('bgcls_day_end_selected_boy_name');
     if (lastSelected) return lastSelected;
     const savedName = localStorage.getItem('bgcls_agent_name');
     if (savedName) return savedName;
-    const username = localStorage.getItem('bgcls_remember_username');
+    const username = localStorage.getItem('bgcls_logged_username') || localStorage.getItem('bgcls_remember_username');
     if (username) return username.toUpperCase();
     return 'Delivery Agent';
   });
@@ -317,28 +321,39 @@ export const OldAgentDayEnd: React.FC = () => {
     let isMounted = true;
     const initBoys = async () => {
       try {
+        // Wait until route and staff permissions have been verified
+        if (isAccessChecking) return;
+
         const boys = await getDayEndDeliveryBoys();
         if (!isMounted || !boys || boys.length === 0) return;
 
-        // If NOT staff/manager and assigned to a specific delivery boy:
-        if (!isStaffOrManager && assignedRoute && assignedRoute !== 'ALL') {
-          const normRoute = assignedRoute.trim().toUpperCase();
-          const matched = boys.find((b) => b.name.toUpperCase() === normRoute);
-          const routeBoy: DeliveryBoy = matched || {
-            id: `boy_${normRoute.toLowerCase()}`,
-            name: normRoute,
-            username: normRoute.toLowerCase(),
-            role: 'AGENT' as const,
-            status: 'ACTIVE' as const,
-          };
-          setDeliveryBoys([routeBoy]);
-          setSelectedBoy(routeBoy);
-          setAgentName(routeBoy.name);
-          setAgentId(routeBoy.id);
-          localStorage.setItem('bgcls_day_end_selected_boy_name', routeBoy.name);
+        // Non-staff guard: Strictly lock to manager-assigned delivery boy only
+        if (!isStaffOrManager) {
+          if (assignedRoute && assignedRoute !== 'ALL') {
+            const normRoute = assignedRoute.trim().toUpperCase();
+            const matched = boys.find((b) => b.name.toUpperCase() === normRoute);
+            const routeBoy: DeliveryBoy = matched || {
+              id: `boy_${normRoute.toLowerCase()}`,
+              name: normRoute,
+              username: normRoute.toLowerCase(),
+              role: 'AGENT' as const,
+              status: 'ACTIVE' as const,
+            };
+            setDeliveryBoys([routeBoy]);
+            setSelectedBoy(routeBoy);
+            setAgentName(routeBoy.name);
+            setAgentId(routeBoy.id);
+            localStorage.setItem('bgcls_day_end_selected_boy_name', routeBoy.name);
+          } else {
+            // Unassigned non-staff user: STRICTLY EMPTY LIST
+            setDeliveryBoys([]);
+            setSelectedBoy(null);
+            setAgentName('');
+          }
           return;
         }
 
+        // Staff & Managers get the full roster of all delivery boys
         setDeliveryBoys(boys);
 
         const lastSelected = localStorage.getItem('bgcls_day_end_selected_boy_name');
@@ -383,7 +398,7 @@ export const OldAgentDayEnd: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isStaffOrManager, assignedRoute]);
+  }, [isStaffOrManager, assignedRoute, isAccessChecking]);
 
   // 1b. Fetch all delivery boy reports for cross-agent double-bill scam detection
   useEffect(() => {
@@ -407,12 +422,10 @@ export const OldAgentDayEnd: React.FC = () => {
   // Switch Active Delivery Boy
   const handleSwitchBoy = async (boy: DeliveryBoy) => {
     // Non-staff guard: Cannot switch to other delivery boys
-    if (!isStaffOrManager && assignedRoute && assignedRoute !== 'ALL') {
-      if (boy.name.trim().toUpperCase() !== assignedRoute.trim().toUpperCase()) {
-        toast.error(`Access Restricted: Your account is assigned only to ${assignedRoute}.`);
-        setIsBoyDropdownOpen(false);
-        return;
-      }
+    if (!isStaffOrManager) {
+      toast.error('Only Staff and Managers can switch delivery boys.');
+      setIsBoyDropdownOpen(false);
+      return;
     }
 
     if (selectedBoy?.name.toUpperCase() === boy.name.toUpperCase()) {

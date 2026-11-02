@@ -123,6 +123,7 @@ export const Login = () => {
           localStorage.setItem('bgcls_is_staff', 'true');
         } else {
           localStorage.removeItem('bgcls_is_staff');
+          localStorage.setItem('bgcls_is_staff', 'false');
         }
 
         localStorage.setItem('bgcls_agent_id', data.user.id);
@@ -131,9 +132,27 @@ export const Login = () => {
         if (agentData?.name) {
           localStorage.setItem('bgcls_agent_name', agentData.name);
         }
-        const assignedBoy = data.user?.user_metadata?.assigned_delivery_boy;
+
+        let assignedBoy = data.user?.user_metadata?.assigned_delivery_boy;
+        if (!assignedBoy && data.user.id) {
+          const { data: auditLog } = await supabase
+            .from('audit_logs')
+            .select('action_type')
+            .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
+            .eq('entity_id', data.user.id)
+            .order('timestamp', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (auditLog?.action_type) {
+            const parsed = auditLog.action_type.replace('ASSIGN_DELIVERY_BOY:', '').trim().toUpperCase();
+            if (parsed && parsed !== 'UNASSIGNED' && parsed !== 'NONE') {
+              assignedBoy = parsed;
+            }
+          }
+        }
+
         if (assignedBoy) {
-          localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy);
+          localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy.trim().toUpperCase());
         } else {
           localStorage.removeItem('bgcls_assigned_delivery_boy');
         }

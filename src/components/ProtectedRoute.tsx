@@ -26,21 +26,18 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
         // If checking a STAFF-only route, live verify staff permission against cloud
         if (allowedRole === 'STAFF') {
           const liveStaff = await refreshCurrentStaffPermission();
-          if (liveStaff) {
-            localStorage.setItem('bgcls_is_staff', 'true');
+          if (!liveStaff) {
+            setUserRole('AGENT');
+            setIsAuthenticated(true);
+            return;
           }
         }
 
-        const cachedRole = localStorage.getItem('bgcls_user_role');
-        if (cachedRole) {
-          setUserRole(cachedRole);
-          setIsAuthenticated(true);
-          return;
-        }
-
         const fallbackRole = session.user.email?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
-        localStorage.setItem('bgcls_user_role', fallbackRole);
-        setUserRole(fallbackRole);
+        const cachedRole = localStorage.getItem('bgcls_user_role') || fallbackRole;
+        setUserRole(cachedRole);
+        setIsAuthenticated(true);
+        return;
       }
       
       setIsAuthenticated(true);
@@ -68,8 +65,8 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
   if (allowedRole === 'STAFF') {
     const hasStaffAccess = isCurrentStaffOrManager();
     if (!hasStaffAccess) {
-      toast.error('Restricted: Only authorized staff members can access Cylinder Settlement.');
-      return <Navigate to="/agent/search" replace />;
+      toast.error('Restricted: Staff permission required.');
+      return <Navigate to="/agent/dispatch" replace />;
     }
     return <>{children}</>;
   }

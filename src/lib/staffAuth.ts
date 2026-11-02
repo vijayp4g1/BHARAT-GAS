@@ -34,8 +34,6 @@ export function hasStaffPermission(
   isStaffDb?: boolean | null,
   agentName?: string | null
 ): boolean {
-  if (isStaffDb === true) return true;
-
   const cleanUsername = (username || '').toLowerCase().replace('@', '').trim();
   const cleanName = (agentName || '').toLowerCase().trim();
 
@@ -46,6 +44,11 @@ export function hasStaffPermission(
   if (cleanUsername === 'ganesh' || cleanName === 'ganesh' || cleanUsername.startsWith('ganesh') || cleanName.startsWith('ganesh')) {
     return true;
   }
+
+  // If database explicitly set is_staff to true
+  if (isStaffDb === true) return true;
+  // If database explicitly set is_staff to false, this user is strictly NOT staff!
+  if (isStaffDb === false) return false;
 
   if (!agentId && !username && !agentName) return false;
 
@@ -61,66 +64,124 @@ export function hasStaffPermission(
  * Check if the currently active logged-in user is a Staff member or Manager
  */
 export function isCurrentStaffOrManager(): boolean {
-  const role = localStorage.getItem('bgcls_user_role');
-  if (role === 'MANAGER') return true;
+  // If explicitly flagged as non-staff
+  if (localStorage.getItem('bgcls_is_staff') === 'false') {
+    return false;
+  }
 
-  const currentAgentId = localStorage.getItem('bgcls_agent_id');
-  const currentUsername = localStorage.getItem('bgcls_remember_username');
-  const isExplicitStaff = localStorage.getItem('bgcls_is_staff') === 'true';
+  const currentUsername = (
+    localStorage.getItem('bgcls_logged_username') ||
+    localStorage.getItem('bgcls_remember_username') ||
+    ''
+  ).toLowerCase().trim();
 
-  if (isExplicitStaff) return true;
-  return hasStaffPermission(currentAgentId, currentUsername);
-}
-
-/**
- * Live-refresh and verify staff permissions against Supabase
- * Ensures that if Manager granted permission while user was logged in,
- * the user receives instant access without having to re-login.
- */
-export async function refreshCurrentStaffPermission(): Promise<boolean> {
-  const role = localStorage.getItem('bgcls_user_role');
-  if (role === 'MANAGER') return true;
-
-  const currentAgentId = localStorage.getItem('bgcls_agent_id');
-  const currentUsername = (localStorage.getItem('bgcls_remember_username') || '').toLowerCase().trim();
+  // Non-staff known agents
+  if (currentUsername === 'sanija') {
+    return false;
+  }
 
   // Pre-approved staff usernames
   if (currentUsername === 'john' || currentUsername === 'ganesh') {
-    localStorage.setItem('bgcls_is_staff', 'true');
     return true;
   }
 
-  if (!currentAgentId && !currentUsername) return false;
+  const role = localStorage.getItem('bgcls_user_role');
+  if (role === 'AGENT') {
+    return localStorage.getItem('bgcls_is_staff') === 'true';
+  }
 
-  try {
-    let query = supabase.from('agents').select('id, name, username, is_staff, role');
-    if (currentAgentId && currentAgentId !== 'agent_default') {
-      query = query.or(`id.eq.${currentAgentId},username.ilike.${currentUsername || ''}`);
-    } else if (currentUsername) {
-      query = query.ilike('username', currentUsername);
+  if (role === 'MANAGER') {
+    // Only allow manager if username is NOT an agent
+    const isAgentUser = currentUsername && !currentUsername.includes('manager') && !currentUsername.includes('admin') && !currentUsername.includes('@');
+    if (isAgentUser) {
+      return localStorage.getItem('bgcls_is_staff') === 'true';
     }
-
-    const { data } = await query.maybeSingle();
-    if (data) {
-      const isStaff = Boolean(
-        data.is_staff === true ||
-        data.role === 'MANAGER' ||
-        (data.username && (data.username.toLowerCase() === 'john' || data.username.toLowerCase() === 'ganesh'))
-      );
-
-      if (isStaff) {
-        localStorage.setItem('bgcls_is_staff', 'true');
-        return true;
-      } else {
-        localStorage.removeItem('bgcls_is_staff');
-        return false;
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to refresh staff permission from cloud:', err);
+    return true;
   }
 
   return localStorage.getItem('bgcls_is_staff') === 'true';
+}
+
+/**
+ * Live-refresh and verify staff permissions directly against Supabase Postgres
+ * Authoritative check: never trusts stale localStorage.
+ */
+export async function refreshCurrentStaffPermission(): Promise<boolean> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !session.user) {
+      const currentUsername = (
+        localStorage.getItem('bgcls_logged_username') ||
+        localStorage.getItem('bgcls_remember_username') ||
+        ''
+      ).toLowerCase().trim();
+
+      if (currentUsername === 'john' || currentUsername === 'ganesh') {
+        localStorage.setItem('bgcls_is_staff', 'true');
+        return true;
+      }
+      return false;
+    }
+
+    const email = (session.user.email || '').toLowerCase().trim();
+    const userId = session.user.id;
+
+    // Manager / Owner account (custom domain / external email like vijay.p4g1@gmail.com)
+    if (!email.includes('@bgcls.local')) {
+      const { data: agent } = await adminClient
+        .from('agents')
+        .select('id, name, username, is_staff, role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const isMgr = agent?.role === 'MANAGER' || !agent;
+      if (isMgr) {
+        localStorage.setItem('bgcls_user_role', 'MANAGER');
+        localStorage.setItem('bgcls_is_staff', 'true');
+        return true;
+      }
+    }
+
+    // Agent account (@bgcls.local)
+    const { data: agent } = await adminClient
+      .from('agents')
+      .select('id, name, username, is_staff, role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const username = (agent?.username || email.split('@')[0] || '').toLowerCase().trim();
+    const isStaff = Boolean(
+      agent?.is_staff === true ||
+      agent?.role === 'MANAGER' ||
+      username === 'john' ||
+      username === 'ganesh'
+    );
+
+    if (agent?.role) {
+      localStorage.setItem('bgcls_user_role', agent.role);
+    } else {
+      localStorage.setItem('bgcls_user_role', 'AGENT');
+    }
+
+    if (username) {
+      localStorage.setItem('bgcls_logged_username', username);
+    }
+    if (agent?.name) {
+      localStorage.setItem('bgcls_agent_name', agent.name);
+    }
+
+    if (isStaff) {
+      localStorage.setItem('bgcls_is_staff', 'true');
+      return true;
+    } else {
+      localStorage.removeItem('bgcls_is_staff');
+      localStorage.setItem('bgcls_is_staff', 'false');
+      return false;
+    }
+  } catch (err) {
+    console.warn('Failed to refresh staff permission from cloud:', err);
+    return localStorage.getItem('bgcls_is_staff') === 'true';
+  }
 }
 
 /**

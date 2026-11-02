@@ -31,7 +31,7 @@ import {
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
-import { isCurrentStaffOrManager } from '../lib/staffAuth';
+import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
 import { 
   getDayEndDeliveryBoys, 
   fetchAllDayEndReportsForDate, 
@@ -55,10 +55,24 @@ export const StaffDayEndSummary: React.FC = () => {
 
   // Strict Protection: Non-staff users must not access the delivery boys centralized page!
   useEffect(() => {
+    let isMounted = true;
     if (!isCurrentStaffOrManager()) {
       toast.error('Restricted: Staff permission required.');
       navigate('/agent/dispatch', { replace: true });
+      return;
     }
+
+    refreshCurrentStaffPermission().then((liveStaff) => {
+      if (!isMounted) return;
+      if (!liveStaff) {
+        toast.error('Restricted: Staff permission required.');
+        navigate('/agent/dispatch', { replace: true });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, [navigate]);
   
   const handleBack = () => {

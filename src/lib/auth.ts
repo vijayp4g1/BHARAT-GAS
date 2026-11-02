@@ -28,6 +28,13 @@ export async function performLogout(): Promise<void> {
   // Clear specific application auth cache
   localStorage.removeItem('bgcls_agent_id');
   localStorage.removeItem('bgcls_user_role');
+  localStorage.removeItem('bgcls_is_staff');
+  localStorage.removeItem('bgcls_assigned_delivery_boy');
+  localStorage.removeItem('bgcls_agent_name');
+  localStorage.removeItem('bgcls_logged_username');
+  localStorage.removeItem('bgcls_day_end_selected_boy_name');
+  localStorage.removeItem('bgcls_staff_permissions_list');
+  localStorage.removeItem('bgcls_agent_delivery_boy_assignments');
 
   // Clear any persistent Supabase auth tokens from localStorage
   try {

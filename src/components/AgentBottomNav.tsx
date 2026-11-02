@@ -5,9 +5,7 @@ import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/s
 
 
 export const AgentBottomNav = () => {
-  const [isStaff, setIsStaff] = useState<boolean>(
-    () => localStorage.getItem('bgcls_is_staff') === 'true' || isCurrentStaffOrManager()
-  );
+  const [isStaff, setIsStaff] = useState<boolean>(() => isCurrentStaffOrManager());
 
   useEffect(() => {
     refreshCurrentStaffPermission().then((liveStaff) => {
