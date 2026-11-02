@@ -35,6 +35,8 @@ interface LiveCameraScannerModalProps {
   }) => void;
   existingNumbers: string[];
   claimedByOtherAgents?: Record<string, { agentName: string; date?: string; consumerName?: string }>;
+  agentName?: string;
+  agentId?: string;
 }
 
 interface ScannedSessionItem {
@@ -130,6 +132,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   onConsumerScanned,
   existingNumbers,
   claimedByOtherAgents = {},
+  agentName,
+  agentId,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -396,6 +400,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         cylinder_type: '14.2KG_STD',
         timestamp: Date.now(),
         date: todayStr,
+        agent_name: (agentName || '').trim().toUpperCase(),
+        agent_id: agentId,
       });
       // Retain latest 300 scans
       localStorage.setItem('bgcls_scanned_receipts_audit_log', JSON.stringify(log.slice(0, 300)));

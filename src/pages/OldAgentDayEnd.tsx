@@ -173,7 +173,6 @@ export const OldAgentDayEnd: React.FC = () => {
   const [isSavingDb, setIsSavingDb] = useState<boolean>(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
-  const [recoverableCount, setRecoverableCount] = useState<number>(0);
 
   // Synchronous State Refs for Lifecycle Flush (survives app switching & tab kill)
   const entriesRef = useRef<ItemEntry[]>(entries);
@@ -542,64 +541,6 @@ export const OldAgentDayEnd: React.FC = () => {
       window.removeEventListener('beforeunload', handleAppSwitchOrUnload);
     };
   }, [supervisorPhone]);
-
-  // 6. Scan history recovery detector
-  useEffect(() => {
-    try {
-      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
-      if (rawLog) {
-        const log = JSON.parse(rawLog);
-        if (Array.isArray(log) && log.length > 0) {
-          const existingSet = new Set(entries.map((e) => e.consumer_number.toLowerCase()));
-          const missing = log.filter(
-            (item: any) => item.date === reportDate && !existingSet.has(item.consumer_number.toLowerCase())
-          );
-          setRecoverableCount(missing.length);
-          return;
-        }
-      }
-      setRecoverableCount(0);
-    } catch (_) {
-      setRecoverableCount(0);
-    }
-  }, [entries, reportDate]);
-
-  const handleRecoverLostBills = () => {
-    try {
-      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
-      if (!rawLog) return;
-      const log = JSON.parse(rawLog);
-      const existingSet = new Set(entries.map((e) => e.consumer_number.toLowerCase()));
-      const toRecover: ItemEntry[] = [];
-
-      log.forEach((item: any) => {
-        if (item.date === reportDate && !existingSet.has(item.consumer_number.toLowerCase())) {
-          toRecover.push({
-            consumer_id: item.consumer_id,
-            consumer_number: item.consumer_number,
-            consumer_name: item.consumer_name,
-            address: item.address,
-            mobile: item.mobile,
-            found: true,
-            source: 'local',
-            cylinder_type: item.cylinder_type || '14.2KG_STD',
-            payment_mode: 'CASH',
-            empty_collected: true,
-            scanned_at: new Date(item.timestamp).toISOString(),
-          });
-          existingSet.add(item.consumer_number.toLowerCase());
-        }
-      });
-
-      if (toRecover.length > 0) {
-        setEntries((prev) => [...toRecover, ...prev]);
-        setHasUnsavedChanges(true);
-        toast.success(`Recovered ${toRecover.length} bills from camera scan history!`, { icon: '🛡️' });
-      }
-    } catch (e) {
-      toast.error('Recovery failed');
-    }
-  };
 
   // 4. Save Bills to Database
   const handleSaveToDatabase = async () => {
@@ -1280,25 +1221,28 @@ export const OldAgentDayEnd: React.FC = () => {
       )}
 
       {/* Gemini AI Receipt Scanner Banner */}
-      <div className="mb-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-2xl p-3 shadow-md shadow-amber-500/20 text-white flex items-center justify-between gap-2 border border-amber-300/30">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0 border border-white/30">
-            <Camera className="w-5 h-5 text-white animate-pulse" />
+      <div className="mb-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-3xl p-3.5 shadow-xl shadow-orange-500/25 text-white flex items-center justify-between gap-2 border-2 border-amber-300">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-2xl bg-slate-950 flex items-center justify-center shrink-0 shadow-lg border border-amber-400/40">
+            <Camera className="w-6 h-6 text-amber-400 animate-pulse" />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-black tracking-wide flex items-center gap-1 uppercase">
-              <span>📷 Gemini AI Receipt Scanner</span>
-            </p>
-            <p className="text-[11px] text-amber-100 font-medium truncate mt-0.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase bg-slate-950 text-amber-300 px-2 py-0.5 rounded-md font-mono">CAMERA AI</span>
+              <h3 className="text-sm font-black tracking-tight uppercase text-white truncate">RECEIPT SCANNER</h3>
+            </div>
+            <p className="text-[11px] text-amber-100 font-semibold truncate mt-0.5">
               Snap cash memos to auto-extract Cons No & Name
             </p>
           </div>
         </div>
         <button
+          type="button"
           onClick={() => setIsLiveScannerOpen(true)}
-          className="bg-slate-950 hover:bg-slate-900 active:scale-95 text-amber-300 border border-amber-400/40 text-[11px] font-black px-3 py-2 rounded-xl shrink-0 transition-all shadow-md"
+          className="bg-slate-950 hover:bg-slate-900 active:scale-95 text-amber-300 border-2 border-amber-400 text-xs font-black px-3.5 py-2.5 rounded-2xl shrink-0 transition-all shadow-xl flex items-center gap-1.5"
         >
-          OPEN SCANNER
+          <Camera className="w-4 h-4 text-amber-400" />
+          <span>SCAN BILLS</span>
         </button>
       </div>
 
@@ -1429,29 +1373,6 @@ export const OldAgentDayEnd: React.FC = () => {
               Process Numbers
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Emergency Scan History Recovery Banner */}
-      {recoverableCount > 0 && (
-        <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between gap-2 shadow-md border border-amber-300/30 animate-pulse">
-          <div className="flex items-center gap-2 min-w-0">
-            <RotateCcw className="w-4 h-4 shrink-0 text-white animate-spin" />
-            <div className="min-w-0">
-              <p className="text-xs font-black uppercase tracking-tight">
-                {recoverableCount} Scanned Bill{recoverableCount > 1 ? 's' : ''} Found in Device History!
-              </p>
-              <p className="text-[10px] text-amber-100 truncate">
-                Bills detected from earlier camera scan session
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleRecoverLostBills}
-            className="bg-slate-950 hover:bg-slate-900 active:scale-95 text-amber-300 border border-amber-400/40 text-[11px] font-black px-3 py-1.5 rounded-xl shrink-0 transition-all shadow-md"
-          >
-            Restore {recoverableCount} Bills
-          </button>
         </div>
       )}
 
@@ -1700,6 +1621,17 @@ export const OldAgentDayEnd: React.FC = () => {
             )}
           </button>
 
+          {/* Quick Camera Scanner Button in Floating Dock */}
+          <button
+            type="button"
+            onClick={() => setIsLiveScannerOpen(true)}
+            className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-95 text-slate-950 p-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 font-black shadow-md shadow-amber-400/30"
+            title="Open Gemini Camera Scanner"
+          >
+            <Camera className="w-4 h-4 text-slate-950" />
+            <span className="text-[11px] font-black hidden sm:inline">Scan</span>
+          </button>
+
           {/* Optional WhatsApp Button */}
           <button
             onClick={handleSendWhatsApp}
@@ -1837,6 +1769,9 @@ export const OldAgentDayEnd: React.FC = () => {
         onClose={() => setIsLiveScannerOpen(false)}
         onConsumerScanned={handleConsumerAutoScanned}
         existingNumbers={entries.map((e) => e.consumer_number)}
+        claimedByOtherAgents={crossAgentClaimedMap}
+        agentName={agentName}
+        agentId={agentId}
       />
 
       <AgentBottomNav />
