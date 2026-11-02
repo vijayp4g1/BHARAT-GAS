@@ -102,6 +102,8 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
       'Consumer No': b.consumer_number,
       'Customer Name': b.consumer_name,
       'Delivery Boy': b.deliveryBoy,
+      'Cash Memo': b.cash_memo || '-',
+      'Order No': b.order_no || '-',
       'Refill Type': b.refill_type || 'PayNBook Apps',
       'Status': b.status || 'Online Bill (Delivery Done)',
     }));
@@ -113,8 +115,10 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     worksheet['!cols'] = [
       { wch: 6 },
       { wch: 16 },
-      { wch: 32 },
+      { wch: 30 },
       { wch: 18 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 16 },
       { wch: 25 },
     ];
@@ -396,7 +400,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             </div>
           </div>
 
-          {/* Master Table of Bills (No CASH MEMO, No ORDER NO, Compact Font) */}
+          {/* Master Table of Bills (With CASH MEMO & ORDER NO, Compact Font) */}
           {displayedBills.length === 0 ? (
             <div className="py-8 text-center text-slate-500 font-semibold text-xs">
               No online bills recorded for any delivery boy on {formattedDate}.
@@ -409,10 +413,12 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
               <table className="w-full text-left border-collapse text-[10px] print:text-[8pt]">
                 <thead>
                   <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[9px] print:text-[7.5pt] tracking-wider">
-                    <th className="py-1 px-1.5 border-r border-slate-400 w-10 text-center">S.No</th>
-                    <th className="py-1 px-2 border-r border-slate-400 font-mono w-28 text-center">Consumer No</th>
-                    <th className="py-1 px-2.5 border-r border-slate-400">Customer Name</th>
-                    <th className="py-1 px-2 w-28 text-center">Delivery Boy</th>
+                    <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
+                    <th className="py-1 px-2 border-r border-slate-400">Customer Name</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 w-24 text-center">Delivery Boy</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-20 text-center">Cash Memo</th>
+                    <th className="py-1 px-1.5 font-mono w-20 text-center">Order No</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
@@ -421,27 +427,33 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                       key={`${bill.consumer_number}-${index}`}
                       className="hover:bg-slate-50 print:hover:bg-transparent"
                     >
-                      <td className="py-0.5 px-1.5 border-r border-slate-300 text-center font-semibold text-slate-700 text-[9px] print:text-[7.5pt]">
+                      <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7.5pt]">
                         {index + 1}
                       </td>
-                      <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[10px] print:text-[8pt] text-center">
+                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[8pt] text-center">
                         #{bill.consumer_number}
                       </td>
-                      <td className="py-0.5 px-2.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[10px] print:text-[8pt]">
+                      <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[8pt]">
                         {bill.consumer_name || 'Consumer'}
                       </td>
-                      <td className="py-0.5 px-2 font-semibold text-slate-800 uppercase text-[9px] print:text-[7.5pt] text-center">
+                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7.5pt] text-center">
                         #{bill.deliveryBoySerial} {bill.deliveryBoy}
+                      </td>
+                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center">
+                        {bill.cash_memo || '-'}
+                      </td>
+                      <td className="py-0.5 px-1.5 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center">
+                        {bill.order_no || '-'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-100 border-t border-black font-bold text-slate-950 text-[9.5px] print:text-[7.5pt]">
-                    <td colSpan={2} className="py-1 px-2 border-r border-slate-400">
+                    <td colSpan={3} className="py-1 px-2 border-r border-slate-400">
                       TOTAL: {displayedBills.length} ONLINE BILLS
                     </td>
-                    <td colSpan={2} className="py-1 px-2 text-right">
+                    <td colSpan={3} className="py-1 px-2 text-right">
                       Verified for BPCL PayNBook Submission
                     </td>
                   </tr>
@@ -526,7 +538,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             </div>
           ) : (
             /* =================================================================== */
-            /* GROUPED BY DELIVERY BOY (No Cash Memo, No Order No)                 */
+            /* GROUPED BY DELIVERY BOY (With Cash Memo & Order No)                 */
             /* =================================================================== */
             <div className="space-y-3 mb-3">
               {Object.keys(boyBreakdown).map((boyName) => {
@@ -548,7 +560,9 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                         <tr className="bg-slate-100 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
                           <th className="py-0.5 px-1.5 border-r border-slate-300 w-9 text-center">S.No</th>
                           <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-28">Consumer No</th>
-                          <th className="py-0.5 px-2">Customer Name</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300">Customer Name</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-24">Cash Memo</th>
+                          <th className="py-0.5 px-2 font-mono text-center w-24">Order No</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-300">
@@ -560,8 +574,14 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                             <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
                               #{bill.consumer_number}
                             </td>
-                            <td className="py-0.5 px-2 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
                               {bill.consumer_name || 'Consumer'}
+                            </td>
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center">
+                              {bill.cash_memo || '-'}
+                            </td>
+                            <td className="py-0.5 px-2 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center">
+                              {bill.order_no || '-'}
                             </td>
                           </tr>
                         ))}
