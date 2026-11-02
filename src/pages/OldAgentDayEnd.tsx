@@ -23,6 +23,9 @@ import {
   Database,
   RotateCcw,
   ChevronDown,
+  ChevronUp,
+  Minus,
+  CheckCheck,
   Users,
   ShieldAlert,
   AlertTriangle,
@@ -204,6 +207,15 @@ export const OldAgentDayEnd: React.FC = () => {
   const [isSavingDb, setIsSavingDb] = useState<boolean>(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [isFloatingDockMinimized, setIsFloatingDockMinimized] = useState<boolean>(false);
+
+  // Serial Number (#1..#17) for active selected delivery boy
+  const selectedBoyIndex = useMemo(() => {
+    if (!selectedBoy && !agentName) return null;
+    const nameToMatch = (selectedBoy ? selectedBoy.name : agentName).trim().toUpperCase();
+    const idx = deliveryBoys.findIndex((b) => b.name.trim().toUpperCase() === nameToMatch);
+    return idx !== -1 ? idx + 1 : null;
+  }, [selectedBoy, agentName, deliveryBoys]);
 
   // Synchronous State Refs for Lifecycle Flush (survives app switching & tab kill)
   const entriesRef = useRef<ItemEntry[]>(entries);
@@ -1214,7 +1226,7 @@ export const OldAgentDayEnd: React.FC = () => {
   }, [deliveryBoys, boySearchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-36 pt-3 px-3 max-w-xl mx-auto font-sans">
+    <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-xl mx-auto font-sans">
       {/* Sleek Mobile Compact Header */}
       <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
         <div className="flex items-center justify-between mb-3">
@@ -1268,7 +1280,7 @@ export const OldAgentDayEnd: React.FC = () => {
         <div className="bg-white/10 rounded-2xl p-2.5 flex items-center justify-between gap-2 border border-white/10 mb-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 shadow-sm">
-              {selectedBoy ? selectedBoy.name.charAt(0) : (agentName ? agentName.charAt(0) : '👤')}
+              {selectedBoyIndex ? `#${selectedBoyIndex}` : (agentName ? agentName.charAt(0) : '👤')}
             </div>
             <div className="min-w-0">
               <span className="text-[10px] text-blue-200 uppercase font-semibold tracking-wider block leading-tight">
@@ -1715,7 +1727,7 @@ export const OldAgentDayEnd: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[460px] overflow-y-auto pr-0.5">
+          <div className="space-y-2 pr-0.5">
             {displayedEntries.map((item, index) => {
               const origIndex = entries.findIndex((e) => e.consumer_number === item.consumer_number);
               const claimantAgent = item.duplicate_of_agent || crossAgentClaimedMap[item.consumer_number.toLowerCase()]?.agentName;
@@ -1871,59 +1883,104 @@ export const OldAgentDayEnd: React.FC = () => {
       </div>
 
       {/* Floating Bottom Sticky Action Bar */}
-      <div className="fixed bottom-16 left-0 right-0 max-w-xl mx-auto px-3 pointer-events-none z-40">
-        <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-2.5 shadow-2xl border border-white/10 pointer-events-auto flex items-center justify-between gap-2">
-          {/* Primary Save to Database Button */}
-          <button
-            onClick={handleSaveToDatabase}
-            disabled={isSavingDb || (entries.length === 0 && !hasUnsavedChanges)}
-            className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-white font-black py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/40 text-xs active:scale-[0.98] transition-all"
-          >
-            {isSavingDb ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Saving to Database...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4 text-emerald-200" />
-                <span>Save {entries.length} Bills to Database</span>
-              </>
-            )}
-          </button>
+      {isFloatingDockMinimized ? (
+        <button
+          type="button"
+          onClick={() => setIsFloatingDockMinimized(false)}
+          className={`fixed bottom-[74px] right-3 z-40 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 font-black text-xs backdrop-blur-md border transition-all active:scale-95 ${
+            hasUnsavedChanges
+              ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-300 animate-pulse shadow-amber-500/30'
+              : 'bg-slate-900/95 text-emerald-400 border-slate-700 shadow-slate-950/40'
+          }`}
+          title="Expand Save Dock"
+        >
+          {hasUnsavedChanges ? (
+            <>
+              <Save className="w-3.5 h-3.5 text-slate-950" />
+              <span>Save ({entries.length})</span>
+            </>
+          ) : (
+            <>
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{entries.length} Saved</span>
+            </>
+          )}
+          <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+        </button>
+      ) : (
+        <div className="fixed bottom-[68px] left-0 right-0 max-w-xl mx-auto px-3 pointer-events-none z-40 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="bg-slate-900/95 backdrop-blur-md rounded-2xl p-2 sm:p-2.5 shadow-2xl border border-white/10 pointer-events-auto flex items-center justify-between gap-1.5 sm:gap-2">
+            {/* Primary Save to Database Button */}
+            <button
+              onClick={handleSaveToDatabase}
+              disabled={isSavingDb || (entries.length === 0 && !hasUnsavedChanges)}
+              className={`flex-1 disabled:opacity-50 text-white font-black py-2.5 px-3 sm:px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg text-xs active:scale-[0.98] transition-all ${
+                hasUnsavedChanges
+                  ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/30 animate-pulse'
+                  : 'bg-emerald-700/90 hover:bg-emerald-600 text-white shadow-emerald-700/20'
+              }`}
+            >
+              {isSavingDb ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Saving to Database...</span>
+                </>
+              ) : hasUnsavedChanges ? (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save Changes ({entries.length} Bills)</span>
+                </>
+              ) : (
+                <>
+                  <CheckCheck className="w-4 h-4 text-emerald-300" />
+                  <span>Saved ({entries.length} Bills in Database)</span>
+                </>
+              )}
+            </button>
 
-          {/* Quick Camera Scanner Button in Floating Dock */}
-          <button
-            type="button"
-            onClick={() => setIsLiveScannerOpen(true)}
-            className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-95 text-slate-950 p-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 font-black shadow-md shadow-amber-400/30"
-            title="Open Gemini Camera Scanner"
-          >
-            <Camera className="w-4 h-4 text-slate-950" />
-            <span className="text-[11px] font-black hidden sm:inline">Scan</span>
-          </button>
+            {/* Quick Camera Scanner Button in Floating Dock */}
+            <button
+              type="button"
+              onClick={() => setIsLiveScannerOpen(true)}
+              className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-95 text-slate-950 p-2.5 px-3 rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 font-black shadow-md shadow-amber-400/30"
+              title="Open Gemini Camera Scanner"
+            >
+              <Camera className="w-4 h-4 text-slate-950" />
+              <span className="text-[11px] font-black hidden sm:inline">Scan</span>
+            </button>
 
-          {/* Optional WhatsApp Button */}
-          <button
-            onClick={handleSendWhatsApp}
-            disabled={entries.length === 0}
-            className="bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-40 text-white p-2.5 rounded-xl border border-emerald-500/30 active:scale-95 transition-all"
-            title="Send WhatsApp Report to Supervisor"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+            {/* Optional WhatsApp Button */}
+            <button
+              onClick={handleSendWhatsApp}
+              disabled={entries.length === 0}
+              className="bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white p-2.5 rounded-xl border border-white/10 active:scale-95 transition-all"
+              title="Send WhatsApp Report to Supervisor"
+            >
+              <Send className="w-4 h-4 text-emerald-400" />
+            </button>
 
-          {/* Copy CSV Button */}
-          <button
-            onClick={handleCopyCsv}
-            disabled={entries.length === 0}
-            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white p-2.5 rounded-xl border border-white/10 active:scale-95 transition-all"
-            title="Copy CSV Numbers"
-          >
-            <Copy className="w-4 h-4" />
-          </button>
+            {/* Copy CSV Button */}
+            <button
+              onClick={handleCopyCsv}
+              disabled={entries.length === 0}
+              className="bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white p-2.5 rounded-xl border border-white/10 active:scale-95 transition-all"
+              title="Copy CSV Numbers"
+            >
+              {copiedCsv ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-300" />}
+            </button>
+
+            {/* Minimize Dock Button */}
+            <button
+              type="button"
+              onClick={() => setIsFloatingDockMinimized(true)}
+              className="bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white p-2 sm:p-2.5 rounded-xl transition-all flex items-center justify-center shrink-0 border border-white/5"
+              title="Minimize dock to view bills"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       </>
       )}
 
@@ -1995,7 +2052,7 @@ export const OldAgentDayEnd: React.FC = () => {
                           isSelected ? 'bg-slate-950 text-amber-300' : 'bg-white/10 text-white'
                         }`}
                       >
-                        {boy.name.charAt(0)}
+                        #{deliveryBoys.findIndex((b) => b.name === boy.name) + 1}
                       </div>
                       <div className="min-w-0">
                         <span className="text-xs font-black block uppercase truncate">{boy.name}</span>

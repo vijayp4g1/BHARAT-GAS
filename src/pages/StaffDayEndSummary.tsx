@@ -1652,6 +1652,9 @@ export const StaffDayEndSummary: React.FC = () => {
                                     await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
                                     const updated = await fetchAllBpclReportsForDate(reportDate);
                                     setBpclReportsMap(updated);
+                                    if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
+                                      setActiveBpclReport(updated[normName] || null);
+                                    }
                                     toast.success(`Marked bills checked done for ${boy.name}`);
                                   }}
                                   className="text-[10px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 px-2 py-0.5 rounded-full transition-all shadow-2xs"
