@@ -90,41 +90,260 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     setTimeout(() => setCopiedCsv(false), 2000);
   };
 
-  // Export to Excel (.xlsx)
+  // Export to Excel (.xlsx) - Multi-sheet, beautifully formatted & professional
   const handleExportExcel = () => {
     if (displayedBills.length === 0) {
       toast.error('No online bills to export');
       return;
     }
 
-    const rows = displayedBills.map((b, index) => ({
-      'S.No': index + 1,
-      'Consumer No': b.consumer_number,
-      'Customer Name': b.consumer_name,
-      'Delivery Boy': b.deliveryBoy,
-      'Cash Memo': b.cash_memo || '-',
-      'Order No': b.order_no || '-',
-      'Refill Type': b.refill_type || 'PayNBook Apps',
-      'Status': b.status || 'Online Bill (Delivery Done)',
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Online Bills');
+    const totalBillsCount = displayedBills.length;
 
-    worksheet['!cols'] = [
-      { wch: 6 },
-      { wch: 16 },
-      { wch: 30 },
-      { wch: 18 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 25 },
+    // -------------------------------------------------------------
+    // SHEET 1: OFFICIAL SUBMISSION REPORT
+    // -------------------------------------------------------------
+    const sheet1Rows: any[][] = [
+      ['SIDDHARTHA BHARAT GAS'],
+      ['DAILY ONLINE BILLS (PAYNBOOK APPS) SUBMISSION REPORT'],
+      [],
+      ['Report Date:', formattedDate, 'Refill Type:', 'PayNBook Apps (Online Paid)', '', 'Total Online Bills:', totalBillsCount],
+      [],
+      ['DELIVERY BOYS SUMMARY BREAKDOWN'],
+      ['S.No', 'Delivery Boy Name', 'Online Bills Count', 'Share %'],
     ];
 
+    let boyIndex = 1;
+    Object.entries(boyBreakdown).forEach(([boyName, data]) => {
+      const pct = totalBillsCount > 0 ? ((data.count / totalBillsCount) * 100).toFixed(1) + '%' : '0%';
+      sheet1Rows.push([
+        boyIndex++,
+        `#${data.serial} ${boyName}`,
+        data.count,
+        pct,
+      ]);
+    });
+
+    sheet1Rows.push([
+      'TOTAL',
+      `${Object.keys(boyBreakdown).length} Delivery Boys`,
+      totalBillsCount,
+      '100.0%',
+    ]);
+
+    sheet1Rows.push([]);
+    sheet1Rows.push(['DETAILED ONLINE BILLS SUBMISSION LIST']);
+    sheet1Rows.push([
+      'S.No',
+      'Consumer Number',
+      'Customer Name',
+      'Delivery Boy',
+      'Cash Memo No',
+      'Order Number',
+      'Book Date',
+      'Refill Type',
+      'Status',
+    ]);
+
+    displayedBills.forEach((b, index) => {
+      sheet1Rows.push([
+        index + 1,
+        { t: 's', v: String(b.consumer_number || '') }, // explicitly string so Excel doesn't do scientific notation
+        String(b.consumer_name || 'Consumer').toUpperCase(),
+        `#${b.deliveryBoySerial} ${b.deliveryBoy}`,
+        { t: 's', v: String(b.cash_memo || '-') },
+        { t: 's', v: String(b.order_no || '-') },
+        b.book_date || formattedDate,
+        b.refill_type || 'PayNBook Apps',
+        b.status || 'Online Bill (Delivery Done)',
+      ]);
+    });
+
+    sheet1Rows.push([
+      'TOTAL',
+      `${totalBillsCount} Bills Verified`,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'Verified for BPCL PayNBook Submission',
+    ]);
+
+    sheet1Rows.push([]);
+    sheet1Rows.push([]);
+    sheet1Rows.push(['OFFICIAL VERIFICATION & SIGNATURES']);
+    sheet1Rows.push([
+      'Prepared By (Staff):',
+      '',
+      'Verified By (Manager):',
+      '',
+      'Submitted To (BPCL Office):',
+      '',
+    ]);
+    sheet1Rows.push([
+      '__________________________',
+      '',
+      '__________________________',
+      '',
+      '__________________________',
+      '',
+    ]);
+    sheet1Rows.push([
+      'Signature & Date',
+      '',
+      'Signature & Seal',
+      '',
+      'Officer Stamp & Signature',
+      '',
+    ]);
+    sheet1Rows.push([]);
+    sheet1Rows.push([`Generated on: ${new Date().toLocaleString()} | Siddhartha Bharat Gas (BGCLS) System`]);
+
+    const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+
+    const detailedHeaderRowIndex = 7 + Object.keys(boyBreakdown).length + 2;
+    ws1['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }, // Title
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 8 } }, // Subtitle
+      { s: { r: 5, c: 0 }, e: { r: 5, c: 3 } }, // Breakdown Title
+      { s: { r: detailedHeaderRowIndex, c: 0 }, e: { r: detailedHeaderRowIndex, c: 8 } }, // Detailed list title
+      { s: { r: sheet1Rows.length - 1, c: 0 }, e: { r: sheet1Rows.length - 1, c: 8 } }, // Footer
+    ];
+
+    ws1['!cols'] = [
+      { wch: 7 },   // S.No
+      { wch: 18 },  // Consumer No
+      { wch: 34 },  // Customer Name
+      { wch: 20 },  // Delivery Boy
+      { wch: 15 },  // Cash Memo
+      { wch: 15 },  // Order No
+      { wch: 14 },  // Book Date
+      { wch: 18 },  // Refill Type
+      { wch: 30 },  // Status
+    ];
+
+    XLSX.utils.book_append_sheet(workbook, ws1, 'Submission Report');
+
+    // -------------------------------------------------------------
+    // SHEET 2: BOY-WISE BREAKDOWN
+    // -------------------------------------------------------------
+    const sheet2Rows: any[][] = [
+      ['SIDDHARTHA BHARAT GAS - DELIVERY BOY WISE ONLINE BILLS'],
+      [`Date: ${formattedDate} | Total Online Bills: ${totalBillsCount}`],
+      [],
+    ];
+
+    Object.keys(boyBreakdown).forEach((boyName) => {
+      const boyBills = allOnlineBills.filter(
+        (b) => b.deliveryBoy.trim().toUpperCase() === boyName.trim().toUpperCase()
+      );
+      if (boyBills.length === 0) return;
+
+      sheet2Rows.push([
+        `DELIVERY BOY: #${boyBreakdown[boyName].serial} ${boyName} (${boyBills.length} Bills)`,
+      ]);
+      sheet2Rows.push([
+        'S.No',
+        'Consumer Number',
+        'Customer Name',
+        'Cash Memo No',
+        'Order Number',
+        'Refill Type',
+        'Status',
+      ]);
+
+      boyBills.forEach((b, idx) => {
+        sheet2Rows.push([
+          idx + 1,
+          { t: 's', v: String(b.consumer_number || '') },
+          String(b.consumer_name || 'Consumer').toUpperCase(),
+          { t: 's', v: String(b.cash_memo || '-') },
+          { t: 's', v: String(b.order_no || '-') },
+          b.refill_type || 'PayNBook Apps',
+          b.status || 'Online Bill (Delivery Done)',
+        ]);
+      });
+
+      sheet2Rows.push([
+        'Subtotal',
+        `${boyBills.length} Bills`,
+        '',
+        '',
+        '',
+        '',
+        `Boy #${boyBreakdown[boyName].serial} Verified`,
+      ]);
+      sheet2Rows.push([]); // blank row between delivery boys
+    });
+
+    const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+    ws2['!cols'] = [
+      { wch: 7 },
+      { wch: 18 },
+      { wch: 34 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 30 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, ws2, 'Boy-wise Breakdown');
+
+    // -------------------------------------------------------------
+    // SHEET 3: RAW DATA (FILTER & PIVOT READY)
+    // -------------------------------------------------------------
+    const sheet3Rows: any[][] = [
+      [
+        'S.No',
+        'Consumer Number',
+        'Customer Name',
+        'Delivery Boy',
+        'Delivery Boy S.No',
+        'Cash Memo No',
+        'Order Number',
+        'Book Date',
+        'Refill Type',
+        'Status',
+        'Report Date',
+      ],
+    ];
+
+    displayedBills.forEach((b, index) => {
+      sheet3Rows.push([
+        index + 1,
+        { t: 's', v: String(b.consumer_number || '') },
+        String(b.consumer_name || 'Consumer').toUpperCase(),
+        b.deliveryBoy,
+        b.deliveryBoySerial,
+        { t: 's', v: String(b.cash_memo || '-') },
+        { t: 's', v: String(b.order_no || '-') },
+        b.book_date || formattedDate,
+        b.refill_type || 'PayNBook Apps',
+        b.status || 'Online Bill (Delivery Done)',
+        reportDate,
+      ]);
+    });
+
+    const ws3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
+    ws3['!cols'] = [
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 34 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, ws3, 'Raw Data (Pivot Ready)');
+
+    // Write file
     XLSX.writeFile(workbook, `Siddhartha_BharatGas_Online_Bills_${reportDate}.xlsx`);
-    toast.success('Downloaded Excel spreadsheet!');
+    toast.success('Downloaded complete 3-sheet Excel report!');
   };
 
   // Split bills for 2-column view
