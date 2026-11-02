@@ -68,6 +68,10 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
 
   // Logged in, but wrong role (e.g. Agent trying to access Manager URL)
   if (allowedRole && userRole && allowedRole !== userRole) {
+    // Managers and Authorized Staff can freely access agent routes (e.g. Day End Cash Memos, Search, Routes)
+    if ((userRole === 'MANAGER' || isCurrentStaffOrManager()) && allowedRole === 'AGENT') {
+      return <>{children}</>;
+    }
     if (userRole === 'AGENT') return <Navigate to="/agent/search" replace />;
     if (userRole === 'MANAGER') return <Navigate to="/manager/dashboard" replace />;
   }

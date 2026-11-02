@@ -28,6 +28,7 @@ import {
   MoreVertical,
   MessageCircle,
   ChevronDown,
+  Receipt,
   ChevronUp,
   AlertCircle,
   Sparkles,
@@ -857,6 +858,17 @@ export const StaffCylinderSettlement: React.FC = () => {
             {/* Menu Popover */}
             {isMenuOpen && (
               <div className="absolute right-0 top-12 w-56 bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                <Link
+                  to="/agent/dispatch"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-emerald-300 hover:text-white hover:bg-emerald-500/20 rounded-xl transition-colors text-left"
+                >
+                  <Receipt size={15} className="text-emerald-400" />
+                  <span>Daily Cash Memos (Scan Bills)</span>
+                </Link>
+
+                <div className="my-1 border-t border-slate-800"></div>
+
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);

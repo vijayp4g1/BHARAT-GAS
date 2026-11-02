@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { AgentPerformanceModal } from '../components/AgentPerformanceModal';
-import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload, Search, Flame, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Users, MapPin, Camera, BarChart3, Map, Loader2, Plus, List, Download, Activity, Target, Navigation, Upload, Search, Flame, ShieldCheck, ArrowRight, Receipt } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { BulkImportModal } from '../components/BulkImportModal';
@@ -244,6 +244,13 @@ export const ManagerDashboard = () => {
 
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 shrink-0">
               <Link
+                to="/agent/dispatch"
+                className="flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold px-4 py-3.5 rounded-2xl border border-emerald-400/30 active:scale-95 transition-all text-sm w-full sm:w-auto"
+              >
+                <Receipt size={16} className="text-emerald-400" />
+                <span>Daily Cash Memos</span>
+              </Link>
+              <Link
                 to="/staff/settlement"
                 className="flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black px-6 py-3.5 rounded-2xl shadow-xl shadow-amber-500/25 active:scale-95 transition-all text-sm w-full sm:w-auto"
               >
@@ -263,7 +270,7 @@ export const ManagerDashboard = () => {
         </div>
 
         {/* Quick Actions Grid */}
-        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
+        <section className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 sm:gap-4">
           <Link to="/manager/find-agent" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group bg-gradient-to-br from-amber-500/10 via-white to-white border border-amber-200/80 shadow-sm hover:shadow-md transition-all">
             <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-md shadow-amber-500/20">
               <Search size={20} />
@@ -276,13 +283,16 @@ export const ManagerDashboard = () => {
               <p className="text-xs text-slate-500 mt-0.5">By colony/village</p>
             </div>
           </Link>
-          <Link to="/manager/consumers" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <List size={20} />
+          <Link to="/agent/dispatch" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group border-2 border-emerald-400/40 bg-gradient-to-br from-emerald-50 to-teal-50">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-md shadow-emerald-500/30">
+              <Receipt size={20} />
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Consumers</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Manage records</p>
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-bold text-slate-800 text-sm sm:text-base">Daily Bills</h3>
+                <span className="bg-emerald-500 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase">Live</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">Cash memos & day end</p>
             </div>
           </Link>
           <Link to="/staff/settlement" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group border-2 border-amber-400/40 bg-gradient-to-br from-amber-50 to-orange-50">
@@ -295,6 +305,15 @@ export const ManagerDashboard = () => {
                 <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-1.5 py-0.5 rounded uppercase">Daily</span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">Cylinder settlements</p>
+            </div>
+          </Link>
+          <Link to="/manager/consumers" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">
+            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+              <List size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Consumers</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Manage records</p>
             </div>
           </Link>
           <Link to="/manager/agents" className="glass-card glass-card-hover p-4 sm:p-5 rounded-2xl flex flex-col gap-3 group">

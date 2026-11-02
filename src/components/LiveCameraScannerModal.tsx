@@ -30,8 +30,11 @@ interface LiveCameraScannerModalProps {
     address?: string;
     mobile?: string;
     found: boolean;
+    duplicate_of_agent?: string;
+    duplicate_claimed_date?: string;
   }) => void;
   existingNumbers: string[];
+  claimedByOtherAgents?: Record<string, { agentName: string; date?: string; consumerName?: string }>;
 }
 
 interface ScannedSessionItem {
@@ -83,6 +86,31 @@ function playSuccessBeep() {
   }
 }
 
+function playWarningAlarm() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.setValueAtTime(160, ctx.currentTime + 0.15);
+    osc.frequency.setValueAtTime(220, ctx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (err) {
+    // Audio fallback
+  }
+}
+
 function cleanAndNormalizeDigits(raw: string): string {
   return raw
     .toUpperCase()
@@ -101,6 +129,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   onClose,
   onConsumerScanned,
   existingNumbers,
+  claimedByOtherAgents = {},
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -109,6 +138,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
+  const [duplicateScamNotice, setDuplicateScamNotice] = useState<{
+    consumer_number: string;
+    consumer_name: string;
+    agentName: string;
+    date?: string;
+  } | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
@@ -311,8 +346,31 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     scannedSetRef.current.add(cleanNum.toLowerCase());
     setAlreadyAddedNotice(null);
 
-    if (navigator.vibrate) navigator.vibrate([100, 40, 100]);
-    playSuccessBeep();
+    // ANTI-FRAUD / DOUBLE-BILL SCAM GUARD:
+    // Check if this cash memo was ALREADY submitted by another delivery boy!
+    const otherClaimant =
+      claimedByOtherAgents[resolvedNum.toLowerCase()] ||
+      claimedByOtherAgents[cleanNum.toLowerCase()];
+
+    if (otherClaimant) {
+      if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+      playWarningAlarm();
+
+      setDuplicateScamNotice({
+        consumer_number: resolvedNum,
+        consumer_name: finalName,
+        agentName: otherClaimant.agentName,
+        date: otherClaimant.date,
+      });
+
+      toast.error(
+        `🚨 DOUBLE BILL SCAM ALERT! Bill #${resolvedNum} (${finalName}) was ALREADY GIVEN BY ${otherClaimant.agentName.toUpperCase()}!`,
+        { id: 'scam-alert', duration: 8000 }
+      );
+    } else {
+      if (navigator.vibrate) navigator.vibrate([100, 40, 100]);
+      playSuccessBeep();
+    }
 
     setIsSuccessFlash(true);
     setTimeout(() => setIsSuccessFlash(false), 400);
@@ -330,6 +388,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       address: finalAddress,
       mobile: finalMobile,
       found: true,
+      duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+      duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
     });
 
     if (match.corrected) {
@@ -596,6 +656,39 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             <div className="w-7 h-7 border-b-4 border-r-4 border-amber-400 rounded-br-xl" />
           </div>
         </div>
+
+        {/* Double-Bill Scam Alert Notification */}
+        {duplicateScamNotice && (
+          <div className="absolute top-3 left-3 right-3 bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-rose-300 flex items-start gap-2.5 z-40 animate-in zoom-in-95 duration-200">
+            <div className="w-8 h-8 rounded-xl bg-white text-rose-600 flex items-center justify-center shrink-0 font-black shadow-md mt-0.5">
+              ⚠️
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded-full text-rose-200">
+                  Double Bill Scam Detected!
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateScamNotice(null)}
+                  className="text-white/80 hover:text-white p-0.5"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-xs font-black mt-1 text-white truncate">
+                #{duplicateScamNotice.consumer_number} — {duplicateScamNotice.consumer_name}
+              </p>
+              <div className="mt-1.5 p-2 bg-black/35 rounded-xl border border-white/20 text-xs font-bold text-amber-200">
+                🚨 ALREADY GIVEN BY:{' '}
+                <span className="text-white font-black underline uppercase text-sm">
+                  {duplicateScamNotice.agentName}
+                </span>{' '}
+                {duplicateScamNotice.date ? `(${duplicateScamNotice.date})` : 'today'}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Already Added Warning Notification */}
         {alreadyAddedNotice && (

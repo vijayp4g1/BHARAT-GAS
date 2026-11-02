@@ -2,15 +2,15 @@
   "areas": [
     {
       "code": "01-RAJU",
-      "totalConsumers": 2794,
+      "totalConsumers": 2800,
       "pincodes": [
         "500055",
         "500018",
         "500051",
         "500100",
         "500054",
-        "500039",
         "500090",
+        "500039",
         "500076",
         "500078",
         "500098",
@@ -43,10 +43,11 @@
         "504251",
         "500060",
         "502001",
+        "503001",
+        "505001",
         "509301",
         "506003",
         "500017",
-        "505001",
         "500004",
         "500036",
         "500050",
@@ -64,13 +65,13 @@
         "500086",
         "500012",
         "500073",
-        "503001",
         "501506",
         "507002",
         "507183",
         "520013",
         "500056",
         "523367",
+        "502110",
         "508105",
         "506310",
         "503301",
@@ -101,7 +102,6 @@
         "500033",
         "505471",
         "500065",
-        "523357",
         "506356",
         "505475",
         "500044",
@@ -141,23 +141,23 @@
       "topLocations": [
         {
           "name": "CHINTAL",
-          "count": 689
+          "count": 692
         },
         {
           "name": "QTB",
-          "count": 458
+          "count": 457
         },
         {
           "name": "JDM",
-          "count": 163
+          "count": 162
         },
         {
           "name": "OPP SCHOOL",
-          "count": 109
+          "count": 108
         },
         {
           "name": "JEEDIMETLA",
-          "count": 98
+          "count": 99
         },
         {
           "name": "QUTUBULLAPUR",
@@ -169,27 +169,27 @@
         },
         {
           "name": "APSIIC",
-          "count": 78
+          "count": 82
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 68
+          "count": 67
         },
         {
           "name": "OPP TEMPLE",
-          "count": 57
+          "count": 56
+        },
+        {
+          "name": "BAPU NAGAR",
+          "count": 54
+        },
+        {
+          "name": "ASHOKA RESIDENCY",
+          "count": 53
         },
         {
           "name": "BHAGATH SINGH NAGAR",
           "count": 53
-        },
-        {
-          "name": "BAPU NAGAR",
-          "count": 53
-        },
-        {
-          "name": "ASHOKA RESIDENCY",
-          "count": 49
         },
         {
           "name": "QUTHBULLAPUR",
@@ -203,7 +203,7 @@
     },
     {
       "code": "11-NAVEEN",
-      "totalConsumers": 2643,
+      "totalConsumers": 2662,
       "pincodes": [
         "500055",
         "500051",
@@ -213,8 +213,8 @@
         "500090",
         "500039",
         "500076",
-        "500092",
         "500078",
+        "500092",
         "500098",
         "500014",
         "500054",
@@ -269,7 +269,6 @@
         "500032",
         "500050",
         "509103",
-        "500086",
         "500079",
         "507204",
         "502032",
@@ -311,33 +310,35 @@
         "507003",
         "502109",
         "505481",
+        "500086",
         "506319",
         "505401",
         "503230",
         "503217",
         "509301",
-        "503224"
+        "503224",
+        "500029"
       ],
       "topLocations": [
         {
           "name": "QTB",
-          "count": 572
+          "count": 576
         },
         {
           "name": "BAHADURPALLY",
-          "count": 421
+          "count": 424
         },
         {
           "name": "GANDIMYSAMMA",
-          "count": 274
+          "count": 276
         },
         {
           "name": "DP PALLY",
-          "count": 196
+          "count": 198
         },
         {
           "name": "JDM",
-          "count": 182
+          "count": 186
         },
         {
           "name": "JEEDIMETLA",
@@ -345,19 +346,19 @@
         },
         {
           "name": "OPP SCHOOL",
-          "count": 114
+          "count": 115
         },
         {
           "name": "GANDIMAISAMMA",
-          "count": 87
+          "count": 88
         },
         {
           "name": "CHINTAL",
-          "count": 78
+          "count": 82
         },
         {
           "name": "SURARAM",
-          "count": 73
+          "count": 75
         },
         {
           "name": "QUTUBULLAPUR",
@@ -365,7 +366,7 @@
         },
         {
           "name": "OPP ATM",
-          "count": 62
+          "count": 63
         },
         {
           "name": "D POCHAMPALLY",
@@ -377,13 +378,13 @@
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 54
+          "count": 57
         }
       ]
     },
     {
       "code": "03-NAGARAJU",
-      "totalConsumers": 2247,
+      "totalConsumers": 2243,
       "pincodes": [
         "500055",
         "500018",
@@ -395,8 +396,8 @@
         "500078",
         "500037",
         "500054",
-        "500098",
         "500092",
+        "500098",
         "501401",
         "500049",
         "500101",
@@ -495,7 +496,7 @@
       "topLocations": [
         {
           "name": "SURARAM",
-          "count": 405
+          "count": 406
         },
         {
           "name": "QTB",
@@ -510,12 +511,12 @@
           "count": 98
         },
         {
-          "name": "J GUTTA",
-          "count": 95
+          "name": "JEEDIMETLA",
+          "count": 96
         },
         {
-          "name": "JEEDIMETLA",
-          "count": 94
+          "name": "J GUTTA",
+          "count": 95
         },
         {
           "name": "OPP SCHOOL",
@@ -531,7 +532,7 @@
         },
         {
           "name": "OPP TEMPLE",
-          "count": 39
+          "count": 40
         },
         {
           "name": "QUTUBULLAPUR",
@@ -543,7 +544,7 @@
         },
         {
           "name": "ASHOKA RESIDENCY",
-          "count": 35
+          "count": 36
         },
         {
           "name": "OPP ATM",
@@ -557,7 +558,7 @@
     },
     {
       "code": "15-NIRANJAN",
-      "totalConsumers": 2198,
+      "totalConsumers": 2200,
       "pincodes": [
         "500055",
         "500037",
@@ -583,11 +584,11 @@
         "500070",
         "500068",
         "500032",
+        "500003",
         "506366",
         "506167",
         "500089",
         "506163",
-        "500003",
         "505001",
         "500060",
         "500035",
@@ -646,20 +647,19 @@
         "500057",
         "506302",
         "506132",
-        "509338",
         "501506",
         "500010",
-        "500074",
         "500026",
         "500027",
         "506006",
         "508254",
-        "509001"
+        "509001",
+        "502295"
       ],
       "topLocations": [
         {
           "name": "J GUTTA",
-          "count": 495
+          "count": 496
         },
         {
           "name": "QTB",
@@ -671,7 +671,7 @@
         },
         {
           "name": "PAPI REDDY NAGAR",
-          "count": 94
+          "count": 95
         },
         {
           "name": "KUKATPALLY",
@@ -699,7 +699,7 @@
         },
         {
           "name": "JEEDIMETLA",
-          "count": 44
+          "count": 43
         },
         {
           "name": "JAGADGIRIGUTTA",
@@ -711,7 +711,7 @@
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 34
+          "count": 32
         },
         {
           "name": "QUTBULLAPUR",
@@ -721,7 +721,7 @@
     },
     {
       "code": "18-TIRUPATHI",
-      "totalConsumers": 2026,
+      "totalConsumers": 2038,
       "pincodes": [
         "500055",
         "500051",
@@ -743,8 +743,8 @@
         "500008",
         "500042",
         "500013",
-        "500020",
         "500038",
+        "500020",
         "500015",
         "500004",
         "500084",
@@ -831,7 +831,6 @@
         "503120",
         "502325",
         "505185",
-        "506132",
         "502109",
         "500074",
         "506163",
@@ -845,12 +844,13 @@
         "501505",
         "502220",
         "506366",
-        "502032"
+        "502032",
+        "504202"
       ],
       "topLocations": [
         {
           "name": "CHINTAL",
-          "count": 383
+          "count": 387
         },
         {
           "name": "QTB",
@@ -858,7 +858,7 @@
         },
         {
           "name": "JDM",
-          "count": 108
+          "count": 109
         },
         {
           "name": "GANESH NAGAR",
@@ -866,7 +866,7 @@
         },
         {
           "name": "JEEDIMETLA",
-          "count": 72
+          "count": 71
         },
         {
           "name": "QUTHBULLAPUR",
@@ -874,11 +874,15 @@
         },
         {
           "name": "OPP SCHOOL",
-          "count": 63
+          "count": 65
         },
         {
           "name": "QUTUBULLAPUR",
           "count": 49
+        },
+        {
+          "name": "OPP TEMPLE",
+          "count": 41
         },
         {
           "name": "QUTBULLAPUR",
@@ -889,19 +893,15 @@
           "count": 38
         },
         {
-          "name": "OPP TEMPLE",
-          "count": 37
-        },
-        {
           "name": "CHERUKUPALLY COLONY",
           "count": 34
         },
         {
-          "name": "VENKATESHWARA NAGAR",
-          "count": 29
+          "name": "APSIIC",
+          "count": 30
         },
         {
-          "name": "DWARAKA NAGAR",
+          "name": "VENKATESHWARA NAGAR",
           "count": 29
         },
         {
@@ -912,7 +912,7 @@
     },
     {
       "code": "011-ESHWAR",
-      "totalConsumers": 1816,
+      "totalConsumers": 1792,
       "pincodes": [
         "500055",
         "500018",
@@ -921,8 +921,8 @@
         "500100",
         "500039",
         "500076",
-        "500078",
         "500092",
+        "500078",
         "500098",
         "501401",
         "500054",
@@ -935,29 +935,29 @@
         "500003",
         "500038",
         "500011",
-        "500008",
-        "500089",
-        "500049",
-        "502001",
-        "500072",
         "503111",
         "500080",
         "500020",
         "502255",
+        "500008",
+        "500049",
         "502325",
+        "500005",
+        "502001",
+        "500072",
         "503224",
         "500016",
         "500045",
         "500042",
-        "500060",
         "500070",
         "500068",
         "500057",
         "500027",
+        "500089",
         "500013",
-        "500005",
         "506001",
         "505001",
+        "500060",
         "500034",
         "502032",
         "500086",
@@ -968,7 +968,6 @@
         "500035",
         "500032",
         "506002",
-        "502110",
         "501503",
         "509001",
         "507003",
@@ -985,6 +984,7 @@
         "500079",
         "422102",
         "500029",
+        "412308",
         "560043",
         "560032",
         "500028",
@@ -1004,9 +1004,9 @@
         "500088",
         "502248",
         "505480",
-        "500075",
         "501511",
         "502313",
+        "502110",
         "502329",
         "500074",
         "503001",
@@ -1020,15 +1020,15 @@
       "topLocations": [
         {
           "name": "QTB",
-          "count": 359
+          "count": 357
         },
         {
           "name": "JEEDIMETLA",
-          "count": 304
+          "count": 303
         },
         {
           "name": "SUBASH NAGAR",
-          "count": 219
+          "count": 218
         },
         {
           "name": "SUBHASH NAGAR",
@@ -1036,27 +1036,27 @@
         },
         {
           "name": "JDM",
-          "count": 148
+          "count": 144
         },
         {
           "name": "CHINTAL",
-          "count": 92
+          "count": 94
         },
         {
           "name": "OPP SCHOOL",
-          "count": 69
+          "count": 68
         },
         {
           "name": "QUTUBULLAPUR",
-          "count": 60
+          "count": 59
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 46
+          "count": 44
         },
         {
           "name": "APSIIC",
-          "count": 41
+          "count": 43
         },
         {
           "name": "QUTHBULLAPUR",
@@ -1064,15 +1064,15 @@
         },
         {
           "name": "OPP ATM",
-          "count": 34
+          "count": 36
         },
         {
           "name": "IDA JEEDIMETLA",
           "count": 34
         },
         {
-          "name": "OPP TEMPLE",
-          "count": 32
+          "name": "ASHOKA RESIDENCY",
+          "count": 31
         },
         {
           "name": "SECUNDERABAD",
@@ -1082,10 +1082,10 @@
     },
     {
       "code": "123-WAJEED G",
-      "totalConsumers": 1715,
+      "totalConsumers": 1713,
       "pincodes": [
-        "500090",
         "500018",
+        "500090",
         "500051",
         "500055",
         "500039",
@@ -1108,12 +1108,12 @@
         "500089",
         "500074",
         "500038",
-        "502032",
         "506001",
         "500032",
         "500085",
         "507002",
         "500086",
+        "502032",
         "500068",
         "500013",
         "500016",
@@ -1152,8 +1152,6 @@
         "530016",
         "521137",
         "500033",
-        "500010",
-        "506163",
         "500012",
         "503111",
         "500048",
@@ -1208,12 +1206,13 @@
         "509381",
         "500046",
         "500022",
+        "509120",
         "506356"
       ],
       "topLocations": [
         {
           "name": "GAJULARAMARAM",
-          "count": 351
+          "count": 352
         },
         {
           "name": "QTB",
@@ -1221,15 +1220,15 @@
         },
         {
           "name": "KUKATPALLY",
-          "count": 130
+          "count": 129
         },
         {
           "name": "JDM",
-          "count": 121
+          "count": 122
         },
         {
           "name": "OPP SCHOOL",
-          "count": 88
+          "count": 87
         },
         {
           "name": "KKP",
@@ -1237,11 +1236,11 @@
         },
         {
           "name": "JEEDIMETLA",
-          "count": 55
+          "count": 54
         },
         {
           "name": "CHINTAL",
-          "count": 51
+          "count": 52
         },
         {
           "name": "DEVENDER NAGAR",
@@ -1261,11 +1260,11 @@
         },
         {
           "name": "APSIIC",
-          "count": 29
+          "count": 30
         },
         {
           "name": "OPP ATM",
-          "count": 28
+          "count": 29
         },
         {
           "name": "OPP TEMPLE",
@@ -1275,7 +1274,7 @@
     },
     {
       "code": "04-RAMESH",
-      "totalConsumers": 1656,
+      "totalConsumers": 1660,
       "pincodes": [
         "500055",
         "500051",
@@ -1330,7 +1329,6 @@
         "503307",
         "506163",
         "500043",
-        "509210",
         "502301",
         "530026",
         "500004",
@@ -1338,6 +1336,7 @@
         "506001",
         "502336",
         "500044",
+        "500007",
         "500011",
         "502032",
         "500084",
@@ -1363,11 +1362,11 @@
       "topLocations": [
         {
           "name": "QTB",
-          "count": 425
+          "count": 426
         },
         {
           "name": "SHAPUR",
-          "count": 194
+          "count": 195
         },
         {
           "name": "SHAPUR NAGAR",
@@ -1383,11 +1382,11 @@
         },
         {
           "name": "SANJAY GANDHI NAGAR",
-          "count": 126
+          "count": 127
         },
         {
           "name": "JDM",
-          "count": 123
+          "count": 122
         },
         {
           "name": "KALAVATHI NAGAR",
@@ -1399,7 +1398,7 @@
         },
         {
           "name": "QUTUBULLAPUR",
-          "count": 69
+          "count": 70
         },
         {
           "name": "OPP SCHOOL",
@@ -1407,38 +1406,38 @@
         },
         {
           "name": "CHINTAL",
-          "count": 53
+          "count": 55
         },
         {
           "name": "APIIC COLONY",
           "count": 43
         },
         {
-          "name": "IDA JEEDIMETLA",
-          "count": 40
+          "name": "NEHRU NAGAR",
+          "count": 41
         },
         {
-          "name": "NEHRU NAGAR",
+          "name": "IDA JEEDIMETLA",
           "count": 40
         }
       ]
     },
     {
       "code": "09-S.SRINU",
-      "totalConsumers": 1504,
+      "totalConsumers": 1506,
       "pincodes": [
         "500055",
         "500037",
         "500051",
         "500018",
         "500090",
-        "500100",
         "500039",
+        "500100",
         "500076",
         "500078",
         "500098",
-        "500054",
         "500092",
+        "500054",
         "500101",
         "500049",
         "500072",
@@ -1449,15 +1448,14 @@
         "500013",
         "500068",
         "500014",
-        "500015",
         "500016",
         "506167",
         "506244",
         "509103",
         "500032",
-        "500070",
         "500005",
         "500028",
+        "500015",
         "500080",
         "502110",
         "505152",
@@ -1474,6 +1472,7 @@
         "503108",
         "500006",
         "502318",
+        "500070",
         "500084",
         "502117",
         "504346",
@@ -1496,39 +1495,39 @@
       "topLocations": [
         {
           "name": "J GUTTA",
-          "count": 363
+          "count": 362
         },
         {
           "name": "QTB",
-          "count": 269
+          "count": 268
         },
         {
           "name": "MAQDUM NAGAR",
-          "count": 114
+          "count": 113
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 108
+          "count": 110
         },
         {
           "name": "JDM",
-          "count": 78
+          "count": 80
         },
         {
-          "name": "QUTUBULLAPUR",
-          "count": 50
+          "name": "CHINTAL",
+          "count": 51
         },
         {
           "name": "JEEDIMETLA",
           "count": 50
         },
         {
-          "name": "CHINTAL",
-          "count": 48
+          "name": "OPP SCHOOL",
+          "count": 50
         },
         {
-          "name": "OPP SCHOOL",
-          "count": 48
+          "name": "QUTUBULLAPUR",
+          "count": 49
         },
         {
           "name": "SRINIVAS NAGAR",
@@ -1552,13 +1551,13 @@
         },
         {
           "name": "APSIIC",
-          "count": 30
+          "count": 32
         }
       ]
     },
     {
       "code": "07-MANIKANTA",
-      "totalConsumers": 1495,
+      "totalConsumers": 1490,
       "pincodes": [
         "500055",
         "500051",
@@ -1571,8 +1570,8 @@
         "500054",
         "500092",
         "500098",
-        "500101",
         "501401",
+        "500101",
         "500037",
         "500045",
         "500049",
@@ -1648,7 +1647,6 @@
         "509103",
         "500004",
         "508253",
-        "501506",
         "509401",
         "501505",
         "502306",
@@ -1666,35 +1664,35 @@
       "topLocations": [
         {
           "name": "SURARAM",
-          "count": 303
+          "count": 300
         },
         {
           "name": "QTB",
-          "count": 285
+          "count": 284
         },
         {
           "name": "JDM",
-          "count": 98
+          "count": 95
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 77
+          "count": 76
         },
         {
           "name": "JEEDIMETLA",
-          "count": 69
+          "count": 71
         },
         {
           "name": "OPP SCHOOL",
-          "count": 58
-        },
-        {
-          "name": "RAJEEV GANDHI NAGAR",
-          "count": 51
+          "count": 60
         },
         {
           "name": "CHINTAL",
-          "count": 51
+          "count": 53
+        },
+        {
+          "name": "RAJEEV GANDHI NAGAR",
+          "count": 50
         },
         {
           "name": "QUTUBULLAPUR",
@@ -1706,7 +1704,7 @@
         },
         {
           "name": "OPP TEMPLE",
-          "count": 31
+          "count": 29
         },
         {
           "name": "SHAPUR",
@@ -1722,13 +1720,13 @@
         },
         {
           "name": "SHAPUR NAGAR",
-          "count": 27
+          "count": 26
         }
       ]
     },
     {
       "code": "003-ANAND",
-      "totalConsumers": 1458,
+      "totalConsumers": 1468,
       "pincodes": [
         "500055",
         "500051",
@@ -1761,13 +1759,14 @@
         "500014",
         "500045",
         "500013",
-        "500084",
         "500068",
         "507002",
+        "502032",
         "500011",
         "500020",
         "500042",
         "500081",
+        "500084",
         "500067",
         "500004",
         "500079",
@@ -1782,9 +1781,9 @@
         "500046",
         "500048",
         "502110",
-        "502032",
         "509301",
         "500003",
+        "500032",
         "400008",
         "500095",
         "502313",
@@ -1819,6 +1818,7 @@
         "500026",
         "500036",
         "501503",
+        "507301",
         "505101",
         "509120",
         "502286",
@@ -1841,15 +1841,15 @@
       "topLocations": [
         {
           "name": "GAJULARAMARAM",
-          "count": 405
+          "count": 409
         },
         {
           "name": "QTB",
-          "count": 246
+          "count": 249
         },
         {
           "name": "JDM",
-          "count": 128
+          "count": 130
         },
         {
           "name": "OPP SCHOOL",
@@ -1861,11 +1861,11 @@
         },
         {
           "name": "KUKATPALLY",
-          "count": 70
+          "count": 69
         },
         {
           "name": "CHINTAL",
-          "count": 53
+          "count": 56
         },
         {
           "name": "ADARSH NAGAR",
@@ -1873,7 +1873,7 @@
         },
         {
           "name": "OPP TEMPLE",
-          "count": 41
+          "count": 42
         },
         {
           "name": "OPP ATM",
@@ -1884,29 +1884,29 @@
           "count": 39
         },
         {
-          "name": "KKP",
-          "count": 30
+          "name": "APSIIC",
+          "count": 32
         },
         {
-          "name": "APSIIC",
-          "count": 29
+          "name": "KKP",
+          "count": 30
         },
         {
           "name": "METTUKANIGUDA",
           "count": 25
         },
         {
-          "name": "HYD",
+          "name": "METTUKANGUDA",
           "count": 24
         }
       ]
     },
     {
       "code": "08-SURENDER J GUTTA",
-      "totalConsumers": 1325,
+      "totalConsumers": 1335,
       "pincodes": [
-        "500037",
         "500018",
+        "500037",
         "500055",
         "500051",
         "500039",
@@ -1926,6 +1926,7 @@
         "505001",
         "500054",
         "500028",
+        "508101",
         "500074",
         "500035",
         "500032",
@@ -1936,7 +1937,6 @@
         "502032",
         "503111",
         "509103",
-        "508101",
         "500015",
         "507002",
         "522112",
@@ -1972,6 +1972,7 @@
         "500058",
         "500057",
         "507201",
+        "509338",
         "500050",
         "505471",
         "501506",
@@ -1985,15 +1986,15 @@
       "topLocations": [
         {
           "name": "J GUTTA",
-          "count": 241
+          "count": 243
         },
         {
           "name": "QTB",
-          "count": 173
+          "count": 175
         },
         {
           "name": "VENKATESWARA NAGAR",
-          "count": 56
+          "count": 57
         },
         {
           "name": "VENKATESHWARA NAGAR",
@@ -2009,15 +2010,15 @@
         },
         {
           "name": "OPP SCHOOL",
-          "count": 36
+          "count": 37
+        },
+        {
+          "name": "CHINTAL",
+          "count": 35
         },
         {
           "name": "JEEDIMETLA",
           "count": 34
-        },
-        {
-          "name": "CHINTAL",
-          "count": 33
         },
         {
           "name": "QUTUBULLAPUR",
@@ -2041,13 +2042,13 @@
         },
         {
           "name": "APSIIC",
-          "count": 22
+          "count": 24
         }
       ]
     },
     {
       "code": "17-SRIPAL",
-      "totalConsumers": 1252,
+      "totalConsumers": 1251,
       "pincodes": [
         "500014",
         "500051",
@@ -2100,15 +2101,15 @@
       "topLocations": [
         {
           "name": "DOOLAPALLY",
-          "count": 391
+          "count": 389
         },
         {
           "name": "QTB",
-          "count": 235
+          "count": 236
         },
         {
           "name": "JDM",
-          "count": 100
+          "count": 101
         },
         {
           "name": "JEEDIMETLA",
@@ -2120,7 +2121,7 @@
         },
         {
           "name": "OPP TEMPLE",
-          "count": 33
+          "count": 34
         },
         {
           "name": "DOOLAPAAY",
@@ -2132,7 +2133,7 @@
         },
         {
           "name": "KOMPALLY",
-          "count": 27
+          "count": 25
         },
         {
           "name": "DOOLAPALLY COLONY",
@@ -2162,7 +2163,7 @@
     },
     {
       "code": "06-HANUMANTH-V",
-      "totalConsumers": 1205,
+      "totalConsumers": 1208,
       "pincodes": [
         "500055",
         "500037",
@@ -2247,7 +2248,7 @@
       "topLocations": [
         {
           "name": "QTB",
-          "count": 208
+          "count": 207
         },
         {
           "name": "J GUTTA",
@@ -2263,11 +2264,11 @@
         },
         {
           "name": "CHINTAL",
-          "count": 68
+          "count": 71
         },
         {
           "name": "IDPL",
-          "count": 68
+          "count": 67
         },
         {
           "name": "JDM",
@@ -2295,7 +2296,7 @@
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 30
+          "count": 29
         },
         {
           "name": "BALANAGAR",
@@ -2309,7 +2310,7 @@
     },
     {
       "code": "14-KADALI NAGARAJU",
-      "totalConsumers": 1101,
+      "totalConsumers": 1099,
       "pincodes": [
         "500055",
         "500018",
@@ -2329,6 +2330,7 @@
         "500028",
         "500005",
         "500072",
+        "503125",
         "500015",
         "500020",
         "500008",
@@ -2337,7 +2339,6 @@
         "500068",
         "507002",
         "500042",
-        "503125",
         "502313",
         "502110",
         "500070",
@@ -2374,11 +2375,11 @@
         },
         {
           "name": "QTB",
-          "count": 200
+          "count": 199
         },
         {
           "name": "SAI BABA NAGAR",
-          "count": 164
+          "count": 163
         },
         {
           "name": "SAIBABA NAGAR",
@@ -2394,7 +2395,7 @@
         },
         {
           "name": "CHINTAL",
-          "count": 41
+          "count": 40
         },
         {
           "name": "QUTUBULLAPUR",
@@ -2422,17 +2423,17 @@
         },
         {
           "name": "GAJULARAMARAM",
-          "count": 15
+          "count": 14
         },
         {
           "name": "APSIIC",
-          "count": 14
+          "count": 13
         }
       ]
     },
     {
       "code": "016-SHIVA KISHORE",
-      "totalConsumers": 902,
+      "totalConsumers": 915,
       "pincodes": [
         "500055",
         "500051",
@@ -2448,21 +2449,23 @@
         "500101",
         "500037",
         "501401",
+        "500049",
         "500020",
         "500084",
-        "500049",
+        "500072",
         "502001",
         "500008",
         "500079",
+        "500013",
         "500012",
         "500014",
         "500038",
         "500016",
         "502325",
-        "500072",
         "505001",
         "500003",
         "500035",
+        "503108",
         "500052",
         "500005",
         "500061",
@@ -2471,13 +2474,11 @@
         "506001",
         "500080",
         "509001",
-        "500013",
         "502220",
         "834009",
         "534002",
         "500073",
         "560093",
-        "503108",
         "502318",
         "500048",
         "500059",
@@ -2492,6 +2493,7 @@
         "500053",
         "500032",
         "502279",
+        "509202",
         "501505",
         "506122",
         "502255",
@@ -2501,11 +2503,11 @@
       "topLocations": [
         {
           "name": "GAJULARAMARAM",
-          "count": 244
+          "count": 249
         },
         {
           "name": "QTB",
-          "count": 200
+          "count": 203
         },
         {
           "name": "JDM",
@@ -2517,11 +2519,11 @@
         },
         {
           "name": "OPP SCHOOL",
-          "count": 40
+          "count": 38
         },
         {
           "name": "SHAPUR",
-          "count": 34
+          "count": 33
         },
         {
           "name": "QUTUBULLAPUR",
@@ -2541,7 +2543,7 @@
         },
         {
           "name": "INDIRA NAGAR",
-          "count": 29
+          "count": 30
         },
         {
           "name": "CHINTAL",
@@ -2563,7 +2565,7 @@
     },
     {
       "code": "000-SHIVA KISHORE-1",
-      "totalConsumers": 670,
+      "totalConsumers": 666,
       "pincodes": [
         "500055",
         "500018",
@@ -2580,10 +2582,10 @@
         "501401",
         "500101",
         "500049",
-        "500045",
         "500072",
         "503111",
         "500008",
+        "500045",
         "502220",
         "503224",
         "500011",
@@ -2591,6 +2593,7 @@
         "500013",
         "500068",
         "500043",
+        "500015",
         "509131",
         "500057",
         "503110",
@@ -2617,10 +2620,8 @@
         "502381",
         "500070",
         "509210",
-        "500015",
         "509381",
         "509204",
-        "509202",
         "502001",
         "500036",
         "500079",
@@ -2634,7 +2635,7 @@
         },
         {
           "name": "QTB",
-          "count": 141
+          "count": 140
         },
         {
           "name": "J GUTTA",
@@ -2692,7 +2693,7 @@
     },
     {
       "code": "001-SRIPAL-A",
-      "totalConsumers": 612,
+      "totalConsumers": 604,
       "pincodes": [
         "500055",
         "500051",
@@ -2703,20 +2704,20 @@
         "500078",
         "500076",
         "501401",
-        "500098",
         "500092",
+        "500098",
         "500054",
         "500037",
         "500101",
-        "500011",
         "500014",
-        "500042",
-        "500049",
         "500013",
+        "500042",
         "503111",
+        "500049",
         "500072",
         "500015",
         "500004",
+        "500011",
         "507165",
         "503125",
         "518221",
@@ -2739,7 +2740,7 @@
       "topLocations": [
         {
           "name": "QTB",
-          "count": 141
+          "count": 140
         },
         {
           "name": "JEEDIMETLA",
@@ -2747,7 +2748,7 @@
         },
         {
           "name": "JDM",
-          "count": 48
+          "count": 47
         },
         {
           "name": "APUROOPA COLONY",
@@ -2763,7 +2764,7 @@
         },
         {
           "name": "OPP SCHOOL",
-          "count": 24
+          "count": 23
         },
         {
           "name": "SHAPUR NAGAR",
@@ -2778,16 +2779,16 @@
           "count": 19
         },
         {
+          "name": "CHINTAL",
+          "count": 18
+        },
+        {
           "name": "RAM REDDY NAGAR",
           "count": 18
         },
         {
           "name": "IDA JEEDIMETLA",
           "count": 18
-        },
-        {
-          "name": "CHINTAL",
-          "count": 17
         },
         {
           "name": "GAJULARAMARAM",
@@ -2801,15 +2802,15 @@
     },
     {
       "code": "111-WAJEED",
-      "totalConsumers": 597,
+      "totalConsumers": 596,
       "pincodes": [
         "500055",
         "500018",
         "500051",
         "500090",
         "500054",
-        "500100",
         "500039",
+        "500100",
         "500078",
         "500076",
         "500098",
@@ -2817,8 +2818,8 @@
         "500092",
         "500037",
         "501401",
-        "500072",
         "500015",
+        "500072",
         "503111",
         "508126",
         "500025",
@@ -2860,15 +2861,15 @@
       "topLocations": [
         {
           "name": "CHINTAL",
-          "count": 121
+          "count": 125
         },
         {
           "name": "QTB",
-          "count": 107
+          "count": 106
         },
         {
           "name": "CHANDRA NAGAR",
-          "count": 53
+          "count": 54
         },
         {
           "name": "JDM",
@@ -2884,7 +2885,7 @@
         },
         {
           "name": "JAYARAM NAGAR",
-          "count": 32
+          "count": 33
         },
         {
           "name": "QUTUBULLAPUR",
@@ -2896,7 +2897,7 @@
         },
         {
           "name": "KUKATPALLY",
-          "count": 13
+          "count": 12
         },
         {
           "name": "SURARAM",
@@ -2922,7 +2923,7 @@
     },
     {
       "code": "146-VIJAY ADDURI",
-      "totalConsumers": 536,
+      "totalConsumers": 533,
       "pincodes": [
         "500042",
         "500018",
@@ -2932,17 +2933,16 @@
         "500038",
         "500072",
         "500092",
+        "500051",
         "500093",
+        "500049",
         "500086",
         "500090",
         "500003",
         "501401",
         "500045",
         "500039",
-        "500051",
-        "500049",
         "500068",
-        "500101",
         "500008",
         "500005",
         "500013",
@@ -2952,8 +2952,8 @@
         "500076",
         "500078",
         "500070",
+        "500073",
         "509375",
-        "506001",
         "523357",
         "500087",
         "500089",
@@ -2970,6 +2970,7 @@
         "500026",
         "500041",
         "501505",
+        "500101",
         "501506",
         "502285",
         "500080",
@@ -2978,13 +2979,12 @@
         "500081",
         "500020",
         "500091",
-        "500036",
-        "500082"
+        "500036"
       ],
       "topLocations": [
         {
           "name": "BALANAGAR",
-          "count": 147
+          "count": 149
         },
         {
           "name": "BALA NAGAR",
@@ -2996,7 +2996,7 @@
         },
         {
           "name": "HYD",
-          "count": 32
+          "count": 30
         },
         {
           "name": "VINAYAK NAGAR",
@@ -3045,131 +3045,27 @@
       ]
     },
     {
-      "code": "155-SAMA TRANSFER",
-      "totalConsumers": 192,
-      "pincodes": [
-        "500011",
-        "500018",
-        "500042",
-        "500016",
-        "500037",
-        "500055",
-        "500038",
-        "500073",
-        "500098",
-        "502001",
-        "500072",
-        "505460",
-        "500093",
-        "502110",
-        "506332",
-        "500049",
-        "501401",
-        "500089",
-        "500080",
-        "500001",
-        "531011",
-        "500010",
-        "500008",
-        "500076",
-        "505301",
-        "502325",
-        "505122",
-        "500100",
-        "500015",
-        "509001",
-        "506001",
-        "500078",
-        "506349",
-        "500035",
-        "500045"
-      ],
-      "topLocations": [
-        {
-          "name": "BALANAGAR",
-          "count": 38
-        },
-        {
-          "name": "GOUTHAM NAGAR",
-          "count": 22
-        },
-        {
-          "name": "FEROZGUDA",
-          "count": 20
-        },
-        {
-          "name": "BALA NAGAR",
-          "count": 16
-        },
-        {
-          "name": "FEROZ GUDA",
-          "count": 16
-        },
-        {
-          "name": "NAGARJUNA COLONY",
-          "count": 9
-        },
-        {
-          "name": "GOWTHAM NAGAR",
-          "count": 8
-        },
-        {
-          "name": "HYD",
-          "count": 8
-        },
-        {
-          "name": "TEMPLE",
-          "count": 7
-        },
-        {
-          "name": "NILL",
-          "count": 6
-        },
-        {
-          "name": "SECUNDERABAD",
-          "count": 5
-        },
-        {
-          "name": "GAUTHAM NAGAR",
-          "count": 4
-        },
-        {
-          "name": "FATHE NAGAR",
-          "count": 4
-        },
-        {
-          "name": "S R NAGAR",
-          "count": 3
-        },
-        {
-          "name": "GROUND FLOOR",
-          "count": 3
-        }
-      ]
-    },
-    {
       "code": "169624_PortIn-169624_PortIn",
-      "totalConsumers": 75,
+      "totalConsumers": 86,
       "pincodes": [
         "500014",
         "500055",
-        "500039",
-        "500010",
-        "500037",
-        "500015",
+        "500051",
         "500100",
+        "500090",
+        "500039",
         "500018",
+        "500010",
+        "500015",
+        "500049",
+        "500076",
         "500067",
         "500011",
         "505001",
         "500061",
-        "500090",
-        "501401",
-        "500049",
-        "500092",
-        "500051",
-        "500076",
-        "502001"
+        "500057",
+        "502001",
+        "500092"
       ],
       "topLocations": [
         {
@@ -3177,7 +3073,23 @@
           "count": 16
         },
         {
+          "name": "GUNDLAPOCHAMPALLY",
+          "count": 6
+        },
+        {
+          "name": "JEEDIMETLA",
+          "count": 5
+        },
+        {
+          "name": "SURARAM",
+          "count": 4
+        },
+        {
           "name": "SUCHITRA",
+          "count": 4
+        },
+        {
+          "name": "BUILDING",
           "count": 4
         },
         {
@@ -3185,15 +3097,11 @@
           "count": 4
         },
         {
-          "name": "GUNDLAPOCHAMPALLY",
-          "count": 4
-        },
-        {
-          "name": "JEEDIMETLA",
+          "name": "QTB",
           "count": 3
         },
         {
-          "name": "BUILDING",
+          "name": "DOOLAPALLY",
           "count": 3
         },
         {
@@ -3201,66 +3109,53 @@
           "count": 3
         },
         {
-          "name": "SURARAM",
-          "count": 2
+          "name": "GAJULARAMARAM",
+          "count": 3
+        },
+        {
+          "name": "JDM",
+          "count": 3
         },
         {
           "name": "APSIIC",
           "count": 2
         },
         {
-          "name": "DOOLAPALLY",
+          "name": "QUTUBULLAPUR",
           "count": 2
         },
         {
           "name": "ALWAL",
-          "count": 2
-        },
-        {
-          "name": "QTB",
-          "count": 2
-        },
-        {
-          "name": "5TH FLOOR",
-          "count": 2
-        },
-        {
-          "name": "KUKATPALLY",
-          "count": 2
-        },
-        {
-          "name": "SRINIVASA NILAYAM",
           "count": 2
         }
       ]
     },
     {
       "code": "20-SIDDHARTHA BLOCKED EKYC",
-      "totalConsumers": 23,
+      "totalConsumers": 17,
       "pincodes": [
         "500018",
-        "500051",
-        "500039",
         "500090",
+        "500051",
         "500078",
         "501503",
         "502255",
+        "500039",
         "500086",
-        "500055",
-        "500076"
+        "500055"
       ],
       "topLocations": [
         {
-          "name": "GAJULARAMARAM",
-          "count": 7
-        },
-        {
           "name": "QTB",
-          "count": 6
+          "count": 4
         },
         {
           "name": "CHINTAL",
-          "count": 4
+          "count": 3
+        },
+        {
+          "name": "GAJULARAMARAM",
+          "count": 3
         },
         {
           "name": "OPP SCHOOL",
@@ -3273,14 +3168,6 @@
         {
           "name": "JDM",
           "count": 2
-        },
-        {
-          "name": "BESIDE CHURCH",
-          "count": 1
-        },
-        {
-          "name": "ASHOKA RESIDENCY",
-          "count": 1
         },
         {
           "name": "MAHADEVAPURAM",
@@ -3309,6 +3196,87 @@
         {
           "name": "4 146",
           "count": 1
+        },
+        {
+          "name": "GAJULARAMAARAM",
+          "count": 1
+        },
+        {
+          "name": "ADARSH NAGR",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "code": "155-SAMA TRANSFER",
+      "totalConsumers": 17,
+      "pincodes": [
+        "500018",
+        "500011",
+        "500042",
+        "500037",
+        "531011"
+      ],
+      "topLocations": [
+        {
+          "name": "BALANAGAR",
+          "count": 5
+        },
+        {
+          "name": "GOUTHAM NAGAR",
+          "count": 3
+        },
+        {
+          "name": "FEROZGUDA",
+          "count": 3
+        },
+        {
+          "name": "NAGARJUNA COLONY",
+          "count": 2
+        },
+        {
+          "name": "GOUTHAM NAGAR FEROZGUDA",
+          "count": 1
+        },
+        {
+          "name": "GROUND FLOOR",
+          "count": 1
+        },
+        {
+          "name": "SANATH NAGAR",
+          "count": 1
+        },
+        {
+          "name": "GOWTHAM NAGAR",
+          "count": 1
+        },
+        {
+          "name": "BALA NAGAR",
+          "count": 1
+        },
+        {
+          "name": "FEROZ GUDA",
+          "count": 1
+        },
+        {
+          "name": "GAUTHAM NAGAR",
+          "count": 1
+        },
+        {
+          "name": "SECUNDERABAD",
+          "count": 1
+        },
+        {
+          "name": "AIR FORCE STSTION BEGUMPE",
+          "count": 1
+        },
+        {
+          "name": "FAROZGUDA",
+          "count": 1
+        },
+        {
+          "name": "WISLIY LINE",
+          "count": 1
         }
       ]
     },
@@ -3329,16 +3297,16 @@
   "topColonies": [
     {
       "name": "QTB",
-      "totalConsumers": 5385,
+      "totalConsumers": 5387,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
           "area": "01-RAJU",
-          "count": 458
+          "count": 457
         },
         {
           "area": "04-RAMESH",
-          "count": 425
+          "count": 426
         },
         {
           "area": "03-NAGARAJU",
@@ -3348,35 +3316,35 @@
     },
     {
       "name": "CHINTAL",
-      "totalConsumers": 1958,
+      "totalConsumers": 1990,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
           "area": "18-TIRUPATHI",
-          "count": 383
+          "count": 387
         },
         {
           "area": "111-WAJEED",
-          "count": 121
+          "count": 125
         },
         {
           "area": "011-ESHWAR",
-          "count": 92
+          "count": 94
         }
       ]
     },
     {
       "name": "GAJULARAMARAM",
-      "totalConsumers": 1932,
+      "totalConsumers": 1937,
       "primaryArea": "003-ANAND",
       "secondaryAreas": [
         {
           "area": "123-WAJEED G",
-          "count": 351
+          "count": 352
         },
         {
           "area": "016-SHIVA KISHORE",
-          "count": 244
+          "count": 249
         },
         {
           "area": "04-RAMESH",
@@ -3386,26 +3354,26 @@
     },
     {
       "name": "JDM",
-      "totalConsumers": 1751,
+      "totalConsumers": 1755,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
           "area": "01-RAJU",
-          "count": 163
+          "count": 162
         },
         {
           "area": "011-ESHWAR",
-          "count": 148
+          "count": 144
         },
         {
           "area": "003-ANAND",
-          "count": 128
+          "count": 130
         }
       ]
     },
     {
       "name": "JEEDIMETLA",
-      "totalConsumers": 1615,
+      "totalConsumers": 1617,
       "primaryArea": "011-ESHWAR",
       "secondaryAreas": [
         {
@@ -3424,16 +3392,16 @@
     },
     {
       "name": "J GUTTA",
-      "totalConsumers": 1589,
+      "totalConsumers": 1591,
       "primaryArea": "15-NIRANJAN",
       "secondaryAreas": [
         {
           "area": "09-S.SRINU",
-          "count": 363
+          "count": 362
         },
         {
           "area": "08-SURENDER J GUTTA",
-          "count": 241
+          "count": 243
         },
         {
           "area": "06-HANUMANTH-V",
@@ -3443,12 +3411,12 @@
     },
     {
       "name": "SURARAM",
-      "totalConsumers": 1294,
+      "totalConsumers": 1300,
       "primaryArea": "03-NAGARAJU",
       "secondaryAreas": [
         {
           "area": "07-MANIKANTA",
-          "count": 303
+          "count": 300
         },
         {
           "area": "14-KADALI NAGARAJU",
@@ -3456,22 +3424,22 @@
         },
         {
           "area": "11-NAVEEN",
-          "count": 73
+          "count": 75
         }
       ]
     },
     {
       "name": "OPP SCHOOL",
-      "totalConsumers": 1077,
+      "totalConsumers": 1079,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
           "area": "01-RAJU",
-          "count": 109
+          "count": 108
         },
         {
           "area": "123-WAJEED G",
-          "count": 88
+          "count": 87
         },
         {
           "area": "003-ANAND",
@@ -3486,7 +3454,7 @@
       "secondaryAreas": [
         {
           "area": "04-RAMESH",
-          "count": 69
+          "count": 70
         },
         {
           "area": "11-NAVEEN",
@@ -3499,8 +3467,27 @@
       ]
     },
     {
+      "name": "OPP TEMPLE",
+      "totalConsumers": 551,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 56
+        },
+        {
+          "area": "003-ANAND",
+          "count": 42
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 41
+        }
+      ]
+    },
+    {
       "name": "KUKATPALLY",
-      "totalConsumers": 556,
+      "totalConsumers": 551,
       "primaryArea": "123-WAJEED G",
       "secondaryAreas": [
         {
@@ -3509,36 +3496,17 @@
         },
         {
           "area": "003-ANAND",
-          "count": 70
+          "count": 69
         },
         {
           "area": "11-NAVEEN",
           "count": 53
-        }
-      ]
-    },
-    {
-      "name": "OPP TEMPLE",
-      "totalConsumers": 544,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 53
-        },
-        {
-          "area": "003-ANAND",
-          "count": 41
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 39
         }
       ]
     },
     {
       "name": "BAHADURPALLY",
-      "totalConsumers": 531,
+      "totalConsumers": 538,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -3550,14 +3518,33 @@
           "count": 14
         },
         {
-          "area": "07-MANIKANTA",
+          "area": "011-ESHWAR",
           "count": 11
         }
       ]
     },
     {
+      "name": "APSIIC",
+      "totalConsumers": 505,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 47
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 43
+        },
+        {
+          "area": "003-ANAND",
+          "count": 32
+        }
+      ]
+    },
+    {
       "name": "DOOLAPALLY",
-      "totalConsumers": 499,
+      "totalConsumers": 498,
       "primaryArea": "17-SRIPAL",
       "secondaryAreas": [
         {
@@ -3575,36 +3562,17 @@
       ]
     },
     {
-      "name": "APSIIC",
-      "totalConsumers": 483,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 46
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 41
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 30
-        }
-      ]
-    },
-    {
       "name": "SHAPUR",
-      "totalConsumers": 475,
+      "totalConsumers": 477,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
           "area": "016-SHIVA KISHORE",
-          "count": 34
+          "count": 33
         },
         {
           "area": "11-NAVEEN",
-          "count": 28
+          "count": 29
         },
         {
           "area": "07-MANIKANTA",
@@ -3614,7 +3582,7 @@
     },
     {
       "name": "OPP ATM",
-      "totalConsumers": 463,
+      "totalConsumers": 468,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -3623,22 +3591,22 @@
         },
         {
           "area": "01-RAJU",
-          "count": 36
+          "count": 37
         },
         {
-          "area": "04-RAMESH",
-          "count": 35
+          "area": "011-ESHWAR",
+          "count": 36
         }
       ]
     },
     {
       "name": "SHAPUR NAGAR",
-      "totalConsumers": 411,
+      "totalConsumers": 413,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
           "area": "07-MANIKANTA",
-          "count": 27
+          "count": 26
         },
         {
           "area": "016-SHIVA KISHORE",
@@ -3646,13 +3614,13 @@
         },
         {
           "area": "011-ESHWAR",
-          "count": 22
+          "count": 23
         }
       ]
     },
     {
       "name": "DP PALLY",
-      "totalConsumers": 398,
+      "totalConsumers": 404,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -3661,7 +3629,7 @@
         },
         {
           "area": "18-TIRUPATHI",
-          "count": 18
+          "count": 19
         },
         {
           "area": "03-NAGARAJU",
@@ -3671,7 +3639,7 @@
     },
     {
       "name": "QUTBULLAPUR",
-      "totalConsumers": 387,
+      "totalConsumers": 385,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -3690,26 +3658,26 @@
     },
     {
       "name": "SUBASH NAGAR",
-      "totalConsumers": 364,
+      "totalConsumers": 366,
       "primaryArea": "011-ESHWAR",
       "secondaryAreas": [
         {
           "area": "11-NAVEEN",
-          "count": 20
+          "count": 22
         },
         {
           "area": "03-NAGARAJU",
-          "count": 15
+          "count": 16
         },
         {
           "area": "01-RAJU",
-          "count": 12
+          "count": 13
         }
       ]
     },
     {
       "name": "HAL COLONY",
-      "totalConsumers": 344,
+      "totalConsumers": 348,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
@@ -3717,18 +3685,18 @@
           "count": 39
         },
         {
-          "area": "01-RAJU",
-          "count": 27
+          "area": "11-NAVEEN",
+          "count": 28
         },
         {
-          "area": "11-NAVEEN",
+          "area": "01-RAJU",
           "count": 27
         }
       ]
     },
     {
       "name": "GANDIMYSAMMA",
-      "totalConsumers": 333,
+      "totalConsumers": 336,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -3766,26 +3734,26 @@
     },
     {
       "name": "ASHOKA RESIDENCY",
-      "totalConsumers": 303,
+      "totalConsumers": 318,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
           "area": "03-NAGARAJU",
-          "count": 35
+          "count": 36
         },
         {
           "area": "011-ESHWAR",
-          "count": 30
+          "count": 31
         },
         {
           "area": "11-NAVEEN",
-          "count": 29
+          "count": 30
         }
       ]
     },
     {
       "name": "SURARAM COLONY",
-      "totalConsumers": 290,
+      "totalConsumers": 288,
       "primaryArea": "03-NAGARAJU",
       "secondaryAreas": [
         {
@@ -3803,27 +3771,8 @@
       ]
     },
     {
-      "name": "BALANAGAR",
-      "totalConsumers": 288,
-      "primaryArea": "146-VIJAY ADDURI",
-      "secondaryAreas": [
-        {
-          "area": "155-SAMA TRANSFER",
-          "count": 38
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 25
-        },
-        {
-          "area": "01-RAJU",
-          "count": 15
-        }
-      ]
-    },
-    {
       "name": "SAI BABA NAGAR",
-      "totalConsumers": 280,
+      "totalConsumers": 279,
       "primaryArea": "14-KADALI NAGARAJU",
       "secondaryAreas": [
         {
@@ -3861,12 +3810,12 @@
     },
     {
       "name": "HYD",
-      "totalConsumers": 270,
+      "totalConsumers": 258,
       "primaryArea": "123-WAJEED G",
       "secondaryAreas": [
         {
           "area": "146-VIJAY ADDURI",
-          "count": 32
+          "count": 30
         },
         {
           "area": "003-ANAND",
@@ -3880,7 +3829,7 @@
     },
     {
       "name": "NEAR SCHOOL",
-      "totalConsumers": 255,
+      "totalConsumers": 256,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -3893,13 +3842,32 @@
         },
         {
           "area": "011-ESHWAR",
-          "count": 19
+          "count": 18
+        }
+      ]
+    },
+    {
+      "name": "BALANAGAR",
+      "totalConsumers": 252,
+      "primaryArea": "146-VIJAY ADDURI",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 25
+        },
+        {
+          "area": "01-RAJU",
+          "count": 15
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 8
         }
       ]
     },
     {
       "name": "KKP",
-      "totalConsumers": 247,
+      "totalConsumers": 248,
       "primaryArea": "123-WAJEED G",
       "secondaryAreas": [
         {
@@ -3912,18 +3880,18 @@
         },
         {
           "area": "11-NAVEEN",
-          "count": 19
+          "count": 20
         }
       ]
     },
     {
       "name": "SECUNDERABAD",
-      "totalConsumers": 233,
-      "primaryArea": "011-ESHWAR",
+      "totalConsumers": 229,
+      "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
-          "area": "11-NAVEEN",
-          "count": 30
+          "area": "011-ESHWAR",
+          "count": 31
         },
         {
           "area": "01-RAJU",
@@ -3931,7 +3899,26 @@
         },
         {
           "area": "123-WAJEED G",
-          "count": 23
+          "count": 22
+        }
+      ]
+    },
+    {
+      "name": "BESIDE CHURCH",
+      "totalConsumers": 219,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 27
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 19
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 13
         }
       ]
     },
@@ -3945,18 +3932,18 @@
           "count": 34
         },
         {
-          "area": "03-NAGARAJU",
+          "area": "11-NAVEEN",
           "count": 22
         },
         {
-          "area": "11-NAVEEN",
+          "area": "03-NAGARAJU",
           "count": 21
         }
       ]
     },
     {
       "name": "ANJAIAH NAGAR",
-      "totalConsumers": 201,
+      "totalConsumers": 202,
       "primaryArea": "15-NIRANJAN",
       "secondaryAreas": [
         {
@@ -3965,7 +3952,7 @@
         },
         {
           "area": "09-S.SRINU",
-          "count": 8
+          "count": 9
         },
         {
           "area": "123-WAJEED G",
@@ -3974,27 +3961,8 @@
       ]
     },
     {
-      "name": "BESIDE CHURCH",
-      "totalConsumers": 195,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 25
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 17
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 12
-        }
-      ]
-    },
-    {
       "name": "SUBHASH NAGAR",
-      "totalConsumers": 192,
+      "totalConsumers": 190,
       "primaryArea": "011-ESHWAR",
       "secondaryAreas": [
         {
@@ -4013,7 +3981,7 @@
     },
     {
       "name": "SANJAY GANDHI NAGAR",
-      "totalConsumers": 182,
+      "totalConsumers": 183,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
@@ -4032,7 +4000,7 @@
     },
     {
       "name": "GANDIMAISAMMA",
-      "totalConsumers": 173,
+      "totalConsumers": 174,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -4070,7 +4038,7 @@
     },
     {
       "name": "GOVT HOSPITAL",
-      "totalConsumers": 165,
+      "totalConsumers": 167,
       "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
@@ -4079,7 +4047,7 @@
         },
         {
           "area": "03-NAGARAJU",
-          "count": 17
+          "count": 18
         },
         {
           "area": "003-ANAND",
@@ -4090,14 +4058,14 @@
     {
       "name": "OPP CHURCH",
       "totalConsumers": 155,
-      "primaryArea": "011-ESHWAR",
+      "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
-          "area": "11-NAVEEN",
-          "count": 13
+          "area": "03-NAGARAJU",
+          "count": 14
         },
         {
-          "area": "03-NAGARAJU",
+          "area": "011-ESHWAR",
           "count": 13
         },
         {
@@ -4127,7 +4095,7 @@
     },
     {
       "name": "SRINIVAS NAGAR",
-      "totalConsumers": 151,
+      "totalConsumers": 150,
       "primaryArea": "09-S.SRINU",
       "secondaryAreas": [
         {
@@ -4165,7 +4133,7 @@
     },
     {
       "name": "MAQDUM NAGAR",
-      "totalConsumers": 144,
+      "totalConsumers": 143,
       "primaryArea": "09-S.SRINU",
       "secondaryAreas": [
         {
@@ -4183,35 +4151,16 @@
       ]
     },
     {
-      "name": "TEMPLE",
-      "totalConsumers": 138,
-      "primaryArea": "146-VIJAY ADDURI",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 13
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 11
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 10
-        }
-      ]
-    },
-    {
       "name": "NEAR TEMPLE",
       "totalConsumers": 138,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "011-ESHWAR",
-          "count": 14
+          "area": "03-NAGARAJU",
+          "count": 13
         },
         {
-          "area": "03-NAGARAJU",
+          "area": "011-ESHWAR",
           "count": 13
         },
         {
@@ -4259,8 +4208,27 @@
       ]
     },
     {
+      "name": "TEMPLE",
+      "totalConsumers": 132,
+      "primaryArea": "146-VIJAY ADDURI",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 13
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 11
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 10
+        }
+      ]
+    },
+    {
       "name": "IDPL",
-      "totalConsumers": 130,
+      "totalConsumers": 129,
       "primaryArea": "06-HANUMANTH-V",
       "secondaryAreas": [
         {
@@ -4279,7 +4247,7 @@
     },
     {
       "name": "JAGADGIRIGUTTA",
-      "totalConsumers": 127,
+      "totalConsumers": 126,
       "primaryArea": "15-NIRANJAN",
       "secondaryAreas": [
         {
@@ -4298,7 +4266,7 @@
     },
     {
       "name": "PAPI REDDY NAGAR",
-      "totalConsumers": 124,
+      "totalConsumers": 125,
       "primaryArea": "15-NIRANJAN",
       "secondaryAreas": [
         {
@@ -4317,7 +4285,7 @@
     },
     {
       "name": "GANESH NAGAR",
-      "totalConsumers": 122,
+      "totalConsumers": 124,
       "primaryArea": "18-TIRUPATHI",
       "secondaryAreas": [
         {
@@ -4330,32 +4298,13 @@
         },
         {
           "area": "111-WAJEED",
-          "count": 6
-        }
-      ]
-    },
-    {
-      "name": "KOMPALLY",
-      "totalConsumers": 120,
-      "primaryArea": "17-SRIPAL",
-      "secondaryAreas": [
-        {
-          "area": "169624_PortIn-169624_PortIn",
-          "count": 16
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 15
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 12
+          "count": 7
         }
       ]
     },
     {
       "name": "BHAGATH SINGH NAGAR",
-      "totalConsumers": 118,
+      "totalConsumers": 119,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -4374,7 +4323,7 @@
     },
     {
       "name": "BALAJI TOWERS",
-      "totalConsumers": 115,
+      "totalConsumers": 116,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -4393,7 +4342,7 @@
     },
     {
       "name": "SRINIVASA NAGAR",
-      "totalConsumers": 115,
+      "totalConsumers": 116,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -4411,21 +4360,21 @@
       ]
     },
     {
-      "name": "FGH",
-      "totalConsumers": 107,
-      "primaryArea": "07-MANIKANTA",
+      "name": "KOMPALLY",
+      "totalConsumers": 115,
+      "primaryArea": "17-SRIPAL",
       "secondaryAreas": [
         {
-          "area": "11-NAVEEN",
+          "area": "169624_PortIn-169624_PortIn",
+          "count": 16
+        },
+        {
+          "area": "011-ESHWAR",
           "count": 13
         },
         {
-          "area": "18-TIRUPATHI",
+          "area": "11-NAVEEN",
           "count": 12
-        },
-        {
-          "area": "01-RAJU",
-          "count": 9
         }
       ]
     },
@@ -4449,6 +4398,25 @@
       ]
     },
     {
+      "name": "FGH",
+      "totalConsumers": 106,
+      "primaryArea": "07-MANIKANTA",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 13
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 12
+        },
+        {
+          "area": "01-RAJU",
+          "count": 9
+        }
+      ]
+    },
+    {
       "name": "SDF",
       "totalConsumers": 106,
       "primaryArea": "123-WAJEED G",
@@ -4464,6 +4432,25 @@
         {
           "area": "18-TIRUPATHI",
           "count": 9
+        }
+      ]
+    },
+    {
+      "name": "HANUMAN NAGAR",
+      "totalConsumers": 106,
+      "primaryArea": "08-SURENDER J GUTTA",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 13
+        },
+        {
+          "area": "01-RAJU",
+          "count": 9
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 8
         }
       ]
     },
@@ -4487,25 +4474,6 @@
       ]
     },
     {
-      "name": "HANUMAN NAGAR",
-      "totalConsumers": 105,
-      "primaryArea": "08-SURENDER J GUTTA",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 13
-        },
-        {
-          "area": "01-RAJU",
-          "count": 9
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 8
-        }
-      ]
-    },
-    {
       "name": "ALLWYN COLONY",
       "totalConsumers": 104,
       "primaryArea": "15-NIRANJAN",
@@ -4520,13 +4488,51 @@
         },
         {
           "area": "003-ANAND",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "name": "QUTHUBULLAPUR",
+      "totalConsumers": 103,
+      "primaryArea": "18-TIRUPATHI",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 15
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 13
+        },
+        {
+          "area": "11-NAVEEN",
           "count": 9
         }
       ]
     },
     {
+      "name": "BAPU NAGAR",
+      "totalConsumers": 103,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 6
+        },
+        {
+          "area": "09-S.SRINU",
+          "count": 5
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 5
+        }
+      ]
+    },
+    {
       "name": "CHANDRA NAGAR",
-      "totalConsumers": 102,
+      "totalConsumers": 103,
       "primaryArea": "111-WAJEED",
       "secondaryAreas": [
         {
@@ -4563,58 +4569,20 @@
       ]
     },
     {
-      "name": "QUTHUBULLAPUR",
-      "totalConsumers": 100,
-      "primaryArea": "18-TIRUPATHI",
+      "name": "GIRI NAGAR",
+      "totalConsumers": 94,
+      "primaryArea": "06-HANUMANTH-V",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
-          "count": 15
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 11
+          "area": "016-SHIVA KISHORE",
+          "count": 4
         },
         {
           "area": "11-NAVEEN",
-          "count": 9
-        }
-      ]
-    },
-    {
-      "name": "BAPU NAGAR",
-      "totalConsumers": 100,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 6
+          "count": 4
         },
         {
-          "area": "011-ESHWAR",
-          "count": 5
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 5
-        }
-      ]
-    },
-    {
-      "name": "BALA NAGAR",
-      "totalConsumers": 99,
-      "primaryArea": "146-VIJAY ADDURI",
-      "secondaryAreas": [
-        {
-          "area": "155-SAMA TRANSFER",
-          "count": 16
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 10
-        },
-        {
-          "area": "011-ESHWAR",
+          "area": "03-NAGARAJU",
           "count": 3
         }
       ]
@@ -4629,42 +4597,23 @@
           "count": 21
         },
         {
-          "area": "123-WAJEED G",
-          "count": 5
-        },
-        {
           "area": "04-RAMESH",
           "count": 5
-        }
-      ]
-    },
-    {
-      "name": "GIRI NAGAR",
-      "totalConsumers": 93,
-      "primaryArea": "06-HANUMANTH-V",
-      "secondaryAreas": [
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 4
         },
         {
-          "area": "03-NAGARAJU",
-          "count": 3
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 3
+          "area": "123-WAJEED G",
+          "count": 5
         }
       ]
     },
     {
       "name": "PRAGATHI NAGAR",
-      "totalConsumers": 92,
+      "totalConsumers": 93,
       "primaryArea": "08-SURENDER J GUTTA",
       "secondaryAreas": [
         {
           "area": "11-NAVEEN",
-          "count": 17
+          "count": 18
         },
         {
           "area": "123-WAJEED G",
@@ -4678,7 +4627,7 @@
     },
     {
       "name": "NEAR MASJID",
-      "totalConsumers": 85,
+      "totalConsumers": 86,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -4692,6 +4641,25 @@
         {
           "area": "123-WAJEED G",
           "count": 7
+        }
+      ]
+    },
+    {
+      "name": "BALA NAGAR",
+      "totalConsumers": 84,
+      "primaryArea": "146-VIJAY ADDURI",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 10
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 3
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 3
         }
       ]
     },
@@ -4716,7 +4684,7 @@
     },
     {
       "name": "TSSIC",
-      "totalConsumers": 82,
+      "totalConsumers": 81,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
@@ -4735,7 +4703,7 @@
     },
     {
       "name": "DWARAKA NAGAR",
-      "totalConsumers": 78,
+      "totalConsumers": 79,
       "primaryArea": "18-TIRUPATHI",
       "secondaryAreas": [
         {
@@ -4743,12 +4711,31 @@
           "count": 20
         },
         {
-          "area": "01-RAJU",
-          "count": 4
+          "area": "11-NAVEEN",
+          "count": 5
         },
         {
+          "area": "003-ANAND",
+          "count": 5
+        }
+      ]
+    },
+    {
+      "name": "BUILDING",
+      "totalConsumers": 75,
+      "primaryArea": "17-SRIPAL",
+      "secondaryAreas": [
+        {
           "area": "11-NAVEEN",
-          "count": 4
+          "count": 10
+        },
+        {
+          "area": "01-RAJU",
+          "count": 9
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 8
         }
       ]
     },
@@ -4772,32 +4759,13 @@
       ]
     },
     {
-      "name": "BUILDING",
-      "totalConsumers": 74,
-      "primaryArea": "17-SRIPAL",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 10
-        },
-        {
-          "area": "01-RAJU",
-          "count": 8
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 7
-        }
-      ]
-    },
-    {
       "name": "SRI RAM NAGAR",
-      "totalConsumers": 74,
+      "totalConsumers": 75,
       "primaryArea": "09-S.SRINU",
       "secondaryAreas": [
         {
           "area": "07-MANIKANTA",
-          "count": 9
+          "count": 10
         },
         {
           "area": "01-RAJU",
@@ -4806,6 +4774,25 @@
         {
           "area": "11-NAVEEN",
           "count": 6
+        }
+      ]
+    },
+    {
+      "name": "NEAR SHOP",
+      "totalConsumers": 74,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "003-ANAND",
+          "count": 6
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 5
+        },
+        {
+          "area": "09-S.SRINU",
+          "count": 5
         }
       ]
     },
@@ -4825,25 +4812,6 @@
         {
           "area": "003-ANAND",
           "count": 3
-        }
-      ]
-    },
-    {
-      "name": "NEAR SHOP",
-      "totalConsumers": 73,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "003-ANAND",
-          "count": 6
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 6
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 5
         }
       ]
     },
@@ -4868,7 +4836,7 @@
     },
     {
       "name": "CHANDRAGIRI NAGAR",
-      "totalConsumers": 72,
+      "totalConsumers": 71,
       "primaryArea": "000-SHIVA KISHORE-1",
       "secondaryAreas": [
         {
@@ -4882,6 +4850,25 @@
         {
           "area": "04-RAMESH",
           "count": 3
+        }
+      ]
+    },
+    {
+      "name": "S G NAGAR",
+      "totalConsumers": 70,
+      "primaryArea": "04-RAMESH",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 5
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 5
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 4
         }
       ]
     },
@@ -4901,25 +4888,6 @@
         {
           "area": "03-NAGARAJU",
           "count": 10
-        }
-      ]
-    },
-    {
-      "name": "S G NAGAR",
-      "totalConsumers": 69,
-      "primaryArea": "04-RAMESH",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 5
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 5
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 4
         }
       ]
     },
@@ -4962,8 +4930,27 @@
       ]
     },
     {
-      "name": "NEHRU NAGAR",
+      "name": "NTR NAGAR",
       "totalConsumers": 68,
+      "primaryArea": "09-S.SRINU",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 12
+        },
+        {
+          "area": "01-RAJU",
+          "count": 9
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "name": "NEHRU NAGAR",
+      "totalConsumers": 67,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
@@ -4982,7 +4969,7 @@
     },
     {
       "name": "RAJEEV GANDHI NAGAR",
-      "totalConsumers": 67,
+      "totalConsumers": 66,
       "primaryArea": "07-MANIKANTA",
       "secondaryAreas": [
         {
@@ -4996,44 +4983,6 @@
         {
           "area": "04-RAMESH",
           "count": 2
-        }
-      ]
-    },
-    {
-      "name": "NTR NAGAR",
-      "totalConsumers": 67,
-      "primaryArea": "09-S.SRINU",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 12
-        },
-        {
-          "area": "01-RAJU",
-          "count": 9
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 6
-        }
-      ]
-    },
-    {
-      "name": "VIVEKANANDA NAGAR",
-      "totalConsumers": 64,
-      "primaryArea": "016-SHIVA KISHORE",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 7
-        },
-        {
-          "area": "003-ANAND",
-          "count": 4
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 3
         }
       ]
     },
@@ -5058,7 +5007,7 @@
     },
     {
       "name": "APUROOPA COLONY",
-      "totalConsumers": 63,
+      "totalConsumers": 64,
       "primaryArea": "001-SRIPAL-A",
       "secondaryAreas": [
         {
@@ -5076,21 +5025,59 @@
       ]
     },
     {
-      "name": "OPP MARKET",
-      "totalConsumers": 62,
-      "primaryArea": "01-RAJU",
+      "name": "VIVEKANANDA NAGAR",
+      "totalConsumers": 63,
+      "primaryArea": "016-SHIVA KISHORE",
       "secondaryAreas": [
         {
           "area": "123-WAJEED G",
-          "count": 8
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 6
+          "count": 7
         },
         {
           "area": "003-ANAND",
           "count": 4
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "OPP MARKET",
+      "totalConsumers": 63,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 9
+        },
+        {
+          "area": "09-S.SRINU",
+          "count": 7
+        },
+        {
+          "area": "003-ANAND",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "SUCHITRA",
+      "totalConsumers": 62,
+      "primaryArea": "011-ESHWAR",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 14
+        },
+        {
+          "area": "003-ANAND",
+          "count": 6
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 5
         }
       ]
     },
@@ -5128,25 +5115,6 @@
         },
         {
           "area": "15-NIRANJAN",
-          "count": 5
-        }
-      ]
-    },
-    {
-      "name": "SUCHITRA",
-      "totalConsumers": 61,
-      "primaryArea": "011-ESHWAR",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 14
-        },
-        {
-          "area": "003-ANAND",
-          "count": 6
-        },
-        {
-          "area": "18-TIRUPATHI",
           "count": 5
         }
       ]
@@ -5209,40 +5177,40 @@
       ]
     },
     {
-      "name": "OPP RAMALAYAM TEMPLE",
+      "name": "APIIC",
       "totalConsumers": 58,
       "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "09-S.SRINU",
-          "count": 7
-        },
-        {
-          "area": "07-MANIKANTA",
+          "area": "03-NAGARAJU",
           "count": 6
         },
         {
-          "area": "003-ANAND",
-          "count": 6
+          "area": "011-ESHWAR",
+          "count": 5
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 4
         }
       ]
     },
     {
-      "name": "SAI NAGAR",
+      "name": "NLB NAGAR",
       "totalConsumers": 58,
-      "primaryArea": "146-VIJAY ADDURI",
+      "primaryArea": "016-SHIVA KISHORE",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
-          "count": 6
+          "area": "04-RAMESH",
+          "count": 12
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 5
         },
         {
           "area": "123-WAJEED G",
-          "count": 6
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 3
+          "count": 5
         }
       ]
     },
@@ -5266,40 +5234,40 @@
       ]
     },
     {
-      "name": "VINAYAK NAGAR",
-      "totalConsumers": 58,
-      "primaryArea": "146-VIJAY ADDURI",
+      "name": "OPP RAMALAYAM TEMPLE",
+      "totalConsumers": 57,
+      "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "011-ESHWAR",
+          "area": "09-S.SRINU",
           "count": 7
         },
         {
-          "area": "11-NAVEEN",
-          "count": 4
+          "area": "003-ANAND",
+          "count": 6
         },
         {
-          "area": "123-WAJEED G",
-          "count": 3
+          "area": "11-NAVEEN",
+          "count": 6
         }
       ]
     },
     {
-      "name": "GROUND FLOOR",
+      "name": "SAI NAGAR",
       "totalConsumers": 57,
-      "primaryArea": "17-SRIPAL",
+      "primaryArea": "146-VIJAY ADDURI",
       "secondaryAreas": [
         {
-          "area": "06-HANUMANTH-V",
-          "count": 5
-        },
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 4
+          "area": "123-WAJEED G",
+          "count": 6
         },
         {
           "area": "01-RAJU",
-          "count": 4
+          "count": 5
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 3
         }
       ]
     },
@@ -5323,51 +5291,13 @@
       ]
     },
     {
-      "name": "NLB NAGAR",
-      "totalConsumers": 57,
-      "primaryArea": "016-SHIVA KISHORE",
-      "secondaryAreas": [
-        {
-          "area": "04-RAMESH",
-          "count": 12
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 5
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 5
-        }
-      ]
-    },
-    {
-      "name": "APIIC",
-      "totalConsumers": 56,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 5
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 5
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 4
-        }
-      ]
-    },
-    {
       "name": "AMBEDKAR NAGAR",
-      "totalConsumers": 56,
+      "totalConsumers": 57,
       "primaryArea": "18-TIRUPATHI",
       "secondaryAreas": [
         {
           "area": "09-S.SRINU",
-          "count": 14
+          "count": 15
         },
         {
           "area": "01-RAJU",
@@ -5386,7 +5316,7 @@
       "secondaryAreas": [
         {
           "area": "04-RAMESH",
-          "count": 8
+          "count": 7
         },
         {
           "area": "11-NAVEEN",
@@ -5394,6 +5324,25 @@
         },
         {
           "area": "07-MANIKANTA",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "GROUND FLOOR",
+      "totalConsumers": 55,
+      "primaryArea": "17-SRIPAL",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 5
+        },
+        {
+          "area": "016-SHIVA KISHORE",
+          "count": 4
+        },
+        {
+          "area": "01-RAJU",
           "count": 4
         }
       ]
@@ -5418,6 +5367,25 @@
       ]
     },
     {
+      "name": "VINAYAK NAGAR",
+      "totalConsumers": 55,
+      "primaryArea": "146-VIJAY ADDURI",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 7
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 4
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 3
+        }
+      ]
+    },
+    {
       "name": "USHODAYA COLONY",
       "totalConsumers": 54,
       "primaryArea": "016-SHIVA KISHORE",
@@ -5433,25 +5401,6 @@
         {
           "area": "000-SHIVA KISHORE-1",
           "count": 3
-        }
-      ]
-    },
-    {
-      "name": "G RAMARAM",
-      "totalConsumers": 53,
-      "primaryArea": "003-ANAND",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 11
-        },
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 10
-        },
-        {
-          "area": "000-SHIVA KISHORE-1",
-          "count": 8
         }
       ]
     },
@@ -5494,6 +5443,25 @@
       ]
     },
     {
+      "name": "G RAMARAM",
+      "totalConsumers": 52,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 11
+        },
+        {
+          "area": "016-SHIVA KISHORE",
+          "count": 10
+        },
+        {
+          "area": "000-SHIVA KISHORE-1",
+          "count": 8
+        }
+      ]
+    },
+    {
       "name": "HANUMAN TEMPLE",
       "totalConsumers": 52,
       "primaryArea": "11-NAVEEN",
@@ -5507,7 +5475,7 @@
           "count": 5
         },
         {
-          "area": "003-ANAND",
+          "area": "146-VIJAY ADDURI",
           "count": 4
         }
       ]
@@ -5545,27 +5513,27 @@
           "count": 5
         },
         {
-          "area": "07-MANIKANTA",
-          "count": 4
+          "area": "18-TIRUPATHI",
+          "count": 5
         }
       ]
     },
     {
-      "name": "NILL",
-      "totalConsumers": 52,
-      "primaryArea": "146-VIJAY ADDURI",
+      "name": "JAYARAM NAGAR",
+      "totalConsumers": 51,
+      "primaryArea": "111-WAJEED",
       "secondaryAreas": [
         {
-          "area": "155-SAMA TRANSFER",
-          "count": 6
+          "area": "011-ESHWAR",
+          "count": 10
         },
         {
-          "area": "06-HANUMANTH-V",
-          "count": 5
+          "area": "15-NIRANJAN",
+          "count": 2
         },
         {
-          "area": "01-RAJU",
-          "count": 5
+          "area": "18-TIRUPATHI",
+          "count": 1
         }
       ]
     },
@@ -5585,25 +5553,6 @@
         {
           "area": "123-WAJEED G",
           "count": 4
-        }
-      ]
-    },
-    {
-      "name": "JAYARAM NAGAR",
-      "totalConsumers": 50,
-      "primaryArea": "111-WAJEED",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 10
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 2
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 1
         }
       ]
     },
@@ -5637,7 +5586,7 @@
         },
         {
           "area": "07-MANIKANTA",
-          "count": 5
+          "count": 4
         },
         {
           "area": "003-ANAND",
@@ -5690,7 +5639,7 @@
       "secondaryAreas": [
         {
           "area": "03-NAGARAJU",
-          "count": 7
+          "count": 6
         },
         {
           "area": "09-S.SRINU",
@@ -5722,8 +5671,27 @@
       ]
     },
     {
+      "name": "BALAJI LAYOUT",
+      "totalConsumers": 47,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 6
+        },
+        {
+          "area": "01-RAJU",
+          "count": 6
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 6
+        }
+      ]
+    },
+    {
       "name": "SANGAREDDY",
-      "totalConsumers": 48,
+      "totalConsumers": 47,
       "primaryArea": "07-MANIKANTA",
       "secondaryAreas": [
         {
@@ -5731,12 +5699,12 @@
           "count": 6
         },
         {
-          "area": "011-ESHWAR",
-          "count": 5
+          "area": "06-HANUMANTH-V",
+          "count": 4
         },
         {
-          "area": "06-HANUMANTH-V",
-          "count": 3
+          "area": "011-ESHWAR",
+          "count": 4
         }
       ]
     },
@@ -5760,40 +5728,21 @@
       ]
     },
     {
-      "name": "MOOSAPET",
-      "totalConsumers": 45,
-      "primaryArea": "01-RAJU",
+      "name": "NILL",
+      "totalConsumers": 46,
+      "primaryArea": "146-VIJAY ADDURI",
       "secondaryAreas": [
         {
-          "area": "003-ANAND",
+          "area": "06-HANUMANTH-V",
           "count": 6
         },
-        {
-          "area": "123-WAJEED G",
-          "count": 4
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 4
-        }
-      ]
-    },
-    {
-      "name": "BALAJI LAYOUT",
-      "totalConsumers": 45,
-      "primaryArea": "003-ANAND",
-      "secondaryAreas": [
         {
           "area": "01-RAJU",
-          "count": 6
-        },
-        {
-          "area": "11-NAVEEN",
           "count": 5
         },
         {
-          "area": "123-WAJEED G",
-          "count": 5
+          "area": "011-ESHWAR",
+          "count": 3
         }
       ]
     },
@@ -5817,6 +5766,44 @@
       ]
     },
     {
+      "name": "HOUSING",
+      "totalConsumers": 45,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "18-TIRUPATHI",
+          "count": 7
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 7
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "MOOSAPET",
+      "totalConsumers": 44,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "003-ANAND",
+          "count": 6
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 4
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 4
+        }
+      ]
+    },
+    {
       "name": "DSF",
       "totalConsumers": 44,
       "primaryArea": "18-TIRUPATHI",
@@ -5836,8 +5823,46 @@
       ]
     },
     {
-      "name": "MAIN ROAD",
+      "name": "OPP HANUMAN TEMPLE",
       "totalConsumers": 44,
+      "primaryArea": "17-SRIPAL",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 6
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 4
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "D P PALLY",
+      "totalConsumers": 44,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 4
+        },
+        {
+          "area": "14-KADALI NAGARAJU",
+          "count": 2
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "MAIN ROAD",
+      "totalConsumers": 43,
       "primaryArea": "04-RAMESH",
       "secondaryAreas": [
         {
@@ -5850,44 +5875,6 @@
         },
         {
           "area": "17-SRIPAL",
-          "count": 4
-        }
-      ]
-    },
-    {
-      "name": "HOUSING",
-      "totalConsumers": 44,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 7
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 7
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "OPP HANUMAN TEMPLE",
-      "totalConsumers": 43,
-      "primaryArea": "17-SRIPAL",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 5
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 4
-        },
-        {
-          "area": "15-NIRANJAN",
           "count": 4
         }
       ]
@@ -5912,25 +5899,6 @@
       ]
     },
     {
-      "name": "D P PALLY",
-      "totalConsumers": 43,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 4
-        },
-        {
-          "area": "14-KADALI NAGARAJU",
-          "count": 2
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 1
-        }
-      ]
-    },
-    {
       "name": "DEVAMMA BASTHI",
       "totalConsumers": 43,
       "primaryArea": "08-SURENDER J GUTTA",
@@ -5946,25 +5914,6 @@
         {
           "area": "016-SHIVA KISHORE",
           "count": 2
-        }
-      ]
-    },
-    {
-      "name": "SHAMIRPET",
-      "totalConsumers": 43,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 6
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 5
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 4
         }
       ]
     },
@@ -5988,21 +5937,59 @@
       ]
     },
     {
-      "name": "SEC",
-      "totalConsumers": 41,
+      "name": "JEEDIMETLA VILLAGE",
+      "totalConsumers": 42,
       "primaryArea": "011-ESHWAR",
       "secondaryAreas": [
         {
-          "area": "11-NAVEEN",
-          "count": 6
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 4
+          "area": "01-RAJU",
+          "count": 3
         },
         {
           "area": "18-TIRUPATHI",
-          "count": 4
+          "count": 3
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "RAJIV GRUHA KALPA",
+      "totalConsumers": 42,
+      "primaryArea": "03-NAGARAJU",
+      "secondaryAreas": [
+        {
+          "area": "15-NIRANJAN",
+          "count": 7
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 3
+        },
+        {
+          "area": "000-SHIVA KISHORE-1",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SIDDHARTHA BLOCKED EKYC",
+      "totalConsumers": 41,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 10
+        },
+        {
+          "area": "111-WAJEED",
+          "count": 8
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 5
         }
       ]
     },
@@ -6045,25 +6032,6 @@
       ]
     },
     {
-      "name": "RAJIV GRUHA KALPA",
-      "totalConsumers": 41,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
-        {
-          "area": "15-NIRANJAN",
-          "count": 7
-        },
-        {
-          "area": "000-SHIVA KISHORE-1",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "PP NAGAR",
       "totalConsumers": 41,
       "primaryArea": "000-SHIVA KISHORE-1",
@@ -6083,21 +6051,78 @@
       ]
     },
     {
-      "name": "SIDDHARTHA BLOCKED EKYC",
-      "totalConsumers": 40,
-      "primaryArea": "01-RAJU",
+      "name": "SHAMIRPET",
+      "totalConsumers": 41,
+      "primaryArea": "03-NAGARAJU",
       "secondaryAreas": [
         {
           "area": "11-NAVEEN",
-          "count": 10
+          "count": 6
         },
         {
-          "area": "111-WAJEED",
-          "count": 8
+          "area": "18-TIRUPATHI",
+          "count": 5
+        },
+        {
+          "area": "14-KADALI NAGARAJU",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "SEC",
+      "totalConsumers": 40,
+      "primaryArea": "011-ESHWAR",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 6
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 5
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "name": "MANIKYA NAGAR",
+      "totalConsumers": 40,
+      "primaryArea": "18-TIRUPATHI",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 9
         },
         {
           "area": "011-ESHWAR",
-          "count": 5
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "VENKATRAM NAGAR",
+      "totalConsumers": 40,
+      "primaryArea": "07-MANIKANTA",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 4
+        },
+        {
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 3
         }
       ]
     },
@@ -6136,25 +6161,6 @@
       ]
     },
     {
-      "name": "MANIKYA NAGAR",
-      "totalConsumers": 39,
-      "primaryArea": "18-TIRUPATHI",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 9
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 2
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "BAHADUR PALLY",
       "totalConsumers": 39,
       "primaryArea": "11-NAVEEN",
@@ -6174,27 +6180,8 @@
       ]
     },
     {
-      "name": "VENKATRAM NAGAR",
-      "totalConsumers": 39,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 4
-        },
-        {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 3
-        }
-      ]
-    },
-    {
       "name": "GAJULARAMAARAM",
-      "totalConsumers": 39,
+      "totalConsumers": 38,
       "primaryArea": "003-ANAND",
       "secondaryAreas": [
         {
@@ -6212,17 +6199,17 @@
       ]
     },
     {
-      "name": "JEEDIMETLA VILLAGE",
-      "totalConsumers": 39,
-      "primaryArea": "011-ESHWAR",
+      "name": "RAJIV GANDHI NAGAR",
+      "totalConsumers": 38,
+      "primaryArea": "07-MANIKANTA",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
-          "count": 3
+          "area": "03-NAGARAJU",
+          "count": 6
         },
         {
-          "area": "18-TIRUPATHI",
-          "count": 3
+          "area": "003-ANAND",
+          "count": 2
         },
         {
           "area": "04-RAMESH",
@@ -6326,25 +6313,6 @@
       ]
     },
     {
-      "name": "RAJIV GANDHI NAGAR",
-      "totalConsumers": 37,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 5
-        },
-        {
-          "area": "003-ANAND",
-          "count": 2
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "LENIN NAGAR",
       "totalConsumers": 37,
       "primaryArea": "09-S.SRINU",
@@ -6379,25 +6347,6 @@
         {
           "area": "04-RAMESH",
           "count": 3
-        }
-      ]
-    },
-    {
-      "name": "YOUSUFGUDA",
-      "totalConsumers": 36,
-      "primaryArea": "123-WAJEED G",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 5
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 4
-        },
-        {
-          "area": "003-ANAND",
-          "count": 4
         }
       ]
     },
@@ -6440,6 +6389,25 @@
       ]
     },
     {
+      "name": "YOUSUFGUDA",
+      "totalConsumers": 35,
+      "primaryArea": "123-WAJEED G",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 5
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 4
+        },
+        {
+          "area": "003-ANAND",
+          "count": 4
+        }
+      ]
+    },
+    {
       "name": "RGK",
       "totalConsumers": 34,
       "primaryArea": "03-NAGARAJU",
@@ -6478,20 +6446,20 @@
       ]
     },
     {
-      "name": "ERRAGADDA",
+      "name": "KARIMNAGAR",
       "totalConsumers": 34,
-      "primaryArea": "003-ANAND",
+      "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
+          "area": "18-TIRUPATHI",
+          "count": 4
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 4
+        },
+        {
           "area": "01-RAJU",
-          "count": 5
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 5
-        },
-        {
-          "area": "011-ESHWAR",
           "count": 3
         }
       ]
@@ -6512,82 +6480,6 @@
         {
           "area": "000-SHIVA KISHORE-1",
           "count": 1
-        }
-      ]
-    },
-    {
-      "name": "PEERZADIGUDA",
-      "totalConsumers": 33,
-      "primaryArea": "15-NIRANJAN",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 4
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "WARANGAL",
-      "totalConsumers": 33,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 5
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "VILLAGE",
-      "totalConsumers": 33,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 4
-        },
-        {
-          "area": "14-KADALI NAGARAJU",
-          "count": 4
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 4
-        }
-      ]
-    },
-    {
-      "name": "KARIMNAGAR",
-      "totalConsumers": 33,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 4
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
-          "count": 4
-        },
-        {
-          "area": "003-ANAND",
-          "count": 3
         }
       ]
     },
@@ -6706,6 +6598,44 @@
       ]
     },
     {
+      "name": "WARANGAL",
+      "totalConsumers": 32,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 5
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 3
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "ASHOK RESIDENCY",
+      "totalConsumers": 32,
+      "primaryArea": "123-WAJEED G",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 4
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 3
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 3
+        }
+      ]
+    },
+    {
       "name": "DOOLAPAAY",
       "totalConsumers": 32,
       "primaryArea": "17-SRIPAL",
@@ -6721,6 +6651,63 @@
       ]
     },
     {
+      "name": "ERRAGADDA",
+      "totalConsumers": 32,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 5
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 5
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "PEERZADIGUDA",
+      "totalConsumers": 31,
+      "primaryArea": "15-NIRANJAN",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 4
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 3
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "VINAYAKA NAGAR",
+      "totalConsumers": 31,
+      "primaryArea": "146-VIJAY ADDURI",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 5
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 4
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 3
+        }
+      ]
+    },
+    {
       "name": "BVS TOWERS",
       "totalConsumers": 31,
       "primaryArea": "01-RAJU",
@@ -6730,11 +6717,11 @@
           "count": 3
         },
         {
-          "area": "016-SHIVA KISHORE",
+          "area": "04-RAMESH",
           "count": 3
         },
         {
-          "area": "123-WAJEED G",
+          "area": "016-SHIVA KISHORE",
           "count": 3
         }
       ]
@@ -6778,6 +6765,44 @@
       ]
     },
     {
+      "name": "PRASHANTH NAGAR",
+      "totalConsumers": 31,
+      "primaryArea": "18-TIRUPATHI",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 4
+        },
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 3
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "METTUKANGUDA",
+      "totalConsumers": 31,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "07-MANIKANTA",
+          "count": 3
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
+        },
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "PADMA NAGAR PHASE 2",
       "totalConsumers": 31,
       "primaryArea": "01-RAJU",
@@ -6797,6 +6822,25 @@
       ]
     },
     {
+      "name": "VILLAGE",
+      "totalConsumers": 31,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "14-KADALI NAGARAJU",
+          "count": 4
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 4
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 3
+        }
+      ]
+    },
+    {
       "name": "MAHADEVAPURAM",
       "totalConsumers": 31,
       "primaryArea": "123-WAJEED G",
@@ -6812,44 +6856,6 @@
         {
           "area": "04-RAMESH",
           "count": 2
-        }
-      ]
-    },
-    {
-      "name": "HANAMKONDA",
-      "totalConsumers": 31,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "003-ANAND",
-          "count": 4
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 4
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 4
-        }
-      ]
-    },
-    {
-      "name": "VINAYAKA NAGAR",
-      "totalConsumers": 30,
-      "primaryArea": "146-VIJAY ADDURI",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 4
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 4
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 3
         }
       ]
     },
@@ -6887,63 +6893,6 @@
         },
         {
           "area": "14-KADALI NAGARAJU",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "PRASHANTH NAGAR",
-      "totalConsumers": 30,
-      "primaryArea": "18-TIRUPATHI",
-      "secondaryAreas": [
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 3
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "METTUKANGUDA",
-      "totalConsumers": 30,
-      "primaryArea": "003-ANAND",
-      "secondaryAreas": [
-        {
-          "area": "07-MANIKANTA",
-          "count": 3
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "GOUTHAM NAGAR",
-      "totalConsumers": 30,
-      "primaryArea": "155-SAMA TRANSFER",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "001-SRIPAL-A",
-          "count": 2
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
           "count": 1
         }
       ]
@@ -6987,20 +6936,39 @@
       ]
     },
     {
-      "name": "S R NAGAR",
+      "name": "BALREDDY NAGAR",
       "totalConsumers": 29,
-      "primaryArea": "11-NAVEEN",
+      "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "011-ESHWAR",
-          "count": 4
+          "area": "18-TIRUPATHI",
+          "count": 2
         },
+        {
+          "area": "003-ANAND",
+          "count": 2
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "HANAMKONDA",
+      "totalConsumers": 29,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
         {
           "area": "003-ANAND",
           "count": 4
         },
         {
-          "area": "07-MANIKANTA",
+          "area": "123-WAJEED G",
+          "count": 4
+        },
+        {
+          "area": "11-NAVEEN",
           "count": 4
         }
       ]
@@ -7020,25 +6988,6 @@
         },
         {
           "area": "07-MANIKANTA",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "BALREDDY NAGAR",
-      "totalConsumers": 28,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 2
-        },
-        {
-          "area": "003-ANAND",
-          "count": 2
-        },
-        {
-          "area": "011-ESHWAR",
           "count": 2
         }
       ]
@@ -7082,25 +7031,6 @@
       ]
     },
     {
-      "name": "SURARAM VILLAGE",
-      "totalConsumers": 28,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 4
-        },
-        {
-          "area": "01-RAJU",
-          "count": 1
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 1
-        }
-      ]
-    },
-    {
       "name": "P P NAGAR",
       "totalConsumers": 28,
       "primaryArea": "000-SHIVA KISHORE-1",
@@ -7116,25 +7046,6 @@
         {
           "area": "14-KADALI NAGARAJU",
           "count": 1
-        }
-      ]
-    },
-    {
-      "name": "NEAR POCHAMMA TEMPLE",
-      "totalConsumers": 28,
-      "primaryArea": "011-ESHWAR",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 3
-        },
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 2
-        },
-        {
-          "area": "17-SRIPAL",
-          "count": 2
         }
       ]
     },
@@ -7158,6 +7069,25 @@
       ]
     },
     {
+      "name": "BAL REDDY NAGAR",
+      "totalConsumers": 27,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 2
+        },
+        {
+          "area": "003-ANAND",
+          "count": 1
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "MARKANDEYA NAGAR",
       "totalConsumers": 27,
       "primaryArea": "04-RAMESH",
@@ -7172,6 +7102,25 @@
         },
         {
           "area": "03-NAGARAJU",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SURARAM VILLAGE",
+      "totalConsumers": 27,
+      "primaryArea": "07-MANIKANTA",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 4
+        },
+        {
+          "area": "01-RAJU",
+          "count": 1
+        },
+        {
+          "area": "06-HANUMANTH-V",
           "count": 1
         }
       ]
@@ -7215,6 +7164,25 @@
       ]
     },
     {
+      "name": "VENUS ENCLAVE",
+      "totalConsumers": 27,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "04-RAMESH",
+          "count": 4
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 2
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "SHIRIDI HILLS",
       "totalConsumers": 27,
       "primaryArea": "15-NIRANJAN",
@@ -7230,6 +7198,25 @@
         {
           "area": "111-WAJEED",
           "count": 1
+        }
+      ]
+    },
+    {
+      "name": "NEAR POCHAMMA TEMPLE",
+      "totalConsumers": 27,
+      "primaryArea": "011-ESHWAR",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 3
+        },
+        {
+          "area": "016-SHIVA KISHORE",
+          "count": 2
+        },
+        {
+          "area": "17-SRIPAL",
+          "count": 2
         }
       ]
     },
@@ -7283,40 +7270,21 @@
       ]
     },
     {
-      "name": "SANATH NAGAR",
+      "name": "NIZAMABAD",
       "totalConsumers": 27,
-      "primaryArea": "01-RAJU",
+      "primaryArea": "03-NAGARAJU",
       "secondaryAreas": [
         {
-          "area": "18-TIRUPATHI",
-          "count": 5
+          "area": "11-NAVEEN",
+          "count": 4
         },
         {
-          "area": "11-NAVEEN",
+          "area": "011-ESHWAR",
           "count": 3
         },
         {
-          "area": "155-SAMA TRANSFER",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "BAL REDDY NAGAR",
-      "totalConsumers": 26,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "003-ANAND",
-          "count": 1
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 1
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 1
+          "area": "01-RAJU",
+          "count": 3
         }
       ]
     },
@@ -7397,58 +7365,39 @@
       ]
     },
     {
-      "name": "VENUS ENCLAVE",
+      "name": "S R NAGAR",
       "totalConsumers": 26,
-      "primaryArea": "003-ANAND",
+      "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
-          "area": "04-RAMESH",
+          "area": "011-ESHWAR",
           "count": 4
         },
         {
-          "area": "15-NIRANJAN",
-          "count": 2
+          "area": "003-ANAND",
+          "count": 4
         },
         {
-          "area": "11-NAVEEN",
-          "count": 2
+          "area": "07-MANIKANTA",
+          "count": 4
         }
       ]
     },
     {
-      "name": "FEROZGUDA",
+      "name": "SANATH NAGAR",
       "totalConsumers": 26,
-      "primaryArea": "155-SAMA TRANSFER",
+      "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
-          "count": 3
+          "area": "18-TIRUPATHI",
+          "count": 5
         },
-        {
-          "area": "011-ESHWAR",
-          "count": 1
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "NIZAMABAD",
-      "totalConsumers": 26,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
         {
           "area": "11-NAVEEN",
-          "count": 4
-        },
-        {
-          "area": "011-ESHWAR",
           "count": 3
         },
         {
-          "area": "123-WAJEED G",
+          "area": "016-SHIVA KISHORE",
           "count": 2
         }
       ]
@@ -7492,6 +7441,40 @@
       ]
     },
     {
+      "name": "DILKUSH NAGAR",
+      "totalConsumers": 25,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 1
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "ASHOK NAGA",
+      "totalConsumers": 25,
+      "primaryArea": "03-NAGARAJU",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 3
+        },
+        {
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "111-WAJEED",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "QTY",
       "totalConsumers": 25,
       "primaryArea": "01-RAJU",
@@ -7530,21 +7513,6 @@
       ]
     },
     {
-      "name": "DILKUSH NAGAR",
-      "totalConsumers": 25,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 1
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 1
-        }
-      ]
-    },
-    {
       "name": "RAMANTHAPUR",
       "totalConsumers": 25,
       "primaryArea": "11-NAVEEN",
@@ -7559,25 +7527,6 @@
         },
         {
           "area": "011-ESHWAR",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "FATHE NAGAR",
-      "totalConsumers": 25,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 4
-        },
-        {
-          "area": "155-SAMA TRANSFER",
-          "count": 4
-        },
-        {
-          "area": "146-VIJAY ADDURI",
           "count": 3
         }
       ]
@@ -7640,44 +7589,6 @@
       ]
     },
     {
-      "name": "ASHOK NAGA",
-      "totalConsumers": 24,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "111-WAJEED",
-          "count": 2
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "ASHOK RESIDENCY",
-      "totalConsumers": 24,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 3
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "SHAPOOR NAGAR",
       "totalConsumers": 24,
       "primaryArea": "04-RAMESH",
@@ -7712,25 +7623,6 @@
         {
           "area": "011-ESHWAR",
           "count": 3
-        }
-      ]
-    },
-    {
-      "name": "1ST FLOOR",
-      "totalConsumers": 24,
-      "primaryArea": "003-ANAND",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 3
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 2
         }
       ]
     },
@@ -7784,44 +7676,6 @@
       ]
     },
     {
-      "name": "MEDAK",
-      "totalConsumers": 24,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 3
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 3
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 3
-        }
-      ]
-    },
-    {
-      "name": "SHAIKPET",
-      "totalConsumers": 24,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "003-ANAND",
-          "count": 3
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 2
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "BNR TOWERS",
       "totalConsumers": 23,
       "primaryArea": "01-RAJU",
@@ -7835,7 +7689,7 @@
           "count": 3
         },
         {
-          "area": "15-NIRANJAN",
+          "area": "18-TIRUPATHI",
           "count": 2
         }
       ]
@@ -7880,6 +7734,25 @@
         },
         {
           "area": "123-WAJEED G",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "1ST FLOOR",
+      "totalConsumers": 23,
+      "primaryArea": "003-ANAND",
+      "secondaryAreas": [
+        {
+          "area": "18-TIRUPATHI",
+          "count": 3
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
+        },
+        {
+          "area": "011-ESHWAR",
           "count": 2
         }
       ]
@@ -7980,6 +7853,25 @@
       ]
     },
     {
+      "name": "MEDAK",
+      "totalConsumers": 23,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "18-TIRUPATHI",
+          "count": 3
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 3
+        },
+        {
+          "area": "14-KADALI NAGARAJU",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "BODUPPAL",
       "totalConsumers": 23,
       "primaryArea": "123-WAJEED G",
@@ -7994,6 +7886,25 @@
         },
         {
           "area": "15-NIRANJAN",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SHAIKPET",
+      "totalConsumers": 23,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "003-ANAND",
+          "count": 3
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
+        },
+        {
+          "area": "03-NAGARAJU",
           "count": 2
         }
       ]
@@ -8056,20 +7967,20 @@
       ]
     },
     {
-      "name": "NEAR WATER TANK",
+      "name": "LAST BUS STOP",
       "totalConsumers": 22,
-      "primaryArea": "17-SRIPAL",
+      "primaryArea": "011-ESHWAR",
       "secondaryAreas": [
         {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 2
+          "area": "15-NIRANJAN",
+          "count": 3
         },
         {
           "area": "001-SRIPAL-A",
+          "count": 1
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
           "count": 1
         }
       ]
@@ -8089,6 +8000,25 @@
         },
         {
           "area": "01-RAJU",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "CHENNAREDDY NAGAR",
+      "totalConsumers": 22,
+      "primaryArea": "15-NIRANJAN",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 7
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 1
+        },
+        {
+          "area": "169624_PortIn-169624_PortIn",
           "count": 1
         }
       ]
@@ -8151,6 +8081,25 @@
       ]
     },
     {
+      "name": "GUNDLAPOCHAMPALLY",
+      "totalConsumers": 22,
+      "primaryArea": "169624_PortIn-169624_PortIn",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 5
+        },
+        {
+          "area": "01-RAJU",
+          "count": 2
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "ZAHEERABAD",
       "totalConsumers": 22,
       "primaryArea": "03-NAGARAJU",
@@ -8166,6 +8115,25 @@
         {
           "area": "15-NIRANJAN",
           "count": 1
+        }
+      ]
+    },
+    {
+      "name": "FATHE NAGAR",
+      "totalConsumers": 22,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 4
+        },
+        {
+          "area": "146-VIJAY ADDURI",
+          "count": 3
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 3
         }
       ]
     },
@@ -8246,20 +8214,20 @@
       ]
     },
     {
-      "name": "LAST BUS STOP",
+      "name": "NEAR WATER TANK",
       "totalConsumers": 21,
-      "primaryArea": "011-ESHWAR",
+      "primaryArea": "17-SRIPAL",
       "secondaryAreas": [
         {
-          "area": "15-NIRANJAN",
-          "count": 3
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
         },
         {
           "area": "001-SRIPAL-A",
-          "count": 1
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
           "count": 1
         }
       ]
@@ -8280,39 +8248,16 @@
       ]
     },
     {
-      "name": "SRC NAYAK NAGAR",
+      "name": "BEERAPPA NAGAR",
       "totalConsumers": 21,
-      "primaryArea": "001-SRIPAL-A",
+      "primaryArea": "08-SURENDER J GUTTA",
       "secondaryAreas": [
         {
-          "area": "17-SRIPAL",
-          "count": 2
+          "area": "18-TIRUPATHI",
+          "count": 8
         },
         {
-          "area": "15-NIRANJAN",
-          "count": 2
-        },
-        {
-          "area": "04-RAMESH",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "CHENNAREDDY NAGAR",
-      "totalConsumers": 21,
-      "primaryArea": "15-NIRANJAN",
-      "secondaryAreas": [
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 7
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 1
-        },
-        {
-          "area": "09-S.SRINU",
+          "area": "011-ESHWAR",
           "count": 1
         }
       ]
@@ -8371,25 +8316,6 @@
         {
           "area": "09-S.SRINU",
           "count": 1
-        }
-      ]
-    },
-    {
-      "name": "MOTHI NAGAR",
-      "totalConsumers": 20,
-      "primaryArea": "146-VIJAY ADDURI",
-      "secondaryAreas": [
-        {
-          "area": "03-NAGARAJU",
-          "count": 3
-        },
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 2
-        },
-        {
-          "area": "155-SAMA TRANSFER",
-          "count": 2
         }
       ]
     },
@@ -8470,6 +8396,25 @@
       ]
     },
     {
+      "name": "BAHADHURPALLY",
+      "totalConsumers": 20,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "18-TIRUPATHI",
+          "count": 2
+        },
+        {
+          "area": "001-SRIPAL-A",
+          "count": 1
+        },
+        {
+          "area": "17-SRIPAL",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "SHPUR",
       "totalConsumers": 20,
       "primaryArea": "07-MANIKANTA",
@@ -8508,16 +8453,20 @@
       ]
     },
     {
-      "name": "BEERAPPA NAGAR",
+      "name": "SRC NAYAK NAGAR",
       "totalConsumers": 20,
-      "primaryArea": "08-SURENDER J GUTTA",
+      "primaryArea": "001-SRIPAL-A",
       "secondaryAreas": [
         {
-          "area": "18-TIRUPATHI",
-          "count": 8
+          "area": "17-SRIPAL",
+          "count": 2
         },
         {
-          "area": "011-ESHWAR",
+          "area": "15-NIRANJAN",
+          "count": 2
+        },
+        {
+          "area": "04-RAMESH",
           "count": 1
         }
       ]
@@ -8528,72 +8477,11 @@
       "primaryArea": "07-MANIKANTA",
       "secondaryAreas": [
         {
-          "area": "18-TIRUPATHI",
-          "count": 1
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 1
-        },
-        {
-          "area": "01-RAJU",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "BOLLARAM",
-      "totalConsumers": 20,
-      "primaryArea": "08-SURENDER J GUTTA",
-      "secondaryAreas": [
-        {
-          "area": "04-RAMESH",
-          "count": 3
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 2
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "OLD BOWENPALLY",
-      "totalConsumers": 20,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 3
-        },
-        {
-          "area": "155-SAMA TRANSFER",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "GUNDLAPOCHAMPALLY",
-      "totalConsumers": 20,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "169624_PortIn-169624_PortIn",
-          "count": 4
-        },
-        {
           "area": "01-RAJU",
           "count": 2
         },
         {
-          "area": "03-NAGARAJU",
+          "area": "011-ESHWAR",
           "count": 1
         }
       ]
@@ -8656,25 +8544,6 @@
       ]
     },
     {
-      "name": "BAHADHURPALLY",
-      "totalConsumers": 19,
-      "primaryArea": "11-NAVEEN",
-      "secondaryAreas": [
-        {
-          "area": "18-TIRUPATHI",
-          "count": 2
-        },
-        {
-          "area": "001-SRIPAL-A",
-          "count": 1
-        },
-        {
-          "area": "17-SRIPAL",
-          "count": 1
-        }
-      ]
-    },
-    {
       "name": "SRI RAM NAGAR COLONY",
       "totalConsumers": 19,
       "primaryArea": "07-MANIKANTA",
@@ -8713,6 +8582,25 @@
       ]
     },
     {
+      "name": "RAGHAVENDRA COLONY",
+      "totalConsumers": 19,
+      "primaryArea": "011-ESHWAR",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 2
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "GACHIBOWLI",
       "totalConsumers": 19,
       "primaryArea": "123-WAJEED G",
@@ -8732,36 +8620,17 @@
       ]
     },
     {
-      "name": "MANIKONDA",
+      "name": "BOLLARAM",
       "totalConsumers": 19,
-      "primaryArea": "11-NAVEEN",
+      "primaryArea": "08-SURENDER J GUTTA",
       "secondaryAreas": [
         {
-          "area": "17-SRIPAL",
-          "count": 2
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 2
+          "area": "04-RAMESH",
+          "count": 3
         },
         {
           "area": "07-MANIKANTA",
           "count": 2
-        }
-      ]
-    },
-    {
-      "name": "THORRUR",
-      "totalConsumers": 19,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "08-SURENDER J GUTTA",
-          "count": 3
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 3
         },
         {
           "area": "03-NAGARAJU",
@@ -8770,20 +8639,39 @@
       ]
     },
     {
-      "name": "AMEERPET",
-      "totalConsumers": 19,
-      "primaryArea": "11-NAVEEN",
+      "name": "MOTHI NAGAR",
+      "totalConsumers": 18,
+      "primaryArea": "146-VIJAY ADDURI",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
+          "area": "03-NAGARAJU",
           "count": 3
         },
         {
-          "area": "123-WAJEED G",
+          "area": "016-SHIVA KISHORE",
           "count": 2
         },
         {
-          "area": "155-SAMA TRANSFER",
+          "area": "06-HANUMANTH-V",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SRI SAI COLONY",
+      "totalConsumers": 18,
+      "primaryArea": "03-NAGARAJU",
+      "secondaryAreas": [
+        {
+          "area": "111-WAJEED",
+          "count": 5
+        },
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 2
+        },
+        {
+          "area": "18-TIRUPATHI",
           "count": 2
         }
       ]
@@ -8865,40 +8753,40 @@
       ]
     },
     {
-      "name": "RAGHAVENDRA COLONY",
+      "name": "BANK COLONY",
       "totalConsumers": 18,
-      "primaryArea": "011-ESHWAR",
+      "primaryArea": "01-RAJU",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "04-RAMESH",
+          "area": "123-WAJEED G",
           "count": 2
         },
         {
-          "area": "03-NAGARAJU",
-          "count": 1
+          "area": "11-NAVEEN",
+          "count": 2
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 2
         }
       ]
     },
     {
-      "name": "CHANDRA GIRI NAGAR",
+      "name": "OLD BOWENPALLY",
       "totalConsumers": 18,
-      "primaryArea": "000-SHIVA KISHORE-1",
+      "primaryArea": "07-MANIKANTA",
       "secondaryAreas": [
         {
-          "area": "09-S.SRINU",
+          "area": "011-ESHWAR",
           "count": 3
         },
         {
-          "area": "04-RAMESH",
-          "count": 1
+          "area": "11-NAVEEN",
+          "count": 2
         },
         {
-          "area": "169624_PortIn-169624_PortIn",
-          "count": 1
+          "area": "123-WAJEED G",
+          "count": 2
         }
       ]
     },
@@ -8914,17 +8802,40 @@
       ]
     },
     {
-      "name": "FEROZ GUDA",
+      "name": "MANIKONDA",
       "totalConsumers": 18,
-      "primaryArea": "155-SAMA TRANSFER",
+      "primaryArea": "11-NAVEEN",
       "secondaryAreas": [
         {
-          "area": "000-SHIVA KISHORE-1",
-          "count": 1
+          "area": "17-SRIPAL",
+          "count": 2
         },
         {
-          "area": "001-SRIPAL-A",
-          "count": 1
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "THORRUR",
+      "totalConsumers": 18,
+      "primaryArea": "07-MANIKANTA",
+      "secondaryAreas": [
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 3
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 3
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 2
         }
       ]
     },
@@ -8986,20 +8897,20 @@
       ]
     },
     {
-      "name": "SRI SAI COLONY",
+      "name": "COLONY",
       "totalConsumers": 17,
-      "primaryArea": "03-NAGARAJU",
+      "primaryArea": "18-TIRUPATHI",
       "secondaryAreas": [
         {
-          "area": "111-WAJEED",
-          "count": 5
-        },
-        {
-          "area": "06-HANUMANTH-V",
+          "area": "03-NAGARAJU",
           "count": 2
         },
         {
-          "area": "18-TIRUPATHI",
+          "area": "11-NAVEEN",
+          "count": 2
+        },
+        {
+          "area": "011-ESHWAR",
           "count": 2
         }
       ]
@@ -9111,44 +9022,6 @@
       ]
     },
     {
-      "name": "PHASE 2",
-      "totalConsumers": 17,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 3
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 2
-        },
-        {
-          "area": "07-MANIKANTA",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "BANK COLONY",
-      "totalConsumers": 17,
-      "primaryArea": "01-RAJU",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "SAI BABA TEMPLE",
       "totalConsumers": 17,
       "primaryArea": "15-NIRANJAN",
@@ -9163,6 +9036,25 @@
         },
         {
           "area": "06-HANUMANTH-V",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "CHANDRA GIRI NAGAR",
+      "totalConsumers": 17,
+      "primaryArea": "000-SHIVA KISHORE-1",
+      "secondaryAreas": [
+        {
+          "area": "09-S.SRINU",
+          "count": 3
+        },
+        {
+          "area": "04-RAMESH",
+          "count": 1
+        },
+        {
+          "area": "18-TIRUPATHI",
           "count": 1
         }
       ]
@@ -9187,6 +9079,25 @@
       ]
     },
     {
+      "name": "AMEERPET",
+      "totalConsumers": 17,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "146-VIJAY ADDURI",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "DEENABANDHU COLONY",
       "totalConsumers": 16,
       "primaryArea": "03-NAGARAJU",
@@ -9206,21 +9117,21 @@
       ]
     },
     {
-      "name": "COLONY",
+      "name": "ANAND NAGAR",
       "totalConsumers": 16,
-      "primaryArea": "18-TIRUPATHI",
+      "primaryArea": "03-NAGARAJU",
       "secondaryAreas": [
         {
-          "area": "03-NAGARAJU",
+          "area": "01-RAJU",
           "count": 2
         },
         {
-          "area": "11-NAVEEN",
+          "area": "123-WAJEED G",
           "count": 2
         },
         {
-          "area": "011-ESHWAR",
-          "count": 2
+          "area": "06-HANUMANTH-V",
+          "count": 1
         }
       ]
     },
@@ -9282,6 +9193,25 @@
       ]
     },
     {
+      "name": "PHASE 2",
+      "totalConsumers": 16,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 3
+        },
+        {
+          "area": "09-S.SRINU",
+          "count": 2
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "OPP IDPL COLONY",
       "totalConsumers": 16,
       "primaryArea": "06-HANUMANTH-V",
@@ -9335,44 +9265,6 @@
       ]
     },
     {
-      "name": "FATHENAGAR",
-      "totalConsumers": 16,
-      "primaryArea": "18-TIRUPATHI",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 2
-        },
-        {
-          "area": "01-RAJU",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        }
-      ]
-    },
-    {
-      "name": "TOLICHOWKI",
-      "totalConsumers": 16,
-      "primaryArea": "06-HANUMANTH-V",
-      "secondaryAreas": [
-        {
-          "area": "003-ANAND",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "INDRA NAGAR",
       "totalConsumers": 16,
       "primaryArea": "016-SHIVA KISHORE",
@@ -9411,25 +9303,6 @@
       ]
     },
     {
-      "name": "BANDLAGUDA",
-      "totalConsumers": 16,
-      "primaryArea": "07-MANIKANTA",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
-          "count": 2
-        },
-        {
-          "area": "01-RAJU",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "DEVENDAR NAGAR",
       "totalConsumers": 16,
       "primaryArea": "123-WAJEED G",
@@ -9440,25 +9313,6 @@
         },
         {
           "area": "003-ANAND",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "SHANTHI NAGAR",
-      "totalConsumers": 16,
-      "primaryArea": "000-SHIVA KISHORE-1",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 2
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 2
-        },
-        {
-          "area": "15-NIRANJAN",
           "count": 1
         }
       ]
@@ -9478,25 +9332,6 @@
         },
         {
           "area": "123-WAJEED G",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "ANAND NAGAR",
-      "totalConsumers": 15,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "06-HANUMANTH-V",
-          "count": 1
-        },
-        {
-          "area": "003-ANAND",
           "count": 1
         }
       ]
@@ -9597,6 +9432,25 @@
       ]
     },
     {
+      "name": "OPP GOVT SCHOOL",
+      "totalConsumers": 15,
+      "primaryArea": "011-ESHWAR",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "03-NAGARAJU",
+          "count": 1
+        }
+      ]
+    },
+    {
       "name": "BHUDEVI HILLS",
       "totalConsumers": 15,
       "primaryArea": "15-NIRANJAN",
@@ -9631,6 +9485,44 @@
       ]
     },
     {
+      "name": "DEENABANDU COLONY",
+      "totalConsumers": 15,
+      "primaryArea": "03-NAGARAJU",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 2
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "FATHENAGAR",
+      "totalConsumers": 15,
+      "primaryArea": "18-TIRUPATHI",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 2
+        },
+        {
+          "area": "01-RAJU",
+          "count": 2
+        },
+        {
+          "area": "146-VIJAY ADDURI",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "3RD FLOOR",
       "totalConsumers": 15,
       "primaryArea": "003-ANAND",
@@ -9650,12 +9542,12 @@
       ]
     },
     {
-      "name": "B K GUDA",
+      "name": "TOLICHOWKI",
       "totalConsumers": 15,
-      "primaryArea": "003-ANAND",
+      "primaryArea": "06-HANUMANTH-V",
       "secondaryAreas": [
         {
-          "area": "01-RAJU",
+          "area": "003-ANAND",
           "count": 3
         },
         {
@@ -9663,8 +9555,8 @@
           "count": 2
         },
         {
-          "area": "18-TIRUPATHI",
-          "count": 1
+          "area": "11-NAVEEN",
+          "count": 2
         }
       ]
     },
@@ -9707,6 +9599,25 @@
       ]
     },
     {
+      "name": "HYDERNAGAR",
+      "totalConsumers": 15,
+      "primaryArea": "123-WAJEED G",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 3
+        },
+        {
+          "area": "003-ANAND",
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 2
+        }
+      ]
+    },
+    {
       "name": "HYDER NAGAR",
       "totalConsumers": 15,
       "primaryArea": "003-ANAND",
@@ -9717,6 +9628,82 @@
         },
         {
           "area": "01-RAJU",
+          "count": 2
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SAI NAGAR COLONY",
+      "totalConsumers": 15,
+      "primaryArea": "17-SRIPAL",
+      "secondaryAreas": [
+        {
+          "area": "11-NAVEEN",
+          "count": 3
+        },
+        {
+          "area": "111-WAJEED",
+          "count": 2
+        },
+        {
+          "area": "09-S.SRINU",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "BANDLAGUDA",
+      "totalConsumers": 15,
+      "primaryArea": "07-MANIKANTA",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 2
+        },
+        {
+          "area": "01-RAJU",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SHANTHI NAGAR",
+      "totalConsumers": 15,
+      "primaryArea": "000-SHIVA KISHORE-1",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
+          "count": 1
+        },
+        {
+          "area": "003-ANAND",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "BC COLONY",
+      "totalConsumers": 14,
+      "primaryArea": "08-SURENDER J GUTTA",
+      "secondaryAreas": [
+        {
+          "area": "17-SRIPAL",
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
           "count": 2
         },
         {
@@ -9789,25 +9776,6 @@
       "secondaryAreas": [
         {
           "area": "011-ESHWAR",
-          "count": 1
-        },
-        {
-          "area": "18-TIRUPATHI",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "SUMITRA NAGAR",
-      "totalConsumers": 14,
-      "primaryArea": "06-HANUMANTH-V",
-      "secondaryAreas": [
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
           "count": 1
         },
         {
@@ -9976,44 +9944,6 @@
       ]
     },
     {
-      "name": "OPP GOVT SCHOOL",
-      "totalConsumers": 14,
-      "primaryArea": "011-ESHWAR",
-      "secondaryAreas": [
-        {
-          "area": "01-RAJU",
-          "count": 3
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 2
-        },
-        {
-          "area": "03-NAGARAJU",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "DEENABANDU COLONY",
-      "totalConsumers": 14,
-      "primaryArea": "03-NAGARAJU",
-      "secondaryAreas": [
-        {
-          "area": "011-ESHWAR",
-          "count": 2
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 2
-        },
-        {
-          "area": "08-SURENDER J GUTTA",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "SREERAM NAGAR",
       "totalConsumers": 14,
       "primaryArea": "09-S.SRINU",
@@ -10120,21 +10050,21 @@
       ]
     },
     {
-      "name": "HYDERNAGAR",
+      "name": "B K GUDA",
       "totalConsumers": 14,
-      "primaryArea": "123-WAJEED G",
+      "primaryArea": "003-ANAND",
       "secondaryAreas": [
         {
-          "area": "11-NAVEEN",
+          "area": "01-RAJU",
+          "count": 3
+        },
+        {
+          "area": "123-WAJEED G",
           "count": 2
         },
         {
-          "area": "003-ANAND",
-          "count": 2
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 2
+          "area": "18-TIRUPATHI",
+          "count": 1
         }
       ]
     },
@@ -10154,25 +10084,6 @@
         {
           "area": "003-ANAND",
           "count": 2
-        }
-      ]
-    },
-    {
-      "name": "SAI NAGAR COLONY",
-      "totalConsumers": 14,
-      "primaryArea": "17-SRIPAL",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 3
-        },
-        {
-          "area": "111-WAJEED",
-          "count": 2
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 1
         }
       ]
     },
@@ -10249,44 +10160,6 @@
       ]
     },
     {
-      "name": "SRINIVAS NAGAR COLONY",
-      "totalConsumers": 14,
-      "primaryArea": "17-SRIPAL",
-      "secondaryAreas": [
-        {
-          "area": "11-NAVEEN",
-          "count": 3
-        },
-        {
-          "area": "011-ESHWAR",
-          "count": 3
-        },
-        {
-          "area": "01-RAJU",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "BC COLONY",
-      "totalConsumers": 13,
-      "primaryArea": "08-SURENDER J GUTTA",
-      "secondaryAreas": [
-        {
-          "area": "17-SRIPAL",
-          "count": 2
-        },
-        {
-          "area": "15-NIRANJAN",
-          "count": 2
-        },
-        {
-          "area": "11-NAVEEN",
-          "count": 2
-        }
-      ]
-    },
-    {
       "name": "DFGD",
       "totalConsumers": 13,
       "primaryArea": "016-SHIVA KISHORE",
@@ -10302,6 +10175,25 @@
         {
           "area": "06-HANUMANTH-V",
           "count": 2
+        }
+      ]
+    },
+    {
+      "name": "SUMITRA NAGAR",
+      "totalConsumers": 13,
+      "primaryArea": "06-HANUMANTH-V",
+      "secondaryAreas": [
+        {
+          "area": "123-WAJEED G",
+          "count": 2
+        },
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 1
+        },
+        {
+          "area": "18-TIRUPATHI",
+          "count": 1
         }
       ]
     },
@@ -10339,6 +10231,25 @@
         },
         {
           "area": "18-TIRUPATHI",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "BAGATHSINGH NAGAR",
+      "totalConsumers": 13,
+      "primaryArea": "14-KADALI NAGARAJU",
+      "secondaryAreas": [
+        {
+          "area": "01-RAJU",
+          "count": 5
+        },
+        {
+          "area": "000-SHIVA KISHORE-1",
+          "count": 1
+        },
+        {
+          "area": "169624_PortIn-169624_PortIn",
           "count": 1
         }
       ]
@@ -10519,44 +10430,6 @@
       "secondaryAreas": []
     },
     {
-      "name": "GAJULARAMARAM ROAD",
-      "totalConsumers": 13,
-      "primaryArea": "04-RAMESH",
-      "secondaryAreas": [
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 3
-        },
-        {
-          "area": "003-ANAND",
-          "count": 2
-        },
-        {
-          "area": "09-S.SRINU",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "name": "NACHARAM",
-      "totalConsumers": 13,
-      "primaryArea": "18-TIRUPATHI",
-      "secondaryAreas": [
-        {
-          "area": "07-MANIKANTA",
-          "count": 2
-        },
-        {
-          "area": "123-WAJEED G",
-          "count": 1
-        },
-        {
-          "area": "016-SHIVA KISHORE",
-          "count": 1
-        }
-      ]
-    },
-    {
       "name": "MAINROAD",
       "totalConsumers": 13,
       "primaryArea": "011-ESHWAR",
@@ -10628,6 +10501,25 @@
         },
         {
           "area": "17-SRIPAL",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "SRINIVAS NAGAR COLONY",
+      "totalConsumers": 13,
+      "primaryArea": "11-NAVEEN",
+      "secondaryAreas": [
+        {
+          "area": "011-ESHWAR",
+          "count": 3
+        },
+        {
+          "area": "17-SRIPAL",
+          "count": 2
+        },
+        {
+          "area": "01-RAJU",
           "count": 1
         }
       ]
@@ -10756,6 +10648,82 @@
       "secondaryAreas": [
         {
           "area": "17-SRIPAL",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "GOVT SCHOOL",
+      "totalConsumers": 12,
+      "primaryArea": "08-SURENDER J GUTTA",
+      "secondaryAreas": [
+        {
+          "area": "06-HANUMANTH-V",
+          "count": 2
+        },
+        {
+          "area": "01-RAJU",
+          "count": 1
+        },
+        {
+          "area": "123-WAJEED G",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "WATER TANK",
+      "totalConsumers": 12,
+      "primaryArea": "06-HANUMANTH-V",
+      "secondaryAreas": [
+        {
+          "area": "03-NAGARAJU",
+          "count": 2
+        },
+        {
+          "area": "07-MANIKANTA",
+          "count": 2
+        },
+        {
+          "area": "003-ANAND",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "NEAR GOVT HOSPITAL",
+      "totalConsumers": 12,
+      "primaryArea": "01-RAJU",
+      "secondaryAreas": [
+        {
+          "area": "04-RAMESH",
+          "count": 3
+        },
+        {
+          "area": "011-ESHWAR",
+          "count": 2
+        },
+        {
+          "area": "11-NAVEEN",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "OPP TEA STALL",
+      "totalConsumers": 12,
+      "primaryArea": "016-SHIVA KISHORE",
+      "secondaryAreas": [
+        {
+          "area": "08-SURENDER J GUTTA",
+          "count": 2
+        },
+        {
+          "area": "01-RAJU",
+          "count": 2
+        },
+        {
+          "area": "15-NIRANJAN",
           "count": 1
         }
       ]

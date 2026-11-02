@@ -1,7 +1,7 @@
 import fs from 'fs';
 import * as XLSX from 'xlsx';
 
-const CSV_PATH = 'customers data/ListOfConsumers (5).csv';
+const CSV_PATH = 'customers data/ListOfConsumers (7).csv';
 
 console.log('Generating Delivery Boy / Find Area Data from', CSV_PATH);
 
