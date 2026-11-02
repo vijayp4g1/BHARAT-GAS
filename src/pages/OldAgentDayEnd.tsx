@@ -446,6 +446,7 @@ export const OldAgentDayEnd: React.FC = () => {
     setSingleInput('');
     setShowSuggestions(false);
     setHasUnsavedChanges(false);
+    setEntries([]); // Reset entries immediately to prevent cross-boy bleeding
 
     // Instant local draft check for snappy UX
     const norm = boy.name.trim().toUpperCase();
@@ -515,7 +516,7 @@ export const OldAgentDayEnd: React.FC = () => {
           : [];
 
         // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
-        if (draftEntries.length > 0 || cloudEntries.length > 0) {
+        if (cloudEntries.length > 0) {
           const mergedMap = new Map<string, ItemEntry>();
           cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
           draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
@@ -528,6 +529,25 @@ export const OldAgentDayEnd: React.FC = () => {
             );
           }
           setHasUnsavedChanges(draftEntries.length > cloudEntries.length);
+          setIsLoaded(true);
+          return;
+        }
+
+        if (cloudReport && cloudReport.total_deliveries === 0) {
+          // Cloud confirmed 0 bills for this delivery boy
+          setEntries([]);
+          setLastSavedTime(null);
+          setHasUnsavedChanges(false);
+          setIsLoaded(true);
+          try {
+            localStorage.removeItem(draftKey);
+          } catch (_) {}
+          return;
+        }
+
+        if (draftEntries.length > 0) {
+          setEntries(draftEntries);
+          setHasUnsavedChanges(true);
           setIsLoaded(true);
           return;
         }
