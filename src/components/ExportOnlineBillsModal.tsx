@@ -5,11 +5,7 @@ import {
   Copy, 
   Check, 
   FileSpreadsheet, 
-  Globe, 
-  Layers, 
-  Users, 
-  Calendar,
-  Sparkles
+  Globe
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -36,7 +32,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
   deliveryBoys,
   bpclReportsMap,
 }) => {
-  const [viewMode, setViewMode] = useState<'ALL' | 'GROUPED'>('ALL');
+  const [viewMode, setViewMode] = useState<'ALL' | 'TWO_COL' | 'GROUPED'>('ALL');
   const [copiedCsv, setCopiedCsv] = useState<boolean>(false);
   const [filterBoy, setFilterBoy] = useState<string>('ALL');
 
@@ -106,9 +102,6 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
       'Consumer No': b.consumer_number,
       'Customer Name': b.consumer_name,
       'Delivery Boy': b.deliveryBoy,
-      'Cash Memo': b.cash_memo || '-',
-      'Order No': b.order_no || '-',
-      'Book Date': b.book_date || formattedDate,
       'Refill Type': b.refill_type || 'PayNBook Apps',
       'Status': b.status || 'Online Bill (Delivery Done)',
     }));
@@ -117,15 +110,11 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Online Bills');
 
-    // Set column widths
     worksheet['!cols'] = [
       { wch: 6 },
       { wch: 16 },
-      { wch: 30 },
+      { wch: 32 },
       { wch: 18 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 14 },
       { wch: 16 },
       { wch: 25 },
     ];
@@ -134,14 +123,19 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     toast.success('Downloaded Excel spreadsheet!');
   };
 
+  // Split bills for 2-column view
+  const halfLength = Math.ceil(displayedBills.length / 2);
+  const leftColBills = displayedBills.slice(0, halfLength);
+  const rightColBills = displayedBills.slice(halfLength);
+
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[120] flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:m-0 print:bg-white print:static print:z-auto print:block print:w-full">
-      {/* Dedicated Print Stylesheet: Strictly hides Day End background page and ensures clean Xerox copy */}
+      {/* Dedicated Print Stylesheet: Compact fonts, no big letters, fits 50/page and 100 front+back */}
       <style>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 8mm 10mm 8mm 10mm;
+            margin: 6mm 8mm 6mm 8mm;
           }
           /* Strictly hide Day End page, navigation bars, docks and non-print controls */
           .day-end-main-page,
@@ -159,7 +153,8 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            min-height: auto !important;
+            font-size: 8.5pt !important;
+            line-height: 1.15 !important;
           }
           .print-modal-container {
             position: static !important;
@@ -192,13 +187,26 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           thead {
             display: table-header-group !important;
           }
+          tfoot {
+            display: table-footer-group !important;
+          }
           tr {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            height: 15.5px !important;
+          }
+          td, th {
+            padding-top: 1.2px !important;
+            padding-bottom: 1.2px !important;
+            padding-left: 3px !important;
+            padding-right: 3px !important;
+            font-size: 8pt !important;
+            line-height: 1.15 !important;
           }
           .signature-section {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            margin-top: 12px !important;
           }
         }
       `}</style>
@@ -222,7 +230,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400 truncate">
-                Print Xerox submission sheet or export Excel for BPCL office
+                Compact Xerox sheet (up to 100 consumers in 1 page front & back)
               </p>
             </div>
           </div>
@@ -311,10 +319,39 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             <span>Layout:</span>
             <button
               type="button"
-              onClick={() => setViewMode(viewMode === 'ALL' ? 'GROUPED' : 'ALL')}
-              className="bg-slate-800 hover:bg-slate-750 text-slate-200 px-2 py-1 rounded-lg border border-slate-700"
+              onClick={() => setViewMode('ALL')}
+              className={`px-2 py-1 rounded-lg border transition-all ${
+                viewMode === 'ALL'
+                  ? 'bg-indigo-600 text-white font-bold border-indigo-500'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+              }`}
+              title="Single compact table (50 rows per side, 100 on front & back)"
             >
-              {viewMode === 'ALL' ? 'Single Master Table' : 'Grouped by Boy'}
+              Single Table (50/side)
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('TWO_COL')}
+              className={`px-2 py-1 rounded-lg border transition-all ${
+                viewMode === 'TWO_COL'
+                  ? 'bg-indigo-600 text-white font-bold border-indigo-500'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+              }`}
+              title="2-Column Side-by-Side split"
+            >
+              2-Column Split
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('GROUPED')}
+              className={`px-2 py-1 rounded-lg border transition-all ${
+                viewMode === 'GROUPED'
+                  ? 'bg-indigo-600 text-white font-bold border-indigo-500'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+              }`}
+              title="Grouped by delivery boy"
+            >
+              Grouped
             </button>
           </div>
         </div>
@@ -322,59 +359,60 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
         {/* ========================================================================= */}
         {/* PRINTABLE XEROX SHEET CONTAINER                                          */}
         {/* ========================================================================= */}
-        <div id="printable-online-bills-sheet" className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white text-slate-950 print-sheet-content print:p-0 print:overflow-visible font-sans">
+        <div id="printable-online-bills-sheet" className="p-3 sm:p-5 overflow-y-auto flex-1 bg-white text-slate-950 print-sheet-content print:p-0 print:overflow-visible font-sans">
           
-          {/* Official Agency Letterhead Header */}
-          <div className="border-b-2 border-black pb-3 mb-4 text-center">
-            <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-black">
+          {/* Official Agency Letterhead Header - Sleek & Compact (No Big Letters) */}
+          <div className="border-b border-black pb-1.5 mb-2 text-center print:pb-1 print:mb-1.5">
+            <h1 className="text-base sm:text-lg font-black uppercase tracking-tight text-black print:text-[12pt] print:leading-tight">
               SIDDHARTHA BHARAT GAS
             </h1>
-            <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-wide text-slate-800 mt-0.5">
+            <h2 className="text-[11px] sm:text-xs font-bold uppercase tracking-wide text-slate-800 mt-0.5 print:text-[8.5pt] print:leading-tight">
               DAILY ONLINE BILLS (PAYNBOOK APPS) SUBMISSION REPORT
             </h2>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 mt-2 px-1 border-t border-slate-300 pt-1.5 flex-wrap gap-2">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-700 mt-1 px-1 border-t border-slate-300 pt-1 flex-wrap gap-1 print:text-[7.5pt]">
               <span>📅 <b>DATE:</b> {formattedDate}</span>
-              <span>🏢 <b>BPCL REFILL TYPE:</b> PayNBook Apps (Online Paid)</span>
-              <span>📊 <b>TOTAL ONLINE BILLS:</b> <b className="text-black text-sm">{displayedBills.length}</b></span>
+              <span>🏢 <b>REFILL TYPE:</b> PayNBook Apps (Online Paid)</span>
+              <span>📊 <b>TOTAL ONLINE BILLS:</b> <b className="text-black">{displayedBills.length}</b></span>
             </div>
           </div>
 
-          {/* Delivery Boy Summary Pill Box */}
-          <div className="mb-4 p-2.5 bg-slate-100 rounded-xl border border-slate-300 print:bg-slate-50 print:border-slate-400 text-xs">
-            <span className="font-black text-slate-900 block mb-1 uppercase tracking-wider text-[11px]">
-              DELIVERY BOYS SUMMARY BREAKDOWN:
-            </span>
-            <div className="flex items-center gap-2 flex-wrap">
+          {/* Delivery Boy Summary Pill Box - Compact 1-liner */}
+          <div className="mb-2 p-1.5 bg-slate-50 rounded-lg border border-slate-300 print:border-slate-400 text-[10px] print:text-[7.5pt] print:p-1 print:mb-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-bold text-slate-900 uppercase tracking-wider text-[9px] print:text-[7.5pt]">
+                BOYS BREAKDOWN:
+              </span>
               {Object.entries(boyBreakdown).map(([bName, data]) => (
                 <span
                   key={bName}
-                  className="bg-white border border-slate-400 text-slate-900 px-2 py-0.5 rounded-md font-bold text-xs"
+                  className="bg-white border border-slate-300 text-slate-900 px-1.5 py-0.2 rounded font-semibold text-[9.5px] print:text-[7.5pt]"
                 >
-                  #{data.serial} <b>{bName}:</b> {data.count} Bills
+                  #{data.serial} <b>{bName}:</b> {data.count}
                 </span>
               ))}
-              <span className="bg-black text-white px-2.5 py-0.5 rounded-md font-black text-xs ml-auto">
-                GRAND TOTAL: {allOnlineBills.length} BILLS
+              <span className="bg-black text-white px-2 py-0.2 rounded font-bold text-[9.5px] print:text-[7.5pt] ml-auto">
+                TOTAL: {allOnlineBills.length} BILLS
               </span>
             </div>
           </div>
 
-          {/* Master Table of Bills */}
+          {/* Master Table of Bills (No CASH MEMO, No ORDER NO, Compact Font) */}
           {displayedBills.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 font-semibold text-sm">
+            <div className="py-8 text-center text-slate-500 font-semibold text-xs">
               No online bills recorded for any delivery boy on {formattedDate}.
             </div>
           ) : viewMode === 'ALL' || filterBoy !== 'ALL' ? (
-            <div className="border border-black rounded-lg overflow-hidden mb-6">
-              <table className="w-full text-left border-collapse text-xs">
+            /* =================================================================== */
+            /* SINGLE FULL-WIDTH TABLE: 50 rows per side, 100 on front & back      */
+            /* =================================================================== */
+            <div className="border border-black rounded-md overflow-hidden mb-3">
+              <table className="w-full text-left border-collapse text-[10px] print:text-[8pt]">
                 <thead>
-                  <tr className="bg-slate-200 border-b-2 border-black text-black uppercase font-black tracking-wider text-[11px]">
-                    <th className="py-2 px-2.5 border-r border-slate-400 w-12 text-center">S.No</th>
-                    <th className="py-2 px-3 border-r border-slate-400 font-mono text-sm w-36">Consumer No</th>
-                    <th className="py-2 px-3 border-r border-slate-400">Customer Name</th>
-                    <th className="py-2 px-3 border-r border-slate-400 w-32">Delivery Boy</th>
-                    <th className="py-2 px-2.5 border-r border-slate-400 font-mono w-24">Cash Memo</th>
-                    <th className="py-2 px-2.5 font-mono w-24">Order No</th>
+                  <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[9px] print:text-[7.5pt] tracking-wider">
+                    <th className="py-1 px-1.5 border-r border-slate-400 w-10 text-center">S.No</th>
+                    <th className="py-1 px-2 border-r border-slate-400 font-mono w-28 text-center">Consumer No</th>
+                    <th className="py-1 px-2.5 border-r border-slate-400">Customer Name</th>
+                    <th className="py-1 px-2 w-28 text-center">Delivery Boy</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
@@ -383,42 +421,114 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                       key={`${bill.consumer_number}-${index}`}
                       className="hover:bg-slate-50 print:hover:bg-transparent"
                     >
-                      <td className="py-1.5 px-2.5 border-r border-slate-300 text-center font-black text-slate-700">
+                      <td className="py-0.5 px-1.5 border-r border-slate-300 text-center font-semibold text-slate-700 text-[9px] print:text-[7.5pt]">
                         {index + 1}
                       </td>
-                      <td className="py-1.5 px-3 border-r border-slate-300 font-mono font-black text-slate-950 text-sm">
+                      <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[10px] print:text-[8pt] text-center">
                         #{bill.consumer_number}
                       </td>
-                      <td className="py-1.5 px-3 border-r border-slate-300 font-bold text-slate-900 uppercase">
+                      <td className="py-0.5 px-2.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[10px] print:text-[8pt]">
                         {bill.consumer_name || 'Consumer'}
                       </td>
-                      <td className="py-1.5 px-3 border-r border-slate-300 font-black text-slate-800 uppercase">
+                      <td className="py-0.5 px-2 font-semibold text-slate-800 uppercase text-[9px] print:text-[7.5pt] text-center">
                         #{bill.deliveryBoySerial} {bill.deliveryBoy}
-                      </td>
-                      <td className="py-1.5 px-2.5 border-r border-slate-300 font-mono text-slate-700">
-                        {bill.cash_memo || '-'}
-                      </td>
-                      <td className="py-1.5 px-2.5 font-mono text-slate-700">
-                        {bill.order_no || '-'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-slate-200 border-t-2 border-black font-black text-slate-950 text-xs">
-                    <td colSpan={2} className="py-2 px-3 border-r border-slate-400">
+                  <tr className="bg-slate-100 border-t border-black font-bold text-slate-950 text-[9.5px] print:text-[7.5pt]">
+                    <td colSpan={2} className="py-1 px-2 border-r border-slate-400">
                       TOTAL: {displayedBills.length} ONLINE BILLS
                     </td>
-                    <td colSpan={4} className="py-2 px-3 text-right">
+                    <td colSpan={2} className="py-1 px-2 text-right">
                       Verified for BPCL PayNBook Submission
                     </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+          ) : viewMode === 'TWO_COL' ? (
+            /* =================================================================== */
+            /* 2-COLUMN SPLIT: Side-by-side columns (25-30/col = 50-60/side)       */
+            /* =================================================================== */
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {/* Left Column Table */}
+              <div className="border border-black rounded-md overflow-hidden">
+                <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
+                  <thead>
+                    <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
+                      <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400">Customer Name</th>
+                      <th className="py-1 px-1.5 w-20 text-center">Boy</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-300">
+                    {leftColBills.map((bill, index) => (
+                      <tr key={`left-${bill.consumer_number}-${index}`}>
+                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
+                          {index + 1}
+                        </td>
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
+                          #{bill.consumer_number}
+                        </td>
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                          {bill.consumer_name || 'Consumer'}
+                        </td>
+                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7pt] text-center">
+                          #{bill.deliveryBoySerial} {bill.deliveryBoy}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Right Column Table */}
+              <div className="border border-black rounded-md overflow-hidden">
+                <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
+                  <thead>
+                    <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
+                      <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400">Customer Name</th>
+                      <th className="py-1 px-1.5 w-20 text-center">Boy</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-300">
+                    {rightColBills.map((bill, index) => (
+                      <tr key={`right-${bill.consumer_number}-${index}`}>
+                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
+                          {halfLength + index + 1}
+                        </td>
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
+                          #{bill.consumer_number}
+                        </td>
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                          {bill.consumer_name || 'Consumer'}
+                        </td>
+                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7pt] text-center">
+                          #{bill.deliveryBoySerial} {bill.deliveryBoy}
+                        </td>
+                      </tr>
+                    ))}
+                    {rightColBills.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-3 text-center text-slate-400 text-xs italic">
+                          -
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : (
-            // Grouped by Delivery Boy Sections
-            <div className="space-y-4 mb-6">
+            /* =================================================================== */
+            /* GROUPED BY DELIVERY BOY (No Cash Memo, No Order No)                 */
+            /* =================================================================== */
+            <div className="space-y-3 mb-3">
               {Object.keys(boyBreakdown).map((boyName) => {
                 const boyBills = allOnlineBills.filter(
                   (b) => b.deliveryBoy.trim().toUpperCase() === boyName.trim().toUpperCase()
@@ -426,40 +536,32 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                 if (boyBills.length === 0) return null;
 
                 return (
-                  <div key={boyName} className="border border-black rounded-lg overflow-hidden">
-                    <div className="bg-slate-800 text-white p-2 flex items-center justify-between text-xs font-black print:bg-slate-200 print:text-black print:border-b print:border-black">
+                  <div key={boyName} className="border border-black rounded-md overflow-hidden">
+                    <div className="bg-slate-800 text-white p-1.5 flex items-center justify-between text-[10px] font-bold print:bg-slate-200 print:text-black print:border-b print:border-black print:text-[7.5pt]">
                       <span className="uppercase tracking-wide">
                         DELIVERY BOY: #{boyBreakdown[boyName].serial} {boyName}
                       </span>
                       <span>{boyBills.length} Online Bills</span>
                     </div>
-                    <table className="w-full text-left border-collapse text-xs">
+                    <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
                       <thead>
-                        <tr className="bg-slate-100 border-b border-black text-black uppercase font-bold text-[10px]">
-                          <th className="py-1.5 px-2.5 border-r border-slate-300 w-10 text-center">S.No</th>
-                          <th className="py-1.5 px-3 border-r border-slate-300 font-mono text-xs w-36">Consumer No</th>
-                          <th className="py-1.5 px-3 border-r border-slate-300">Customer Name</th>
-                          <th className="py-1.5 px-2.5 border-r border-slate-300 font-mono w-24">Cash Memo</th>
-                          <th className="py-1.5 px-2.5 font-mono w-24">Order No</th>
+                        <tr className="bg-slate-100 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
+                          <th className="py-0.5 px-1.5 border-r border-slate-300 w-9 text-center">S.No</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-28">Consumer No</th>
+                          <th className="py-0.5 px-2">Customer Name</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-300">
                         {boyBills.map((bill, index) => (
                           <tr key={`${bill.consumer_number}-${index}`}>
-                            <td className="py-1 px-2.5 border-r border-slate-300 text-center font-bold text-slate-600">
+                            <td className="py-0.5 px-1.5 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
                               {index + 1}
                             </td>
-                            <td className="py-1 px-3 border-r border-slate-300 font-mono font-black text-slate-950 text-xs">
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
                               #{bill.consumer_number}
                             </td>
-                            <td className="py-1 px-3 border-r border-slate-300 font-bold text-slate-900 uppercase">
+                            <td className="py-0.5 px-2 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
                               {bill.consumer_name || 'Consumer'}
-                            </td>
-                            <td className="py-1 px-2.5 border-r border-slate-300 font-mono text-slate-700">
-                              {bill.cash_memo || '-'}
-                            </td>
-                            <td className="py-1 px-2.5 font-mono text-slate-700">
-                              {bill.order_no || '-'}
                             </td>
                           </tr>
                         ))}
@@ -471,30 +573,30 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             </div>
           )}
 
-          {/* Official Signatures Section for Office / Xerox Submission */}
-          <div className="mt-8 pt-4 border-t-2 border-black grid grid-cols-3 gap-4 text-center text-xs signature-section print:mt-5 print:pt-3">
+          {/* Official Signatures Section for Office / Xerox Submission - Compact */}
+          <div className="mt-4 pt-2 border-t border-black grid grid-cols-3 gap-3 text-center text-[10px] print:text-[8pt] signature-section print:mt-3 print:pt-2">
             <div>
-              <p className="font-bold text-slate-800 mb-8 print:mb-5">Prepared By (Staff):</p>
+              <p className="font-bold text-slate-800 mb-4 print:mb-3">Prepared By (Staff):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[10px] text-slate-600">Signature & Date</span>
+                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Signature & Date</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-8 print:mb-5">Verified By (Manager):</p>
+              <p className="font-bold text-slate-800 mb-4 print:mb-3">Verified By (Manager):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[10px] text-slate-600">Signature & Seal</span>
+                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Signature & Seal</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-8 print:mb-5">Submitted To (BPCL Office):</p>
+              <p className="font-bold text-slate-800 mb-4 print:mb-3">Submitted To (BPCL Office):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[10px] text-slate-600">Officer Signature & Stamp</span>
+                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Officer Signature & Stamp</span>
               </div>
             </div>
           </div>
 
-          {/* Bottom Generation Timestamp */}
-          <div className="mt-6 text-[10px] text-slate-500 flex items-center justify-between border-t border-slate-200 pt-2 font-mono print:mt-4">
+          {/* Bottom Generation Timestamp - Compact 1-liner */}
+          <div className="mt-3 text-[9px] text-slate-500 flex items-center justify-between border-t border-slate-200 pt-1 font-mono print:text-[7pt] print:mt-2">
             <span>Siddhartha Bharat Gas</span>
             <span>Printed / Generated: {new Date().toLocaleString()}</span>
           </div>
@@ -503,4 +605,3 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
     </div>
   );
 };
-
