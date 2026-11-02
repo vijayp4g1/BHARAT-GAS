@@ -1,10 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Loader2, UserPlus, Users, Trash2, X, User, Phone, Edit2, Search, ShieldCheck, Flame } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  Loader2, 
+  UserPlus, 
+  Users, 
+  Trash2, 
+  X, 
+  User, 
+  Phone, 
+  Edit2, 
+  Search, 
+  ShieldCheck, 
+  Flame,
+  Truck,
+  Lock,
+  CheckCircle2
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 import { hasStaffPermission, grantStaffPermission, revokeStaffPermission } from '../lib/staffAuth';
+import { 
+  fetchAgentDeliveryBoyAssignments, 
+  assignDeliveryBoyToAgent, 
+  type AgentAssignmentMap 
+} from '../lib/agentAssignmentService';
+import { getDayEndDeliveryBoys } from '../lib/dayEndService';
+import type { DeliveryBoy } from '../lib/agentService';
 
 export const ManagerAgents = () => {
   const [agents, setAgents] = useState<any[]>([]);
@@ -13,6 +36,12 @@ export const ManagerAgents = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<any>(null);
+
+  // Delivery Boy Assignments State
+  const [assignments, setAssignments] = useState<AgentAssignmentMap>({});
+  const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
+  const [isAssigningId, setIsAssigningId] = useState<string | null>(null);
+  const [formAssignedBoy, setFormAssignedBoy] = useState<string>('');
   
   // Form State
   const [name, setName] = useState('');
@@ -24,14 +53,20 @@ export const ManagerAgents = () => {
   const fetchAgents = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('agents')
-        .select('*')
-        .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
+      const [{ data, error }, cloudAssignments, boys] = await Promise.all([
+        supabase
+          .from('agents')
+          .select('*')
+          .neq('status', 'DELETED')
+          .order('created_at', { ascending: false }),
+        fetchAgentDeliveryBoyAssignments(),
+        getDayEndDeliveryBoys()
+      ]);
         
       if (error) throw error;
       setAgents(data || []);
+      setAssignments(cloudAssignments || {});
+      setDeliveryBoys(boys || []);
     } catch (error) {
       console.error('Error fetching agents:', error);
       toast.error('Failed to load agents list');
@@ -43,6 +78,39 @@ export const ManagerAgents = () => {
   useEffect(() => {
     fetchAgents();
   }, []);
+
+  const handleAssignDeliveryBoy = async (agent: any, boyName: string) => {
+    setIsAssigningId(agent.id);
+    const cleanBoy = boyName ? boyName.trim().toUpperCase() : '';
+    const cleanUsername = agent.username?.toLowerCase()?.trim() || '';
+
+    // Optimistic UI update
+    setAssignments(prev => {
+      const next = { ...prev };
+      if (cleanBoy) {
+        next[agent.id] = cleanBoy;
+        if (cleanUsername) next[cleanUsername] = cleanBoy;
+      } else {
+        delete next[agent.id];
+        if (cleanUsername) delete next[cleanUsername];
+      }
+      return next;
+    });
+
+    try {
+      await assignDeliveryBoyToAgent(agent.id, agent.username, cleanBoy || null);
+      if (cleanBoy) {
+        toast.success(`Assigned ${cleanBoy} route to ${agent.name}!`);
+      } else {
+        toast.success(`Removed route assignment for ${agent.name}`);
+      }
+    } catch (err) {
+      console.error('Error assigning delivery boy:', err);
+      toast.error('Failed to update delivery boy assignment');
+    } finally {
+      setIsAssigningId(null);
+    }
+  };
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +143,16 @@ export const ManagerAgents = () => {
         throw new Error(error.message || 'Failed to create agent');
       }
 
+      // If delivery boy route was selected for this agent, persist it
+      if (role === 'AGENT' && formAssignedBoy && data?.id) {
+        await assignDeliveryBoyToAgent(data.id, safeUsername, formAssignedBoy);
+        setAssignments(prev => ({
+          ...prev,
+          [data.id]: formAssignedBoy,
+          [safeUsername]: formAssignedBoy
+        }));
+      }
+
       toast.success('Agent account created! They can now log in.');
       
       setAgents([data, ...agents]);
@@ -82,6 +160,7 @@ export const ManagerAgents = () => {
       setUsername('');
       setPassword('');
       setPhone('');
+      setFormAssignedBoy('');
       setIsAddModalOpen(false);
     } catch (error: any) {
       console.error('Error creating agent:', error);
@@ -111,6 +190,23 @@ export const ManagerAgents = () => {
 
       if (error) throw error;
 
+      // Update delivery boy route if changed
+      if (role === 'AGENT') {
+        await assignDeliveryBoyToAgent(editingAgent.id, editingAgent.username, formAssignedBoy || null);
+        setAssignments(prev => {
+          const next = { ...prev };
+          const u = editingAgent.username?.toLowerCase()?.trim();
+          if (formAssignedBoy) {
+            next[editingAgent.id] = formAssignedBoy;
+            if (u) next[u] = formAssignedBoy;
+          } else {
+            delete next[editingAgent.id];
+            if (u) delete next[u];
+          }
+          return next;
+        });
+      }
+
       toast.success('Agent updated successfully');
       
       setAgents(agents.map(a => a.id === editingAgent.id ? { ...a, name, phone, role } : a));
@@ -128,6 +224,7 @@ export const ManagerAgents = () => {
     setName(agent.name);
     setPhone(agent.phone || '');
     setRole(agent.role);
+    setFormAssignedBoy(assignments[agent.id] || assignments[agent.username?.toLowerCase()?.trim()] || '');
     setIsEditModalOpen(true);
   };
 
@@ -137,6 +234,7 @@ export const ManagerAgents = () => {
     setPassword('');
     setPhone('');
     setRole('AGENT');
+    setFormAssignedBoy('');
     setIsAddModalOpen(true);
   };
 
@@ -279,7 +377,7 @@ export const ManagerAgents = () => {
                 {agent.role !== 'MANAGER' && (() => {
                   const isStaff = hasStaffPermission(agent.id, agent.username, agent.is_staff, agent.name);
                   return (
-                    <div className="mb-3 pt-2.5 pb-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <div className="mb-2 pt-2.5 pb-2 border-t border-slate-100 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs text-slate-600 font-semibold">Staff Book:</span>
                         {isStaff && (
@@ -300,6 +398,90 @@ export const ManagerAgents = () => {
                         <ShieldCheck size={14} className={isStaff ? 'text-slate-950 fill-amber-300' : 'text-slate-400'} />
                         <span>{isStaff ? '⭐ Staff Allowed' : 'Grant Staff'}</span>
                       </button>
+                    </div>
+                  );
+                })()}
+
+                {/* Day End Delivery Boy Access Control */}
+                {agent.role !== 'MANAGER' && (() => {
+                  const isStaff = hasStaffPermission(agent.id, agent.username, agent.is_staff, agent.name);
+                  const currentAssigned =
+                    assignments[agent.id] ||
+                    assignments[agent.username?.toLowerCase()?.trim()] ||
+                    '';
+                  const isUpdating = isAssigningId === agent.id;
+
+                  return (
+                    <div className="mb-3 pt-2 pb-2.5 border-t border-slate-100 bg-slate-50/60 -mx-5 px-5">
+                      <div className="flex items-center justify-between gap-1 mb-1.5">
+                        <span className="text-xs text-slate-700 font-bold flex items-center gap-1">
+                          <Truck size={13} className="text-blue-600" /> Day End Route Access:
+                        </span>
+                        {isStaff ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                            ⭐ ALL ROUTES
+                          </span>
+                        ) : currentAssigned ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                            <Lock size={10} /> {currentAssigned}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                            LOCKED (NO ROUTE)
+                          </span>
+                        )}
+                      </div>
+
+                      {isStaff ? (
+                        <div className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded-xl border border-amber-200 font-medium leading-relaxed">
+                          ⭐ As a Staff Member, <b>{agent.name}</b> has unrestricted access to view, add, edit, and delete bills for all 17 delivery boys.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <div className="relative flex-1">
+                              <select
+                                value={currentAssigned}
+                                onChange={(e) => handleAssignDeliveryBoy(agent, e.target.value)}
+                                disabled={isUpdating}
+                                className={`w-full text-xs font-bold py-2 pl-2.5 pr-7 rounded-xl border transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/30 ${
+                                  currentAssigned
+                                    ? 'bg-white border-blue-300 text-blue-950 font-black shadow-sm'
+                                    : 'bg-white border-slate-300 text-slate-500 font-semibold'
+                                }`}
+                              >
+                                <option value="">-- No Route Assigned (Locked) --</option>
+                                {deliveryBoys.map((boy) => (
+                                  <option key={boy.id || boy.name} value={boy.name} className="font-bold py-1">
+                                    🚚 {boy.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {isUpdating && (
+                                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                  <Loader2 size={13} className="animate-spin text-blue-600" />
+                                </div>
+                              )}
+                            </div>
+                            {currentAssigned && (
+                              <button
+                                type="button"
+                                onClick={() => handleAssignDeliveryBoy(agent, '')}
+                                title="Clear delivery boy assignment"
+                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl border border-slate-200 transition-colors shrink-0"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-tight">
+                            {currentAssigned 
+                              ? `Agent @${agent.username} can only view, add, edit & delete bills for ${currentAssigned}.`
+                              : `Assign a delivery boy route so @${agent.username} can record day end bills.`
+                            }
+                          </p>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -435,6 +617,29 @@ export const ManagerAgents = () => {
                 </button>
               </div>
             </div>
+
+            {role === 'AGENT' && (
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5 ml-1 flex items-center gap-1.5">
+                  <Truck size={15} className="text-blue-600" /> Assigned Day End Delivery Boy
+                </label>
+                <select
+                  value={formAssignedBoy}
+                  onChange={(e) => setFormAssignedBoy(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all font-bold text-slate-800"
+                >
+                  <option value="">-- No Route Assigned (Locked) --</option>
+                  {deliveryBoys.map((boy) => (
+                    <option key={boy.id || boy.name} value={boy.name} className="font-bold">
+                      🚚 {boy.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1.5 ml-1">
+                  Agent will only have access to add, edit and delete bills for this specific delivery boy.
+                </p>
+              </div>
+            )}
             
             <div className="mt-auto pt-6">
               <button 
@@ -515,6 +720,29 @@ export const ManagerAgents = () => {
                 </button>
               </div>
             </div>
+
+            {role === 'AGENT' && (
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5 ml-1 flex items-center gap-1.5">
+                  <Truck size={15} className="text-blue-600" /> Assigned Day End Delivery Boy
+                </label>
+                <select
+                  value={formAssignedBoy}
+                  onChange={(e) => setFormAssignedBoy(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all font-bold text-slate-800"
+                >
+                  <option value="">-- No Route Assigned (Locked) --</option>
+                  {deliveryBoys.map((boy) => (
+                    <option key={boy.id || boy.name} value={boy.name} className="font-bold">
+                      🚚 {boy.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1.5 ml-1">
+                  Agent will only have access to add, edit and delete bills for this specific delivery boy.
+                </p>
+              </div>
+            )}
             
             <div className="mt-auto pt-6">
               <button 

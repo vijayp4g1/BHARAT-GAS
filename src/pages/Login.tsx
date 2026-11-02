@@ -127,6 +127,16 @@ export const Login = () => {
 
         localStorage.setItem('bgcls_agent_id', data.user.id);
         localStorage.setItem('bgcls_user_role', actualRole);
+        localStorage.setItem('bgcls_logged_username', username.toLowerCase().trim());
+        if (agentData?.name) {
+          localStorage.setItem('bgcls_agent_name', agentData.name);
+        }
+        const assignedBoy = data.user?.user_metadata?.assigned_delivery_boy;
+        if (assignedBoy) {
+          localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy);
+        } else {
+          localStorage.removeItem('bgcls_assigned_delivery_boy');
+        }
       }
 
       if (actualRole === 'MANAGER') {

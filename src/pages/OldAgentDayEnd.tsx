@@ -26,7 +26,8 @@ import {
   Users,
   ShieldAlert,
   AlertTriangle,
-  Check
+  Check,
+  Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -40,6 +41,12 @@ import {
   type DayEndReportSummary
 } from '../lib/dayEndService';
 import type { DeliveryBoy } from '../lib/agentService';
+import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { 
+  getAgentAssignedDeliveryBoy, 
+  fetchAgentDeliveryBoyAssignments,
+  resolveCurrentAgentDeliveryBoy 
+} from '../lib/agentAssignmentService';
 
 export interface ItemEntry {
   consumer_id?: string;
@@ -144,6 +151,11 @@ export const OldAgentDayEnd: React.FC = () => {
   const [isBoyDropdownOpen, setIsBoyDropdownOpen] = useState<boolean>(false);
   const [boySearchQuery, setBoySearchQuery] = useState<string>('');
   const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
+
+  // Route Access Control (Staff vs Non-Staff assigned to specific boy)
+  const [isStaffOrManager, setIsStaffOrManager] = useState<boolean>(() => isCurrentStaffOrManager());
+  const [assignedRoute, setAssignedRoute] = useState<string | null>(() => getAgentAssignedDeliveryBoy());
+  const [isAccessChecking, setIsAccessChecking] = useState<boolean>(true);
 
   // Agent State (can be switched to any delivery boy from the list)
   const [agentName, setAgentName] = useState<string>(() => {
@@ -253,6 +265,53 @@ export const OldAgentDayEnd: React.FC = () => {
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // Verify authoritatively if current agent is staff or has an assigned route
+  useEffect(() => {
+    let isMounted = true;
+
+    const verifyAccess = async () => {
+      try {
+        const { isStaffOrManager: isStaff, assignedBoy } = await resolveCurrentAgentDeliveryBoy();
+        if (!isMounted) return;
+        setIsStaffOrManager(isStaff);
+        setAssignedRoute(assignedBoy);
+      } catch (err) {
+        console.warn('Error verifying route access:', err);
+      } finally {
+        if (isMounted) setIsAccessChecking(false);
+      }
+    };
+
+    verifyAccess();
+
+    // Listen for realtime route assignment updates from Manager Dashboard
+    const channel = supabase.channel('bgcls_old_day_end_perm_channel');
+    channel.on('broadcast', { event: 'delivery_boy_assignment_changed' }, (payload) => {
+      const currentId = localStorage.getItem('bgcls_agent_id');
+      const currentUser = (
+        localStorage.getItem('bgcls_logged_username') ||
+        localStorage.getItem('bgcls_remember_username') ||
+        ''
+      ).toLowerCase().trim();
+      const p = payload?.payload;
+      if (p && (p.agentId === currentId || p.username === currentUser)) {
+        const newRoute = p.assigned_delivery_boy ? p.assigned_delivery_boy.toUpperCase() : null;
+        setAssignedRoute(newRoute);
+        if (newRoute) {
+          toast.success(`Your assigned delivery route is ${newRoute}`);
+        } else {
+          toast.error('Your delivery route assignment was removed by manager');
+        }
+      }
+    });
+    channel.subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   // 1. Load Delivery Boys and initial selection
   useEffect(() => {
     let isMounted = true;
@@ -260,12 +319,34 @@ export const OldAgentDayEnd: React.FC = () => {
       try {
         const boys = await getDayEndDeliveryBoys();
         if (!isMounted || !boys || boys.length === 0) return;
+
+        // If NOT staff/manager and assigned to a specific delivery boy:
+        if (!isStaffOrManager && assignedRoute && assignedRoute !== 'ALL') {
+          const normRoute = assignedRoute.trim().toUpperCase();
+          const matched = boys.find((b) => b.name.toUpperCase() === normRoute);
+          const routeBoy: DeliveryBoy = matched || {
+            id: `boy_${normRoute.toLowerCase()}`,
+            name: normRoute,
+            username: normRoute.toLowerCase(),
+            role: 'AGENT' as const,
+            status: 'ACTIVE' as const,
+          };
+          setDeliveryBoys([routeBoy]);
+          setSelectedBoy(routeBoy);
+          setAgentName(routeBoy.name);
+          setAgentId(routeBoy.id);
+          localStorage.setItem('bgcls_day_end_selected_boy_name', routeBoy.name);
+          return;
+        }
+
         setDeliveryBoys(boys);
 
         const lastSelected = localStorage.getItem('bgcls_day_end_selected_boy_name');
         const currentAgentId = localStorage.getItem('bgcls_agent_id');
         const currentName = localStorage.getItem('bgcls_agent_name');
-        const currentUsername = localStorage.getItem('bgcls_remember_username');
+        const currentUsername =
+          localStorage.getItem('bgcls_remember_username') ||
+          localStorage.getItem('bgcls_logged_username');
 
         let matched = boys.find((b) => lastSelected && b.name.toUpperCase() === lastSelected.toUpperCase());
         if (!matched && currentName) {
@@ -302,7 +383,7 @@ export const OldAgentDayEnd: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isStaffOrManager, assignedRoute]);
 
   // 1b. Fetch all delivery boy reports for cross-agent double-bill scam detection
   useEffect(() => {
@@ -325,6 +406,15 @@ export const OldAgentDayEnd: React.FC = () => {
 
   // Switch Active Delivery Boy
   const handleSwitchBoy = async (boy: DeliveryBoy) => {
+    // Non-staff guard: Cannot switch to other delivery boys
+    if (!isStaffOrManager && assignedRoute && assignedRoute !== 'ALL') {
+      if (boy.name.trim().toUpperCase() !== assignedRoute.trim().toUpperCase()) {
+        toast.error(`Access Restricted: Your account is assigned only to ${assignedRoute}.`);
+        setIsBoyDropdownOpen(false);
+        return;
+      }
+    }
+
     if (selectedBoy?.name.toUpperCase() === boy.name.toUpperCase()) {
       setIsBoyDropdownOpen(false);
       return;
@@ -1034,18 +1124,28 @@ export const OldAgentDayEnd: React.FC = () => {
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight leading-tight">Day End Report</h1>
-              <button
-                type="button"
-                onClick={() => setIsBoyDropdownOpen(true)}
-                className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/40 text-[11px] font-bold text-amber-300 transition-all active:scale-95"
-                title="Tap to switch Delivery Boy"
-              >
-                <span className="text-blue-200 font-normal">👤 Boy:</span>
-                <span className="text-white font-black uppercase tracking-wide truncate max-w-[120px]">
-                  {selectedBoy ? selectedBoy.name : agentName}
-                </span>
-                <ChevronDown className="w-3 h-3 text-amber-400 shrink-0" />
-              </button>
+              {isStaffOrManager ? (
+                <button
+                  type="button"
+                  onClick={() => setIsBoyDropdownOpen(true)}
+                  className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/40 text-[11px] font-bold text-amber-300 transition-all active:scale-95"
+                  title="Tap to switch Delivery Boy"
+                >
+                  <span className="text-blue-200 font-normal">👤 Boy:</span>
+                  <span className="text-white font-black uppercase tracking-wide truncate max-w-[120px]">
+                    {selectedBoy ? selectedBoy.name : agentName}
+                  </span>
+                  <ChevronDown className="w-3 h-3 text-amber-400 shrink-0" />
+                </button>
+              ) : (
+                <div className="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-[11px] font-bold text-emerald-300">
+                  <Lock className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                  <span className="text-emerald-200 font-normal">Assigned:</span>
+                  <span className="text-white font-black uppercase tracking-wide truncate max-w-[120px]">
+                    {selectedBoy ? selectedBoy.name : (assignedRoute || agentName)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1063,38 +1163,49 @@ export const OldAgentDayEnd: React.FC = () => {
               {selectedBoy ? selectedBoy.name.charAt(0) : (agentName ? agentName.charAt(0) : '👤')}
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] text-blue-200 uppercase font-semibold tracking-wider block leading-tight">Delivery Boy</span>
+              <span className="text-[10px] text-blue-200 uppercase font-semibold tracking-wider block leading-tight">
+                {isStaffOrManager ? 'Delivery Boy' : 'Assigned Route'}
+              </span>
               <span className="font-black text-white text-xs uppercase truncate block">
-                {selectedBoy ? selectedBoy.name : agentName}
+                {selectedBoy ? selectedBoy.name : (assignedRoute || agentName)}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Quick Dropdown select for 1-tap picking on mobile */}
-            <select
-              value={selectedBoy?.name || agentName}
-              onChange={(e) => {
-                const found = deliveryBoys.find((b) => b.name === e.target.value);
-                if (found) handleSwitchBoy(found);
-              }}
-              className="bg-slate-900 text-amber-300 border border-amber-400/50 text-xs font-black px-2 py-1.5 rounded-xl focus:outline-none cursor-pointer max-w-[130px] uppercase shadow-sm"
-            >
-              {deliveryBoys.map((boy) => (
-                <option key={boy.id || boy.name} value={boy.name} className="bg-slate-900 text-white font-bold py-1">
-                  {boy.name}
-                </option>
-              ))}
-            </select>
+            {isStaffOrManager ? (
+              <>
+                {/* Quick Dropdown select for 1-tap picking on mobile */}
+                <select
+                  value={selectedBoy?.name || agentName}
+                  onChange={(e) => {
+                    const found = deliveryBoys.find((b) => b.name === e.target.value);
+                    if (found) handleSwitchBoy(found);
+                  }}
+                  className="bg-slate-900 text-amber-300 border border-amber-400/50 text-xs font-black px-2 py-1.5 rounded-xl focus:outline-none cursor-pointer max-w-[130px] uppercase shadow-sm"
+                >
+                  {deliveryBoys.map((boy) => (
+                    <option key={boy.id || boy.name} value={boy.name} className="bg-slate-900 text-white font-bold py-1">
+                      {boy.name}
+                    </option>
+                  ))}
+                </select>
 
-            <button
-              type="button"
-              onClick={() => setIsBoyDropdownOpen(true)}
-              className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-sm transition-all"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>List</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBoyDropdownOpen(true)}
+                  className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-sm transition-all"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>List</span>
+                </button>
+              </>
+            ) : (
+              <span className="px-2.5 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-xl text-[11px] font-black flex items-center gap-1">
+                <Lock className="w-3 h-3 text-emerald-400" />
+                <span>Locked Route</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -1196,29 +1307,67 @@ export const OldAgentDayEnd: React.FC = () => {
         )}
       </div>
 
-      {/* Anti-Fraud Double Bill Scam Alert Banner */}
-      {duplicateScamCount > 0 && (
-        <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-lg border border-rose-300/30 animate-pulse">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                <ShieldAlert className="w-5 h-5 text-amber-300 animate-bounce" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-xs font-black uppercase tracking-wide truncate">
-                  {duplicateScamCount} Double Bill Scam{duplicateScamCount > 1 ? 's' : ''} Detected!
-                </h3>
-                <p className="text-[10px] text-rose-100 truncate">
-                  This bill was already claimed by another delivery boy today!
-                </p>
-              </div>
-            </div>
-            <span className="bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-white/20 shrink-0">
-              SCAM ALERT
-            </span>
+      {isAccessChecking ? (
+        <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200 text-center my-6 space-y-3">
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto" />
+          <p className="text-xs text-slate-500 font-bold">Verifying route access...</p>
+        </div>
+      ) : !isStaffOrManager && !assignedRoute ? (
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-200 text-center my-6 space-y-4">
+          <div className="w-16 h-16 bg-rose-50 border border-rose-200 text-rose-600 rounded-3xl flex items-center justify-center mx-auto shadow-sm">
+            <ShieldAlert size={32} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-slate-800">Delivery Boy Route Not Assigned</h2>
+            <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">
+              Your account has not been assigned a delivery boy route yet. Only assigned delivery boys or authorized staff members can enter Day End bills.
+            </p>
+          </div>
+
+          <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-left max-w-sm mx-auto text-xs text-amber-900 space-y-1">
+            <p className="font-bold flex items-center gap-1">
+              <Lock size={12} className="text-amber-700" /> Manager Action Required:
+            </p>
+            <p className="text-[11px] text-amber-800 leading-normal">
+              Please contact your manager. In the <b>Manager Dashboard &rarr; Team Members</b>, the manager must select your assigned delivery route (e.g. NAGARAJU, ANAND, etc.).
+            </p>
+          </div>
+
+          <div className="pt-2 flex justify-center">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center gap-2"
+            >
+              <ArrowLeft size={16} /> Back to Search / Home
+            </button>
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Anti-Fraud Double Bill Scam Alert Banner */}
+          {duplicateScamCount > 0 && (
+            <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-lg border border-rose-300/30 animate-pulse">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                    <ShieldAlert className="w-5 h-5 text-amber-300 animate-bounce" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-black uppercase tracking-wide truncate">
+                      {duplicateScamCount} Double Bill Scam{duplicateScamCount > 1 ? 's' : ''} Detected!
+                    </h3>
+                    <p className="text-[10px] text-rose-100 truncate">
+                      This bill was already claimed by another delivery boy today!
+                    </p>
+                  </div>
+                </div>
+                <span className="bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-white/20 shrink-0">
+                  SCAM ALERT
+                </span>
+              </div>
+            </div>
+          )}
 
       {/* Gemini AI Receipt Scanner Banner */}
       <div className="mb-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-3xl p-3.5 shadow-xl shadow-orange-500/25 text-white flex items-center justify-between gap-2 border-2 border-amber-300">
@@ -1653,9 +1802,11 @@ export const OldAgentDayEnd: React.FC = () => {
           </button>
         </div>
       </div>
+      </>
+      )}
 
-      {/* Delivery Boy Selection Modal */}
-      {isBoyDropdownOpen && (
+      {/* Delivery Boy Selection Modal (Staff & Managers Only) */}
+      {isBoyDropdownOpen && isStaffOrManager && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
             {/* Modal Header */}
