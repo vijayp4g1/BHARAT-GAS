@@ -381,6 +381,26 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       ...prev,
     ]);
 
+    // Persistent Write-Ahead Audit Log (Survives app switching, browser refresh & RAM clearing)
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
+      const log = rawLog ? JSON.parse(rawLog) : [];
+      log.unshift({
+        consumer_id: match.consumer_id,
+        consumer_number: resolvedNum,
+        consumer_name: finalName,
+        address: finalAddress,
+        mobile: finalMobile,
+        found: true,
+        cylinder_type: '14.2KG_STD',
+        timestamp: Date.now(),
+        date: todayStr,
+      });
+      // Retain latest 300 scans
+      localStorage.setItem('bgcls_scanned_receipts_audit_log', JSON.stringify(log.slice(0, 300)));
+    } catch (_) {}
+
     onConsumerScanned({
       consumer_id: match.consumer_id,
       consumer_number: resolvedNum,

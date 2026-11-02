@@ -25,7 +25,8 @@ import {
   RefreshCw,
   ArrowLeft,
   AlertTriangle,
-  ShieldAlert
+  ShieldAlert,
+  RotateCcw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -42,6 +43,11 @@ import {
 import type { DeliveryBoy } from '../lib/agentService';
 
 export type ItemEntry = DayEndEntry;
+
+const getWorkingDraftKey = (dateStr: string, agentName: string): string => {
+  const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+  return `bgcls_day_end_working_draft_${dateStr}_${norm}`;
+};
 
 export const StaffDayEndSummary: React.FC = () => {
   const navigate = useNavigate();
@@ -87,6 +93,16 @@ export const StaffDayEndSummary: React.FC = () => {
   const [isSavingDb, setIsSavingDb] = useState<boolean>(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [recoverableCount, setRecoverableCount] = useState<number>(0);
+
+  // Synchronous State Refs for Lifecycle Flush (survives app switching & tab kill)
+  const entriesRef = useRef<ItemEntry[]>(entries);
+  entriesRef.current = entries;
+  const selectedBoyRef = useRef<DeliveryBoy | null>(selectedBoy);
+  selectedBoyRef.current = selectedBoy;
+  const reportDateRef = useRef<string>(reportDate);
+  reportDateRef.current = reportDate;
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Anti-Fraud / Double-Bill Scam Detection:
   // Map of consumer_number -> { agentName, date, consumerName } for all bills already submitted by OTHER delivery boys
@@ -311,32 +327,231 @@ export const StaffDayEndSummary: React.FC = () => {
     loadRosterData(reportDate);
   }, [reportDate, loadRosterData]);
 
-  // 3. Load Bills for Selected Delivery Boy
+  // Write-Ahead Engine: Immediately writes to local storage (0ms) and auto-saves to database (debounced 800ms)
+  const triggerAutoSave = useCallback((updatedEntries: ItemEntry[], boy: DeliveryBoy, dateStr: string) => {
+    const normName = boy.name.trim().toUpperCase();
+    const draftKey = getWorkingDraftKey(dateStr, normName);
+
+    // 1. Synchronously persist to localStorage draft immediately (survives app switches)
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        entries: updatedEntries,
+        timestamp: Date.now(),
+      }));
+    } catch (_) {}
+
+    // 2. Debounced background auto-save to database
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await saveDayEndReportToDatabase({
+          report_date: dateStr,
+          agent_id: boy.id,
+          agent_name: boy.name,
+          entries: updatedEntries as any,
+          supervisor_phone: supervisorPhone,
+        });
+        setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        console.warn('Auto-save error:', err);
+      }
+    }, 800);
+  }, [supervisorPhone]);
+
+  // 3. Load Bills for Selected Delivery Boy (with resilient Local Working Draft protection)
   const loadBillsForSelectedBoy = useCallback(async (boy: DeliveryBoy, dateStr: string) => {
     try {
-      const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
-      if (summary && summary.entries) {
-        setEntries(summary.entries);
-        setLastSavedTime(summary.updated_at ? new Date(summary.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null);
-        setHasUnsavedChanges(false);
-      } else {
-        const normName = boy.name.trim().toUpperCase();
-        const localKey = `bgcls_day_end_cloud_cache_${dateStr}_${normName}`;
-        const cached = localStorage.getItem(localKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          setEntries(parsed.entries || []);
-        } else {
-          setEntries([]);
+      const normName = boy.name.trim().toUpperCase();
+      const draftKey = getWorkingDraftKey(dateStr, normName);
+
+      // 1. Check local working draft first
+      let draftEntries: ItemEntry[] = [];
+      try {
+        const rawDraft = localStorage.getItem(draftKey);
+        if (rawDraft) {
+          const parsed = JSON.parse(rawDraft);
+          if (Array.isArray(parsed.entries)) {
+            draftEntries = parsed.entries;
+          }
         }
+      } catch (_) {}
+
+      // 2. Fetch cloud summary
+      const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
+      const cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
+
+      // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
+      if (draftEntries.length > 0 || cloudEntries.length > 0) {
+        const mergedMap = new Map<string, ItemEntry>();
+        // Add cloud entries first
+        cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+        // Merge draft entries (preserves newly scanned items that haven't reached cloud yet)
+        draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+
+        const finalEntries = Array.from(mergedMap.values());
+        setEntries(finalEntries);
+
+        if (summary?.updated_at) {
+          setLastSavedTime(new Date(summary.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+        setHasUnsavedChanges(draftEntries.length > cloudEntries.length);
+      } else {
+        setEntries([]);
         setLastSavedTime(null);
         setHasUnsavedChanges(false);
       }
     } catch (err) {
       console.warn('Failed to load bills for boy:', err);
-      setEntries([]);
     }
   }, []);
+
+  // App Switch / Background / Pagehide Emergency Flush:
+  // Ensures bills are immediately persisted when the user switches to WhatsApp or another app!
+  useEffect(() => {
+    const handleAppSwitchOrUnload = () => {
+      const boy = selectedBoyRef.current;
+      const currentEntries = entriesRef.current;
+      const currentDate = reportDateRef.current;
+
+      if (boy && currentEntries.length > 0) {
+        const normName = boy.name.trim().toUpperCase();
+        const draftKey = getWorkingDraftKey(currentDate, normName);
+        try {
+          localStorage.setItem(draftKey, JSON.stringify({
+            entries: currentEntries,
+            timestamp: Date.now(),
+          }));
+        } catch (_) {}
+
+        saveDayEndReportToDatabase({
+          report_date: currentDate,
+          agent_id: boy.id,
+          agent_name: boy.name,
+          entries: currentEntries as any,
+          supervisor_phone: supervisorPhone,
+        }).catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleAppSwitchOrUnload);
+    window.addEventListener('pagehide', handleAppSwitchOrUnload);
+    window.addEventListener('beforeunload', handleAppSwitchOrUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleAppSwitchOrUnload);
+      window.removeEventListener('pagehide', handleAppSwitchOrUnload);
+      window.removeEventListener('beforeunload', handleAppSwitchOrUnload);
+    };
+  }, [supervisorPhone]);
+
+  // Scan history recovery detector
+  useEffect(() => {
+    try {
+      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
+      if (rawLog) {
+        const log = JSON.parse(rawLog);
+        if (Array.isArray(log) && log.length > 0) {
+          const existingSet = new Set(entries.map((e) => e.consumer_number.toLowerCase()));
+          const missing = log.filter(
+            (item: any) => item.date === reportDate && !existingSet.has(item.consumer_number.toLowerCase())
+          );
+          setRecoverableCount(missing.length);
+          return;
+        }
+      }
+      setRecoverableCount(0);
+    } catch (_) {
+      setRecoverableCount(0);
+    }
+  }, [entries, reportDate]);
+
+  const handleRecoverLostBills = () => {
+    try {
+      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
+      if (!rawLog) return;
+      const log = JSON.parse(rawLog);
+      const existingSet = new Set(entries.map((e) => e.consumer_number.toLowerCase()));
+      const toRecover: ItemEntry[] = [];
+
+      log.forEach((item: any) => {
+        if (item.date === reportDate && !existingSet.has(item.consumer_number.toLowerCase())) {
+          toRecover.push({
+            consumer_id: item.consumer_id,
+            consumer_number: item.consumer_number,
+            consumer_name: item.consumer_name,
+            address: item.address,
+            mobile: item.mobile,
+            found: true,
+            source: 'local',
+            cylinder_type: item.cylinder_type || '14.2KG_STD',
+            payment_mode: 'CASH',
+            empty_collected: true,
+            scanned_at: new Date(item.timestamp).toISOString(),
+          });
+          existingSet.add(item.consumer_number.toLowerCase());
+        }
+      });
+
+      if (toRecover.length > 0) {
+        const updated = [...toRecover, ...entries];
+        setEntries(updated);
+        if (selectedBoy) {
+          triggerAutoSave(updated, selectedBoy, reportDate);
+        }
+        toast.success(`Recovered ${toRecover.length} bills from camera scan history!`, { icon: '🛡️' });
+      }
+    } catch (e) {
+      toast.error('Recovery failed');
+    }
+  };
+
+  // Synchronous write-ahead to localStorage on ANY change to entries
+  useEffect(() => {
+    if (!selectedBoy) return;
+    const normName = selectedBoy.name.trim().toUpperCase();
+    const draftKey = getWorkingDraftKey(reportDate, normName);
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        entries,
+        timestamp: Date.now(),
+      }));
+    } catch (_) {}
+  }, [entries, selectedBoy, reportDate]);
+
+  // Debounced background auto-save to cloud database whenever entries change with unsaved edits
+  useEffect(() => {
+    if (!selectedBoy || !hasUnsavedChanges || entries.length === 0) return;
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await saveDayEndReportToDatabase({
+          report_date: reportDate,
+          agent_id: selectedBoy.id,
+          agent_name: selectedBoy.name,
+          entries: entries as any,
+          supervisor_phone: supervisorPhone,
+        });
+        setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        console.warn('Auto-save error:', err);
+      }
+    }, 1000);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [entries, hasUnsavedChanges, selectedBoy, reportDate, supervisorPhone]);
 
   useEffect(() => {
     if (selectedBoy) {
@@ -1533,6 +1748,29 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Emergency Scan History Recovery Banner */}
+          {recoverableCount > 0 && (
+            <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between gap-2 shadow-md border border-amber-300/30 animate-pulse">
+              <div className="flex items-center gap-2 min-w-0">
+                <RotateCcw className="w-4 h-4 shrink-0 text-white animate-spin" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-tight">
+                    {recoverableCount} Scanned Bill{recoverableCount > 1 ? 's' : ''} Found in Device History!
+                  </p>
+                  <p className="text-[10px] text-amber-100 truncate">
+                    Bills detected from earlier camera scan session
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleRecoverLostBills}
+                className="bg-slate-950 hover:bg-slate-900 active:scale-95 text-amber-300 border border-amber-400/40 text-[11px] font-black px-3 py-1.5 rounded-xl shrink-0 transition-all shadow-md"
+              >
+                Restore {recoverableCount} Bills
+              </button>
+            </div>
+          )}
 
           {/* Deliveries List */}
           <div className="bg-white rounded-3xl p-3.5 shadow-sm border border-slate-200">
