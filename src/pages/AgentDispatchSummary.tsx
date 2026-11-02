@@ -126,9 +126,12 @@ export const AgentDispatchSummary: React.FC = () => {
   }, [entries, crossAgentClaimedMap]);
 
   // Global duplicate scam map across ALL delivery boys for the active date
-  // consumer_number -> list of { agentName: string, reportDate: string }
+  // consumer_number -> list of { agentName: string, reportDate: string, scannedAt?: string, duplicateOfAgent?: string, reportUpdatedAt?: string }
   const globalDuplicateBillsMap = useMemo(() => {
-    const billOccurrences: Record<string, { agentName: string; reportDate: string }[]> = {};
+    const billOccurrences: Record<
+      string,
+      { agentName: string; reportDate: string; scannedAt?: string; duplicateOfAgent?: string; reportUpdatedAt?: string }[]
+    > = {};
 
     Object.values(rosterSummaries).forEach((report) => {
       const agentName = report.agent_name || '';
@@ -140,7 +143,13 @@ export const AgentDispatchSummary: React.FC = () => {
               billOccurrences[clean] = [];
             }
             if (!billOccurrences[clean].some((o) => o.agentName.trim().toUpperCase() === agentName.trim().toUpperCase())) {
-              billOccurrences[clean].push({ agentName, reportDate: report.report_date });
+              billOccurrences[clean].push({
+                agentName,
+                reportDate: report.report_date,
+                scannedAt: entry.scanned_at,
+                duplicateOfAgent: entry.duplicate_of_agent,
+                reportUpdatedAt: report.updated_at,
+              });
             }
           }
         });
@@ -151,6 +160,7 @@ export const AgentDispatchSummary: React.FC = () => {
   }, [rosterSummaries]);
 
   // Compute duplicate scam statistics per delivery boy for the roster view
+  // Correctly attributes scam count ONLY to the secondary / duplicate submitters (not the original legitimate boy)
   const boyScamStats = useMemo(() => {
     const stats: Record<string, { scamCount: number; duplicateWith: string[] }> = {};
 
@@ -169,9 +179,36 @@ export const AgentDispatchSummary: React.FC = () => {
           );
 
           if (otherOccurrences.length > 0 || entry.duplicate_of_agent) {
-            count++;
-            const claimant = entry.duplicate_of_agent || (otherOccurrences[0] ? otherOccurrences[0].agentName : '');
-            if (claimant) dupWithSet.add(claimant);
+            // 1. If entry explicitly has duplicate_of_agent, this entry is definitely a scam duplicate!
+            if (entry.duplicate_of_agent) {
+              count++;
+              dupWithSet.add(entry.duplicate_of_agent);
+              return;
+            }
+
+            // 2. If another delivery boy explicitly marked this bill as duplicate of THIS boy,
+            // then THIS boy is the original legitimate submitter!
+            const isVictimOfDuplicate = otherOccurrences.some(
+              (o) => o.duplicateOfAgent && o.duplicateOfAgent.trim().toUpperCase() === normName
+            );
+            if (isVictimOfDuplicate) {
+              return;
+            }
+
+            // 3. Fallback: Check who submitted it first chronologically
+            const sorted = [...occurrences].sort((a, b) => {
+              const tA = a.scannedAt ? new Date(a.scannedAt).getTime() : (a.reportUpdatedAt ? new Date(a.reportUpdatedAt).getTime() : 0);
+              const tB = b.scannedAt ? new Date(b.scannedAt).getTime() : (b.reportUpdatedAt ? new Date(b.reportUpdatedAt).getTime() : 0);
+              return tA - tB;
+            });
+
+            // The earliest occurrence is the original submitter!
+            const original = sorted[0];
+            if (original && original.agentName.trim().toUpperCase() !== normName) {
+              // This boy is NOT the original submitter, so this is a duplicate scam submission!
+              count++;
+              dupWithSet.add(original.agentName);
+            }
           }
         });
       }
