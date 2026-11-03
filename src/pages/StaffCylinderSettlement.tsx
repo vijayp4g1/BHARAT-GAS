@@ -45,6 +45,15 @@ import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 import { AddDeliveryBoyModal } from '../components/AddDeliveryBoyModal';
 import { ManageDeliveryBoysModal } from '../components/ManageDeliveryBoysModal';
 
+// Helper to extract clean human remarks without internal JSON blobs (__BGCLS_SCANNED_BILLS__ or __BGCLS_BPCL_REPORT__)
+const getDisplayRemarks = (rawNotes: string | null | undefined): string => {
+  if (!rawNotes) return '';
+  return rawNotes
+    .split('__BGCLS_SCANNED_BILLS__')[0]
+    .split('__BGCLS_BPCL_REPORT__')[0]
+    .trim();
+};
+
 export const StaffCylinderSettlement: React.FC = () => {
   const navigate = useNavigate();
 
@@ -431,7 +440,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       setReturnedFullCylinders(existing.returned_full_cylinders);
       setEmptyCylinders(existing.empty_cylinders);
       setActualCashInput(existing.actual_cash);
-      setNotes(existing.notes || '');
+      setNotes(getDisplayRemarks(existing.notes));
       setShowAdvancedFields(Boolean(existing.due_cylinders || existing.returned_full_cylinders));
     } else {
       setEditingId(null);
@@ -467,7 +476,7 @@ export const StaffCylinderSettlement: React.FC = () => {
     setReturnedFullCylinders(item.returned_full_cylinders);
     setEmptyCylinders(item.empty_cylinders);
     setActualCashInput(item.actual_cash);
-    setNotes(item.notes || '');
+    setNotes(getDisplayRemarks(item.notes));
     setShowAdvancedFields(Boolean(item.due_cylinders || item.returned_full_cylinders));
     setIsFormOpen(true);
   };
@@ -519,14 +528,34 @@ export const StaffCylinderSettlement: React.FC = () => {
     setIsSaving(true);
     // Safe ID Resolution: If already settled for this date, reuse existing ID to prevent unique constraint conflicts
     let recordId = editingId;
+    const existing = settlements.find((s) => (editingId && s.id === editingId) || s.agent_id === selectedAgentId);
     if (!recordId) {
-      const existing = settlements.find((s) => s.agent_id === selectedAgentId);
       if (existing) {
         recordId = existing.id;
       } else {
         recordId = crypto.randomUUID();
       }
     }
+
+    // Preserve internal tags (__BGCLS_SCANNED_BILLS__ & __BGCLS_BPCL_REPORT__)
+    let internalTags = '';
+    if (existing?.notes) {
+      if (existing.notes.includes('__BGCLS_SCANNED_BILLS__')) {
+        let scPart = existing.notes.split('__BGCLS_SCANNED_BILLS__')[1];
+        if (scPart.includes('__BGCLS_BPCL_REPORT__')) {
+          scPart = scPart.split('__BGCLS_BPCL_REPORT__')[0];
+        }
+        internalTags += `\n__BGCLS_SCANNED_BILLS__${scPart.trim()}`;
+      }
+      if (existing.notes.includes('__BGCLS_BPCL_REPORT__')) {
+        let bpclPart = existing.notes.split('__BGCLS_BPCL_REPORT__')[1];
+        if (bpclPart.includes('__BGCLS_SCANNED_BILLS__')) {
+          bpclPart = bpclPart.split('__BGCLS_SCANNED_BILLS__')[0];
+        }
+        internalTags += `\n__BGCLS_BPCL_REPORT__${bpclPart.trim()}`;
+      }
+    }
+    const combinedNotes = `${notes.trim()}${internalTags}`.trim();
 
     const nowIso = new Date().toISOString();
 
@@ -550,7 +579,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       upi_amount: upiAmount,
       total_amount: totalCylinderSalesValue,
       status: calculatedStatus,
-      notes: notes.trim(),
+      notes: combinedNotes,
       created_at: nowIso,
       updated_at: nowIso,
       synced: false,
@@ -710,8 +739,9 @@ export const StaffCylinderSettlement: React.FC = () => {
     } else {
       msg += `⚠️ *Cash Status: EXCESS +₹${s.cash_difference.toLocaleString('en-IN')}*\n`;
     }
-    if (s.notes) {
-      msg += `📝 *Remarks:* ${s.notes}\n`;
+    const cleanRemarks = getDisplayRemarks(s.notes);
+    if (cleanRemarks) {
+      msg += `📝 *Remarks:* ${cleanRemarks}\n`;
     }
     msg += `--------------------------------\n`;
     msg += `Verified by Agency Godown Staff.`;
@@ -751,7 +781,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       'Empty Cylinders Returned': s.empty_cylinders,
       'Total Value (₹)': s.total_amount,
       'Status': s.status,
-      'Staff Notes': s.notes || '',
+      'Staff Notes': getDisplayRemarks(s.notes),
     }));
 
     exportRows.push({
@@ -1431,10 +1461,10 @@ export const StaffCylinderSettlement: React.FC = () => {
                               </div>
                             </div>
 
-                            {item.notes && (
+                            {getDisplayRemarks(item.notes) && (
                               <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 text-[11px]">
                                 <span className="text-slate-500 font-semibold block mb-0.5">Staff Remarks:</span>
-                                <p className="text-slate-200">{item.notes}</p>
+                                <p className="text-slate-200">{getDisplayRemarks(item.notes)}</p>
                               </div>
                             )}
 
@@ -1520,8 +1550,8 @@ export const StaffCylinderSettlement: React.FC = () => {
                             {/* Delivery Boy */}
                             <td className="py-3 px-4">
                               <div className="font-black text-white text-sm">{item.agent_name}</div>
-                              {item.notes && (
-                                <div className="text-[10px] text-slate-400 truncate max-w-xs">{item.notes}</div>
+                              {getDisplayRemarks(item.notes) && (
+                                <div className="text-[10px] text-slate-400 truncate max-w-xs">{getDisplayRemarks(item.notes)}</div>
                               )}
                             </td>
 

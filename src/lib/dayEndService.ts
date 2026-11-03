@@ -46,6 +46,31 @@ export interface DayEndReportSummary {
 }
 
 // Memory & local cache keys
+export const SCANNED_BILLS_TAG = '__BGCLS_SCANNED_BILLS__';
+export const BPCL_REPORT_TAG = '__BGCLS_BPCL_REPORT__';
+
+/**
+ * Safely parse scanned bills JSON from settlement notes.
+ * Robust against co-existence with BPCL reports, arbitrary text, and formatting.
+ */
+export function extractScannedBillsFromNotes(notes: string | null | undefined): DayEndEntry[] {
+  if (!notes || !notes.includes(SCANNED_BILLS_TAG)) return [];
+  try {
+    let raw = notes.split(SCANNED_BILLS_TAG)[1];
+    if (!raw) return [];
+    if (raw.includes(BPCL_REPORT_TAG)) {
+      raw = raw.split(BPCL_REPORT_TAG)[0];
+    }
+    const parsed = JSON.parse(raw.trim());
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('Failed to parse scanned bills from notes:', err);
+  }
+  return [];
+}
+
 const getDayEndStorageKey = (dateStr: string, agentNameOrId: string): string => {
   const cleanAgent = agentNameOrId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
   return `bgcls_day_end_cloud_cache_${dateStr}_${cleanAgent}`;
@@ -117,28 +142,42 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
     if (!setErr && settlements && settlements.length > 0) {
       settlements.forEach((s) => {
         const normName = (s.agent_name || '').trim().toUpperCase();
-        if (s.notes && s.notes.includes('__BGCLS_SCANNED_BILLS__')) {
-          try {
-            const rawJson = s.notes.split('__BGCLS_SCANNED_BILLS__')[1];
-            const parsed = JSON.parse(rawJson);
-            if (Array.isArray(parsed)) {
-              result[normName] = {
-                report_date: dateStr,
-                agent_id: s.agent_id,
-                agent_name: s.agent_name,
-                total_deliveries: parsed.length,
-                domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
-                composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
-                commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
-                empties_collected: parsed.filter((e: any) => e.empty_collected).length,
-                cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
-                upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
-                due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
-                entries: parsed,
-                updated_at: s.updated_at,
-              };
-            }
-          } catch (_) {}
+        const parsed = extractScannedBillsFromNotes(s.notes);
+        if (parsed.length > 0) {
+          result[normName] = {
+            report_date: dateStr,
+            agent_id: s.agent_id,
+            agent_name: s.agent_name,
+            total_deliveries: parsed.length,
+            domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
+            composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
+            commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
+            empties_collected: parsed.filter((e: any) => e.empty_collected).length,
+            cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
+            upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
+            due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
+            entries: parsed,
+            updated_at: s.updated_at,
+          };
+        } else if (s.cash_cylinders || s.upi_cylinders || s.due_cylinders) {
+          const total = (s.cash_cylinders || 0) + (s.upi_cylinders || 0) + (s.due_cylinders || 0);
+          if (total > 0 && !result[normName]) {
+            result[normName] = {
+              report_date: dateStr,
+              agent_id: s.agent_id,
+              agent_name: s.agent_name,
+              total_deliveries: total,
+              domestic_14kg: total,
+              composite_10kg: 0,
+              commercial_19kg: 0,
+              empties_collected: total,
+              cash_count: s.cash_cylinders || 0,
+              upi_count: s.upi_cylinders || 0,
+              due_count: s.due_cylinders || 0,
+              entries: [],
+              updated_at: s.updated_at,
+            };
+          }
         }
       });
     }
@@ -228,27 +267,41 @@ export async function fetchDayEndReportForAgent(
 
     const { data: sData } = await sQuery.maybeSingle();
     if (sData) {
-      if (sData.notes && sData.notes.includes('__BGCLS_SCANNED_BILLS__')) {
-        const rawJson = sData.notes.split('__BGCLS_SCANNED_BILLS__')[1];
-        const parsed = JSON.parse(rawJson);
-        if (Array.isArray(parsed)) {
-          return {
-            report_date: dateStr,
-            agent_id: sData.agent_id,
-            agent_name: sData.agent_name,
-            total_deliveries: parsed.length,
-            domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
-            composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
-            commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
-            empties_collected: parsed.filter((e: any) => e.empty_collected).length,
-            cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
-            upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
-            due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
-            entries: parsed,
-            updated_at: sData.updated_at,
-          };
-        }
+      const parsed = extractScannedBillsFromNotes(sData.notes);
+      if (parsed.length > 0) {
+        const summary: DayEndReportSummary = {
+          report_date: dateStr,
+          agent_id: sData.agent_id,
+          agent_name: sData.agent_name,
+          total_deliveries: parsed.length,
+          domestic_14kg: parsed.filter((e: any) => e.cylinder_type === '14.2KG_STD').length,
+          composite_10kg: parsed.filter((e: any) => e.cylinder_type === '10KG_LITE').length,
+          commercial_19kg: parsed.filter((e: any) => e.cylinder_type === '19KG_COMM').length,
+          empties_collected: parsed.filter((e: any) => e.empty_collected).length,
+          cash_count: parsed.filter((e: any) => e.payment_mode === 'CASH').length,
+          upi_count: parsed.filter((e: any) => e.payment_mode === 'UPI').length,
+          due_count: parsed.filter((e: any) => e.payment_mode === 'DUE').length,
+          entries: parsed,
+          updated_at: sData.updated_at,
+        };
+
+        try {
+          localStorage.setItem(getDayEndStorageKey(dateStr, normName), JSON.stringify(summary));
+        } catch (_) {}
+
+        return summary;
       }
+
+      // Check if local cache has valid scanned entries before falling back to 0
+      try {
+        const rawLocal = localStorage.getItem(getDayEndStorageKey(dateStr, normName));
+        if (rawLocal) {
+          const parsedLocal = JSON.parse(rawLocal);
+          if (Array.isArray(parsedLocal.entries) && parsedLocal.entries.length > 0) {
+            return parsedLocal;
+          }
+        }
+      } catch (_) {}
 
       // If settlement record exists in cloud with 0 bills, return explicit 0 deliveries
       return {
@@ -382,14 +435,18 @@ export async function saveDayEndReportToDatabase(payload: {
       // Retrieve any BPCL Report from existing notes OR local cache so it is NEVER lost!
       let bpclPart = '';
       if (existingSet && (existingSet.notes || '').includes('__BGCLS_BPCL_REPORT__')) {
-        bpclPart = '\n__BGCLS_BPCL_REPORT__' + (existingSet.notes || '').split('__BGCLS_BPCL_REPORT__')[1];
+        let afterBpcl = (existingSet.notes || '').split('__BGCLS_BPCL_REPORT__')[1];
+        if (afterBpcl.includes('__BGCLS_SCANNED_BILLS__')) {
+          afterBpcl = afterBpcl.split('__BGCLS_SCANNED_BILLS__')[0];
+        }
+        bpclPart = '\n__BGCLS_BPCL_REPORT__' + afterBpcl.trim();
       } else {
         // Fallback: check local storage cache for this agent and date
         try {
           const norm = payload.agent_name.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
           const rawLocal = localStorage.getItem(`bgcls_bpcl_report_${payload.report_date}_${norm}`);
           if (rawLocal) {
-            bpclPart = '\n__BGCLS_BPCL_REPORT__' + rawLocal;
+            bpclPart = '\n__BGCLS_BPCL_REPORT__' + rawLocal.trim();
           }
         } catch (_) {}
       }

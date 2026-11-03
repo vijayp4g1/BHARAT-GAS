@@ -44,8 +44,11 @@ const getStorageKey = (dateStr: string, agentName: string): string => {
 export function extractBpclReportFromNotes(notes: string | null | undefined): BpclReportData | null {
   if (!notes || !notes.includes(BPCL_TAG)) return null;
   try {
-    const raw = notes.split(BPCL_TAG)[1];
+    let raw = notes.split(BPCL_TAG)[1];
     if (!raw) return null;
+    if (raw.includes(SCANNED_TAG)) {
+      raw = raw.split(SCANNED_TAG)[0];
+    }
     const jsonStr = raw.trim();
     return JSON.parse(jsonStr);
   } catch (e) {
