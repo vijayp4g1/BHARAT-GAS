@@ -15,7 +15,8 @@ import {
   UserCheck,
   Loader2,
   ChevronDown,
-  Printer
+  Printer,
+  Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
@@ -38,6 +39,8 @@ interface BpclBillsViewProps {
   onAddBillToScanned?: (bill: BpclBillItem) => void;
   onReportUpdated?: (report: BpclReportData) => void;
   onOpenExportAllOnline?: () => void;
+  onConvertBillToOnline?: (consumerNo: string) => void;
+  onConvertAllOnlineConflicts?: () => void;
 }
 
 export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
@@ -50,6 +53,8 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   onAddBillToScanned,
   onReportUpdated,
   onOpenExportAllOnline,
+  onConvertBillToOnline,
+  onConvertAllOnlineConflicts,
 }) => {
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ONLINE'>('PENDING');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -132,6 +137,10 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   );
   const scannedAnySet = new Set(
     scannedEntries.map((e) => e.consumer_number.toLowerCase().trim())
+  );
+
+  const onlineCashConflicts = onlineBills.filter((b) =>
+    scannedCashSet.has(b.consumer_number.toLowerCase().trim())
   );
 
   const activeBills = activeTab === 'PENDING' ? pendingBills : onlineBills;
@@ -239,6 +248,11 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
 
       if (onReportUpdated) {
         onReportUpdated(updated);
+      }
+
+      // Automatically convert scanned bill payment from CASH to Online (UPI) if present in Day End
+      if (manualType === 'ONLINE' && onConvertBillToOnline) {
+        onConvertBillToOnline(cleanCons);
       }
 
       toast.success(`Added #${cleanCons} to ${manualType.toLowerCase()} bills!`);
@@ -483,6 +497,33 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
             </div>
           )}
 
+          {/* Online Bills Scanned as CASH Conflict Banner */}
+          {activeTab === 'ONLINE' && onlineCashConflicts.length > 0 && (
+            <div className="mb-2.5 p-2.5 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white rounded-2xl flex items-center justify-between gap-2 shadow-sm border border-rose-300">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0 animate-pulse" />
+                <div className="min-w-0 text-xs">
+                  <span className="font-black uppercase tracking-wide">
+                    {onlineCashConflicts.length} Online Bill{onlineCashConflicts.length > 1 ? 's' : ''} Scanned as CASH
+                  </span>
+                  <p className="text-[10px] text-rose-100 truncate">
+                    BPCL confirms these as PayNBook Online. Convert payment to Online (UPI)?
+                  </p>
+                </div>
+              </div>
+              {onConvertAllOnlineConflicts && (
+                <button
+                  type="button"
+                  onClick={onConvertAllOnlineConflicts}
+                  className="px-2.5 py-1 bg-white text-rose-900 hover:bg-emerald-50 hover:text-emerald-900 active:scale-95 rounded-xl font-black text-[10px] flex items-center gap-1 shadow-xs transition-all shrink-0"
+                >
+                  <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                  <span>Convert All ({onlineCashConflicts.length})</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Bills Cards List */}
           <div className="space-y-2 max-h-96 overflow-y-auto overscroll-contain pr-0.5">
         {filteredBills.length === 0 ? (
@@ -562,8 +603,15 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
 
                       {/* Scanned status indicator */}
                       {isScannedAny && (
-                        <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> Scanned
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 ${
+                            isScannedAsCash
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          }`}
+                        >
+                          <CheckCircle2 className={`w-2.5 h-2.5 ${isScannedAsCash ? 'text-amber-600' : 'text-emerald-600'}`} />
+                          <span>{isScannedAsCash ? 'Scanned (CASH)' : 'Scanned (Online)'}</span>
                         </span>
                       )}
                     </div>
@@ -591,11 +639,24 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     {/* Cross-check conflict alert for Online Bills:
                         If the bill was paid online via PayNBook, but the delivery boy collected CASH in day end! */}
                     {activeTab === 'ONLINE' && isScannedAsCash && (
-                      <div className="mt-1.5 p-1.5 bg-rose-100 border border-rose-300 rounded-lg text-[10px] font-bold text-rose-800 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0 animate-bounce" />
-                        <span>
-                          🚨 Conflict: Scanned as <b>CASH</b> in Day End, but BPCL says <b>PayNBook Online</b>!
-                        </span>
+                      <div className="mt-1.5 p-2 bg-gradient-to-r from-rose-50 to-amber-50 border border-rose-300 rounded-xl text-[10px] font-bold text-rose-900 flex items-center justify-between gap-2 flex-wrap shadow-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-bounce" />
+                          <span>
+                            🚨 Scanned as <b>CASH</b>, but BPCL says <b>PayNBook Online</b>!
+                          </span>
+                        </div>
+                        {onConvertBillToOnline && (
+                          <button
+                            type="button"
+                            onClick={() => onConvertBillToOnline(bill.consumer_number)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg font-black text-[10px] flex items-center gap-1 shadow-xs transition-all shrink-0 ml-auto"
+                            title="Convert payment from CASH to Online (UPI) in Day End"
+                          >
+                            <Zap className="w-3 h-3 text-amber-300 fill-amber-300" />
+                            <span>Convert to Online</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

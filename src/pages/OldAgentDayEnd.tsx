@@ -503,6 +503,62 @@ export const OldAgentDayEnd: React.FC = () => {
     toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
   };
 
+  // Handler to manually convert a single bill to Online (UPI)
+  const handleConvertBillToOnline = (consumerNo: string) => {
+    const norm = consumerNo.trim().toLowerCase();
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => e.consumer_number.trim().toLowerCase() === norm);
+      if (idx === -1) return prev;
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], payment_mode: 'UPI' };
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+    toast.success(`⚡ Converted #${consumerNo} to Online (UPI)!`);
+  };
+
+  // Handler to convert all conflicting bills to Online (UPI)
+  const handleConvertAllOnlineConflicts = () => {
+    if (!bpclReport?.online_bills) return;
+    const onlineSet = new Set(bpclReport.online_bills.map((b) => b.consumer_number.trim().toLowerCase()));
+    let count = 0;
+    setEntries((prev) => {
+      const updated = prev.map((e) => {
+        if (onlineSet.has(e.consumer_number.trim().toLowerCase()) && e.payment_mode === 'CASH') {
+          count++;
+          return { ...e, payment_mode: 'UPI' as const };
+        }
+        return e;
+      });
+      return updated;
+    });
+    if (count > 0) {
+      setHasUnsavedChanges(true);
+      toast.success(`⚡ Converted ${count} bill${count > 1 ? 's' : ''} to Online (UPI)!`);
+    }
+  };
+
+  // Auto-convert any CASH bill to Online (UPI) when online bills are present
+  useEffect(() => {
+    if (!bpclReport?.online_bills || bpclReport.online_bills.length === 0 || entries.length === 0) return;
+    const onlineSet = new Set(bpclReport.online_bills.map((b) => b.consumer_number.trim().toLowerCase()));
+    let count = 0;
+    const updated = entries.map((e) => {
+      if (onlineSet.has(e.consumer_number.trim().toLowerCase()) && e.payment_mode === 'CASH') {
+        count++;
+        return { ...e, payment_mode: 'UPI' as const };
+      }
+      return e;
+    });
+    if (count > 0) {
+      setEntries(updated);
+      setHasUnsavedChanges(true);
+      toast.success(`⚡ Automatically converted ${count} online bill${count > 1 ? 's' : ''} from CASH to Online (UPI)!`, {
+        id: 'auto-convert-online-old-toast',
+      });
+    }
+  }, [bpclReport, entries]);
+
   // Switch Active Delivery Boy
   const handleSwitchBoy = async (boy: DeliveryBoy) => {
     // Non-staff guard: Cannot switch to other delivery boys
@@ -1545,6 +1601,8 @@ export const OldAgentDayEnd: React.FC = () => {
           onOpenPasteModal={() => setIsBpclModalOpen(true)}
           onToggleCheckedDone={handleToggleCheckedDone}
           onAddBillToScanned={handleAddPendingBillToScanned}
+          onConvertBillToOnline={handleConvertBillToOnline}
+          onConvertAllOnlineConflicts={handleConvertAllOnlineConflicts}
           onReportUpdated={(newRep) => setBpclReport(newRep)}
         />
       </div>

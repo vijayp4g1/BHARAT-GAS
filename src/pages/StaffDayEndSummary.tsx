@@ -614,6 +614,90 @@ export const StaffDayEndSummary: React.FC = () => {
     toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
   };
 
+  // Helper to check if a consumer number is registered in BPCL online_bills for the active boy
+  const isBpclOnlineBill = useCallback((consumerNo: string): boolean => {
+    if (!activeBpclReport?.online_bills) return false;
+    const norm = consumerNo.trim().toLowerCase();
+    return activeBpclReport.online_bills.some((b) => b.consumer_number.trim().toLowerCase() === norm);
+  }, [activeBpclReport]);
+
+  // Auto-convert any scanned bills that are confirmed as BPCL Online (PayNBook) from CASH to UPI
+  const autoConvertOnlineBills = useCallback((
+    currentEntries: ItemEntry[],
+    report: BpclReportData | null
+  ): { updatedEntries: ItemEntry[]; convertedCount: number } => {
+    if (!report || !report.online_bills || report.online_bills.length === 0) {
+      return { updatedEntries: currentEntries, convertedCount: 0 };
+    }
+
+    const onlineConsSet = new Set(
+      report.online_bills.map((b) => b.consumer_number.trim().toLowerCase())
+    );
+
+    let convertedCount = 0;
+    const updatedEntries = currentEntries.map((entry) => {
+      const norm = entry.consumer_number.trim().toLowerCase();
+      if (onlineConsSet.has(norm) && entry.payment_mode === 'CASH') {
+        convertedCount++;
+        return {
+          ...entry,
+          payment_mode: 'UPI' as const,
+        };
+      }
+      return entry;
+    });
+
+    return { updatedEntries, convertedCount };
+  }, []);
+
+  // Handler to manually or automatically convert a single bill to Online (UPI)
+  const handleConvertBillToOnline = useCallback((consumerNo: string) => {
+    const norm = consumerNo.trim().toLowerCase();
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => e.consumer_number.trim().toLowerCase() === norm);
+      if (idx === -1) return prev;
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], payment_mode: 'UPI' };
+      if (selectedBoy) {
+        triggerAutoSave(updated, selectedBoy, reportDate);
+      }
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+    toast.success(`⚡ Converted #${consumerNo} to Online (UPI)!`);
+  }, [selectedBoy, reportDate, triggerAutoSave]);
+
+  // Handler to convert ALL online conflicts to Online (UPI)
+  const handleConvertAllOnlineConflicts = useCallback(() => {
+    if (!activeBpclReport || !selectedBoy) return;
+    const { updatedEntries, convertedCount } = autoConvertOnlineBills(entries, activeBpclReport);
+    if (convertedCount > 0) {
+      setEntries(updatedEntries);
+      setHasUnsavedChanges(true);
+      triggerAutoSave(updatedEntries, selectedBoy, reportDate);
+      toast.success(`⚡ Converted ${convertedCount} bill${convertedCount > 1 ? 's' : ''} to Online (UPI)!`);
+    } else {
+      toast('All online bills are already marked as Online (UPI)', { icon: 'ℹ️' });
+    }
+  }, [activeBpclReport, entries, selectedBoy, reportDate, triggerAutoSave, autoConvertOnlineBills]);
+
+  // Effect: Automatically convert any CASH bill to Online (UPI) whenever BPCL online_bills or entries change
+  useEffect(() => {
+    if (!activeBpclReport?.online_bills || activeBpclReport.online_bills.length === 0) return;
+    if (entries.length === 0 || !selectedBoy) return;
+
+    const { updatedEntries, convertedCount } = autoConvertOnlineBills(entries, activeBpclReport);
+    if (convertedCount > 0) {
+      setEntries(updatedEntries);
+      setHasUnsavedChanges(true);
+      triggerAutoSave(updatedEntries, selectedBoy, reportDate);
+      toast.success(
+        `⚡ Automatically converted ${convertedCount} online bill${convertedCount > 1 ? 's' : ''} to Online (UPI)!`,
+        { id: 'auto-convert-online-toast' }
+      );
+    }
+  }, [activeBpclReport, entries, selectedBoy, reportDate, triggerAutoSave, autoConvertOnlineBills]);
+
   // App Switch / Background / Pagehide Emergency Flush:
   // Ensures bills are immediately persisted when the user switches to WhatsApp or another app!
   useEffect(() => {
@@ -961,7 +1045,7 @@ export const StaffDayEndSummary: React.FC = () => {
       found: true,
       source: 'local',
       cylinder_type: consumer.cylinder_type === '10KG_LITE' ? '10KG_LITE' : (consumer.cylinder_type as string) === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
-      payment_mode: 'CASH',
+      payment_mode: isBpclOnlineBill(consumer.consumer_number) ? 'UPI' : 'CASH',
       empty_collected: true,
       scanned_at: new Date().toISOString(),
       duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -1020,7 +1104,7 @@ export const StaffDayEndSummary: React.FC = () => {
           found: true,
           source: 'local',
           cylinder_type: '14.2KG_STD',
-          payment_mode: 'CASH',
+          payment_mode: isBpclOnlineBill(match.consumer_number) ? 'UPI' : 'CASH',
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -1053,7 +1137,7 @@ export const StaffDayEndSummary: React.FC = () => {
         found: false,
         source: 'manual',
         cylinder_type: '14.2KG_STD',
-        payment_mode: 'CASH',
+        payment_mode: isBpclOnlineBill(cleanInput) ? 'UPI' : 'CASH',
         empty_collected: true,
         scanned_at: new Date().toISOString(),
         duplicate_of_agent: otherClaimantUnverified ? otherClaimantUnverified.agentName : undefined,
@@ -1111,7 +1195,7 @@ export const StaffDayEndSummary: React.FC = () => {
           found: true,
           source: 'local',
           cylinder_type: match.cylinder_type === '10KG_LITE' ? '10KG_LITE' : (match.cylinder_type as string) === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
-          payment_mode: 'CASH',
+          payment_mode: isBpclOnlineBill(match.consumer_number) ? 'UPI' : 'CASH',
           empty_collected: true,
           scanned_at: new Date().toISOString(),
         });
@@ -1134,7 +1218,7 @@ export const StaffDayEndSummary: React.FC = () => {
           found: false,
           source: 'manual',
           cylinder_type: '14.2KG_STD',
-          payment_mode: 'CASH',
+          payment_mode: isBpclOnlineBill(num) ? 'UPI' : 'CASH',
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -1216,7 +1300,7 @@ export const StaffDayEndSummary: React.FC = () => {
           found: scannedItem.found,
           source: 'camera',
           cylinder_type: '14.2KG_STD',
-          payment_mode: 'CASH',
+          payment_mode: isBpclOnlineBill(scannedItem.consumer_number) ? 'UPI' : 'CASH',
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -1959,6 +2043,8 @@ export const StaffDayEndSummary: React.FC = () => {
             onToggleCheckedDone={handleToggleActiveCheckedDone}
             onAddBillToScanned={handleAddPendingBillToScanned}
             onOpenExportAllOnline={() => setIsExportOnlineModalOpen(true)}
+            onConvertBillToOnline={handleConvertBillToOnline}
+            onConvertAllOnlineConflicts={handleConvertAllOnlineConflicts}
             onReportUpdated={(newRep) => {
               setActiveBpclReport(newRep);
               const norm = (newRep.agent_name || '').trim().toUpperCase();
