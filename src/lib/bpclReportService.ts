@@ -95,7 +95,7 @@ export function parseBpclReportText(rawText: string): {
 
   let currentSection: 'PENDING' | 'ONLINE' = 'PENDING';
   // Split on section headers
-  const blocks = rawText.split(/(?=\*?BPCL Status Report:|\*?Status Report:|\*?Delivery Pending\*?|\*?Online Bills\*?)/i);
+  const blocks = rawText.split(/(?=\*?BPCL Status Report:|\*?Status Report:|\*?Delivery Pending\*?|\*?Online Bills\*?|\*?PayNBook\*?|\*?Online Paid\*?)/i);
 
   for (const block of blocks) {
     const trimmed = block.trim();
@@ -103,7 +103,7 @@ export function parseBpclReportText(rawText: string): {
 
     if (/Delivery Pending/i.test(trimmed)) {
       currentSection = 'PENDING';
-    } else if (/Online Bills/i.test(trimmed) || /PayNBook/i.test(trimmed)) {
+    } else if (/Online Bills/i.test(trimmed) || /PayNBook/i.test(trimmed) || /Online Paid/i.test(trimmed)) {
       currentSection = 'ONLINE';
     }
 
@@ -134,10 +134,19 @@ export function parseBpclReportText(rawText: string): {
           type: currentSection,
         };
 
+        const isOnlinePaidStatus = /Online Paid|PayNBook/i.test(item.status || '') || /PayNBook|Online/i.test(item.refill_type || '');
+
         // Prevent duplicates in same list
         if (currentSection === 'PENDING') {
           if (!pendingBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
             pendingBills.push(item);
+          }
+          // If the pending bill is already paid online (PayNBook), it belongs in onlineBills as well!
+          if (isOnlinePaidStatus && !onlineBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
+            onlineBills.push({
+              ...item,
+              type: 'ONLINE',
+            });
           }
         } else {
           if (!onlineBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
