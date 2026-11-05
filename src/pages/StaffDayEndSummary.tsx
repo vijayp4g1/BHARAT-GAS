@@ -371,6 +371,11 @@ export const StaffDayEndSummary: React.FC = () => {
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeBoyIdentityRef = useRef<string | null>(selectedBoy ? selectedBoy.name.trim().toUpperCase() : null);
+  const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+  const activeTabRef = useRef<'ROSTER' | 'SCAN'>(activeTab);
+  activeTabRef.current = activeTab;
+  const sessionClientIdRef = useRef<string>(Math.random().toString(36).substring(2) + Date.now().toString(36));
 
   // Anti-Fraud / Double-Bill Scam Detection:
   // Map of consumer_number -> { agentName, date, consumerName } for all bills already submitted by OTHER delivery boys
@@ -578,9 +583,11 @@ export const StaffDayEndSummary: React.FC = () => {
     initialize();
   }, [isStaffOrManager]);
 
-  // 2. Fetch Roster Summaries & BPCL AI Reports for active date
-  const loadRosterData = useCallback(async (dateStr: string) => {
-    setIsLoadingRoster(true);
+  // 2. Fetch Roster Summaries & BPCL AI Reports for active date (isSilent = true updates data smoothly without flashing spinners)
+  const loadRosterData = useCallback(async (dateStr: string, isSilent: boolean = false) => {
+    if (!isSilent) {
+      setIsLoadingRoster(true);
+    }
     try {
       const [summaries, bpclMap] = await Promise.all([
         fetchAllDayEndReportsForDate(dateStr),
@@ -595,7 +602,9 @@ export const StaffDayEndSummary: React.FC = () => {
     } catch (err) {
       console.warn('Failed to load roster summaries:', err);
     } finally {
-      setIsLoadingRoster(false);
+      if (!isSilent) {
+        setIsLoadingRoster(false);
+      }
     }
   }, []);
 
@@ -629,6 +638,7 @@ export const StaffDayEndSummary: React.FC = () => {
           agent_name: boy.name,
           entries: updatedEntries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
@@ -938,6 +948,7 @@ export const StaffDayEndSummary: React.FC = () => {
           agent_name: boy.name,
           entries: currentEntries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         }).catch(() => {});
       }
     };
@@ -988,6 +999,7 @@ export const StaffDayEndSummary: React.FC = () => {
           agent_name: selectedBoy.name,
           entries: entries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
@@ -1009,43 +1021,74 @@ export const StaffDayEndSummary: React.FC = () => {
     }
   }, [reportDate, loadBillsForSelectedBoy]);
 
-  // 4. Real-time Multi-Staff Sync Listener
+  // 4. Real-time Multi-Staff Sync Listener (Silent & Debounced - No Screen Flickers, No Disruptive Toasts)
   useEffect(() => {
+    const mySessionId = sessionClientIdRef.current;
+    let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let bpclDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
     const channel = supabase.channel('bgcls_cash_memo_live_sync');
     channel
       .on('broadcast', { event: 'cash_memos_updated' }, (payload) => {
-        if (payload?.payload?.report_date === reportDate) {
-          loadRosterData(reportDate);
+        const data = payload?.payload;
+        if (!data || data.report_date !== reportDate) return;
 
-          if (selectedBoy && payload.payload.agent_name?.trim().toUpperCase() === selectedBoy.name.trim().toUpperCase()) {
-            loadBillsForSelectedBoy(selectedBoy, reportDate);
-            toast(`Bills for ${selectedBoy.name} were updated by another staff member`, { icon: '🔄' });
-          }
+        // Skip our own broadcasts
+        if (data.sender_session_id && data.sender_session_id === mySessionId) {
+          return;
         }
+
+        // Debounce background roster sync so rapid scanning by other staff
+        // updates data smoothly in one batch instead of firing 10 immediate reloads
+        if (syncDebounceTimer) {
+          clearTimeout(syncDebounceTimer);
+        }
+
+        syncDebounceTimer = setTimeout(() => {
+          // Silently refresh roster summaries in-place (no loading spinner, no screen flicker)
+          loadRosterData(reportDate, true);
+
+          // If current user is in SCAN view for this delivery boy, sync bills silently without clobbering unsaved edits
+          if (
+            activeTabRef.current === 'SCAN' &&
+            selectedBoyRef.current &&
+            data.agent_name?.trim().toUpperCase() === selectedBoyRef.current.name.trim().toUpperCase()
+          ) {
+            if (!hasUnsavedChangesRef.current) {
+              loadBillsForSelectedBoy(selectedBoyRef.current, reportDate);
+            }
+          }
+        }, 1500);
       })
       .subscribe();
 
-    // Listen to realtime BPCL AI Status Report updates from other devices
+    // Listen to realtime BPCL AI Status Report updates from other devices (Silent)
     const bpclChannel = supabase.channel('bgcls_bpcl_channel');
     bpclChannel
       .on('broadcast', { event: 'bpcl_report_updated' }, (payload) => {
         if (payload?.payload?.dateStr === reportDate) {
-          fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
-            setBpclReportsMap(updatedMap);
-            if (selectedBoyRef.current) {
-              const norm = selectedBoyRef.current.name.trim().toUpperCase();
-              if (updatedMap[norm]) {
-                setActiveBpclReport(updatedMap[norm]);
+          if (bpclDebounceTimer) {
+            clearTimeout(bpclDebounceTimer);
+          }
+          bpclDebounceTimer = setTimeout(() => {
+            fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
+              setBpclReportsMap(updatedMap);
+              if (selectedBoyRef.current) {
+                const norm = selectedBoyRef.current.name.trim().toUpperCase();
+                if (updatedMap[norm]) {
+                  setActiveBpclReport(updatedMap[norm]);
+                }
               }
-            }
-          });
+            });
+          }, 1500);
         }
       })
       .subscribe();
 
     const handleLocalUpdate = (e: any) => {
       if (e?.detail?.report_date === reportDate) {
-        loadRosterData(reportDate);
+        // Silently update roster summaries without unmounting the list or showing a spinner
+        loadRosterData(reportDate, true);
       }
     };
     window.addEventListener('bgcls-day-end-updated', handleLocalUpdate);
@@ -1066,12 +1109,14 @@ export const StaffDayEndSummary: React.FC = () => {
     window.addEventListener('bgcls-bpcl-updated', handleBpclLocalUpdate);
 
     return () => {
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      if (bpclDebounceTimer) clearTimeout(bpclDebounceTimer);
       supabase.removeChannel(channel);
       supabase.removeChannel(bpclChannel);
       window.removeEventListener('bgcls-day-end-updated', handleLocalUpdate);
       window.removeEventListener('bgcls-bpcl-updated', handleBpclLocalUpdate);
     };
-  }, [reportDate, selectedBoy, loadRosterData, loadBillsForSelectedBoy]);
+  }, [reportDate, loadRosterData, loadBillsForSelectedBoy]);
 
   // 5. KPIs & Statistics Calculation
   const kpis = useMemo(() => {
@@ -1134,6 +1179,7 @@ export const StaffDayEndSummary: React.FC = () => {
         entries,
         scanned_by_staff: staffName,
         supervisor_phone: supervisorPhone,
+        sender_session_id: sessionClientIdRef.current,
       });
 
       const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1573,6 +1619,7 @@ export const StaffDayEndSummary: React.FC = () => {
           entries: updated,
           scanned_by_staff: staffName,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
         const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSavedTime(nowFormatted);
@@ -2754,6 +2801,7 @@ export const StaffDayEndSummary: React.FC = () => {
                               entries: [],
                               scanned_by_staff: staffName,
                               supervisor_phone: supervisorPhone,
+                              sender_session_id: sessionClientIdRef.current,
                             });
                             const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                             setLastSavedTime(nowFormatted);

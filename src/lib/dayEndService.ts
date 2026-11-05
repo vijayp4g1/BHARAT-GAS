@@ -343,6 +343,7 @@ export async function saveDayEndReportToDatabase(payload: {
   entries: DayEndEntry[];
   scanned_by_staff?: string;
   supervisor_phone?: string;
+  sender_session_id?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const normName = payload.agent_name.trim().toUpperCase();
   const rawCsv = payload.entries.map((e) => e.consumer_number).join(',');
@@ -527,6 +528,7 @@ export async function saveDayEndReportToDatabase(payload: {
         agent_name: payload.agent_name,
         agent_id: payload.agent_id,
         total_deliveries: payload.entries.length,
+        sender_session_id: payload.sender_session_id,
         updated_at: nowIso,
       },
     });
