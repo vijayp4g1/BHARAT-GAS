@@ -169,6 +169,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
   const [failedScanList, setFailedScanList] = useState<FailedScanItem[]>([]);
   const [showFailedList, setShowFailedList] = useState<boolean>(false);
+  const [showSessionList, setShowSessionList] = useState<boolean>(false);
   const [activeScanFailAlert, setActiveScanFailAlert] = useState<ActiveScanFailAlert | null>(null);
   const manualInputRef = useRef<HTMLInputElement | null>(null);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
@@ -770,49 +771,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col justify-between p-3 font-sans">
-      {/* Top Header Bar */}
-      <div className="flex flex-col gap-2 z-10 bg-slate-900/90 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white shadow-xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400">
-              <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold tracking-tight flex items-center gap-1.5">
-                <span>Gemini AI Receipt Scanner</span>
-                <span className="text-[9px] bg-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded uppercase">
-                  1-Tap Snap
-                </span>
-              </h2>
-              <p className="text-[10px] text-slate-300">Targeting Cons No: & customer name</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={toggleTorch}
-              className={`p-2.5 rounded-xl border transition-all ${
-                torchOn ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-white/10 text-white border-white/10'
-              }`}
-              title="Toggle Flashlight"
-            >
-              <Flashlight className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10 transition-all"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Viewfinder Video Stream Container */}
+    <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between overflow-hidden font-sans select-none">
+      {/* 1. FULLSCREEN VIDEO STREAM VIEWFINDER */}
       <div 
         onClick={triggerFocus}
-        className="relative flex-1 my-2 rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center cursor-pointer"
+        className="absolute inset-0 w-full h-full bg-black flex items-center justify-center cursor-pointer overflow-hidden"
         title="Tap to focus"
       >
         <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
@@ -820,20 +783,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
         {/* Shutter Flash Animation */}
         {isShutterFlash && (
-          <div className="absolute inset-0 bg-white/60 pointer-events-none z-30 transition-opacity duration-150" />
+          <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150" />
         )}
 
-        {/* Target Box Guides & Sweeping Laser Animation */}
+        {/* Target Box Guides: Formatted for Bharatgas Cash Memos */}
         <div
-          className={`absolute inset-x-4 top-6 bottom-24 border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-4 transition-all duration-300 ${
+          className={`absolute top-[12%] bottom-[25%] inset-x-5 sm:inset-x-12 max-w-sm mx-auto border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-3.5 sm:p-4 transition-all duration-300 z-10 ${
             isSuccessFlash
               ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_80px_rgba(16,185,129,0.5)]'
               : 'border-dashed border-amber-400/80 shadow-[0_0_60px_rgba(245,158,11,0.25)]'
           }`}
         >
           <div className="flex justify-between">
-            <div className="w-7 h-7 border-t-4 border-l-4 border-amber-400 rounded-tl-xl" />
-            <div className="w-7 h-7 border-t-4 border-r-4 border-amber-400 rounded-tr-xl" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 border-t-4 border-l-4 border-amber-400 rounded-tl-xl" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 border-t-4 border-r-4 border-amber-400 rounded-tr-xl" />
           </div>
 
           {/* Sweeping Laser Animation Line */}
@@ -842,7 +805,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
 
           {/* Central Instruction Badge */}
-          <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-xs py-2 px-4 rounded-full mx-auto border border-amber-400/40 shadow-lg flex items-center gap-1.5">
+          <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-[11px] sm:text-xs py-1.5 px-3 sm:py-2 sm:px-4 rounded-full mx-auto border border-amber-400/40 shadow-lg flex items-center gap-1.5 pointer-events-none">
             {isProcessing ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
@@ -851,340 +814,378 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             ) : (
               <>
                 <Camera className="w-3.5 h-3.5 text-amber-400" />
-                <span>Align bill in box & tap 1-TAP SNAP</span>
+                <span>Align receipt & tap Snap</span>
               </>
             )}
           </div>
 
           <div className="flex justify-between">
-            <div className="w-7 h-7 border-b-4 border-l-4 border-amber-400 rounded-bl-xl" />
-            <div className="w-7 h-7 border-b-4 border-r-4 border-amber-400 rounded-br-xl" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 border-b-4 border-l-4 border-amber-400 rounded-bl-xl" />
+            <div className="w-6 h-6 sm:w-7 sm:h-7 border-b-4 border-r-4 border-amber-400 rounded-br-xl" />
+          </div>
+        </div>
+      </div>
+
+      {/* 2. FLOATING TOP HEADER OVERLAY */}
+      <div className="relative z-30 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white">
+        <div className="flex items-center justify-between max-w-lg mx-auto">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-sm font-bold tracking-tight flex items-center gap-1.5 truncate">
+                <span>Gemini AI Scanner</span>
+                {scannedSessionList.length > 0 && (
+                  <span className="text-[10px] bg-emerald-500/30 text-emerald-300 border border-emerald-400/40 font-black px-1.5 py-0.2 rounded-full">
+                    {scannedSessionList.length} Added
+                  </span>
+                )}
+              </h2>
+              <p className="text-[10px] text-slate-300 truncate">
+                {agentName ? `Scanning for: ${agentName}` : 'Aim at Cons No & Name'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={toggleTorch}
+              className={`p-2 sm:p-2.5 rounded-xl border transition-all active:scale-95 ${
+                torchOn ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-white/10 text-white border-white/15'
+              }`}
+              title="Toggle Flashlight"
+            >
+              <Flashlight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 sm:p-2.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white border border-white/15 transition-all"
+              title="Close Scanner"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* PROMINENT DIRECT SCAN FAILURE MODAL OVERLAY (STOPS USER IMMEDIATELY ON FAILED BILL) */}
-        {activeScanFailAlert && (
-          <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-gradient-to-b from-slate-900 via-rose-950/50 to-slate-900 border-2 border-rose-500 rounded-3xl p-4 w-full max-w-sm text-white shadow-[0_0_60px_rgba(244,63,94,0.4)] flex flex-col gap-3">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-rose-500/30 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-rose-400 shrink-0">
-                    <AlertCircle className="w-5 h-5 text-rose-400 animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-rose-300 uppercase tracking-wide">
-                      {activeScanFailAlert.type === 'NAME_MISMATCH'
-                        ? '⚠️ Name Mismatch!'
-                        : activeScanFailAlert.type === 'NOT_FOUND'
-                        ? '❌ Not In Database!'
-                        : activeScanFailAlert.type === 'NOT_DETECTED'
-                        ? '🔍 Cons No Not Detected!'
-                        : '⚠️ Bill Not Added!'}
-                    </h3>
-                    <p className="text-[10px] text-slate-300 font-medium">Stop on this bill & choose action</p>
-                  </div>
+        {/* Floating Notification Alerts */}
+        <div className="max-w-lg mx-auto mt-1 space-y-1">
+          {duplicateScamNotice && (
+            <div className="bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white p-2.5 rounded-2xl shadow-2xl border-2 border-rose-300 flex items-start gap-2 animate-in zoom-in-95 duration-200">
+              <span className="text-base leading-none">🚨</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-wider bg-black/40 px-1.5 py-0.2 rounded-full text-rose-200">
+                    DOUBLE BILL SCAM
+                  </span>
+                  <button type="button" onClick={() => setDuplicateScamNotice(null)} className="text-white/80 p-0.5">
+                    <X size={14} />
+                  </button>
                 </div>
+                <p className="text-xs font-black truncate mt-0.5">
+                  #{duplicateScamNotice.consumer_number} — {duplicateScamNotice.consumer_name}
+                </p>
+                <p className="text-[10px] text-amber-200 font-bold">
+                  ALREADY GIVEN BY: <span className="underline uppercase text-white font-black">{duplicateScamNotice.agentName}</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {alreadyAddedNotice && (
+            <div className="bg-amber-500 text-slate-950 p-2 rounded-xl shadow-lg flex items-center gap-2 border border-amber-300 font-bold text-xs animate-pulse">
+              <AlertCircle className="w-4 h-4 shrink-0 text-slate-950" />
+              <span className="truncate">{alreadyAddedNotice}</span>
+            </div>
+          )}
+
+          {!isOnline && !alreadyAddedNotice && (
+            <div className="bg-amber-500 text-slate-950 p-2 rounded-xl shadow-lg flex items-center gap-2 border border-amber-300 font-bold text-xs animate-pulse">
+              <WifiOff className="w-4 h-4 shrink-0 text-slate-950" />
+              <span className="truncate">Offline mode: Type Cons No below</span>
+            </div>
+          )}
+
+          {lastScanned && !alreadyAddedNotice && !duplicateScamNotice && (
+            <div className="bg-emerald-600/95 text-white p-2 rounded-xl shadow-lg flex items-center gap-2 border border-emerald-400/40">
+              <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
+              <span className="text-xs font-black truncate uppercase">ADDED: #{lastScanned}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3. DIRECT SCAN FAILURE MODAL OVERLAY (SCROLLABLE & FULLY VISIBLE ON ANY MOBILE) */}
+      {activeScanFailAlert && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in zoom-in-95 duration-150 overflow-y-auto">
+          <div className="bg-gradient-to-b from-slate-900 via-rose-950/50 to-slate-900 border-2 border-rose-500 rounded-3xl p-4 w-full max-w-sm text-white shadow-[0_0_60px_rgba(244,63,94,0.4)] flex flex-col gap-3 max-h-[88vh] overflow-y-auto my-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-rose-500/30 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertCircle className="w-5 h-5 text-rose-400 animate-bounce" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-rose-300 uppercase tracking-wide">
+                    {activeScanFailAlert.type === 'NAME_MISMATCH'
+                      ? '⚠️ Name Mismatch!'
+                      : activeScanFailAlert.type === 'NOT_FOUND'
+                      ? '❌ Not In Database!'
+                      : activeScanFailAlert.type === 'NOT_DETECTED'
+                      ? '🔍 Cons No Not Detected!'
+                      : '⚠️ Bill Not Added!'}
+                  </h3>
+                  <p className="text-[10px] text-slate-300 font-medium">Choose action for this bill</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveScanFailAlert(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Bill Details Box */}
+            <div className="bg-slate-950/80 rounded-2xl p-3 border border-rose-500/30 flex flex-col gap-2">
+              {activeScanFailAlert.consumer_number && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Scanned Number</span>
+                  <span className="font-mono text-base font-black text-amber-400">
+                    #{activeScanFailAlert.consumer_number}
+                  </span>
+                </div>
+              )}
+              {activeScanFailAlert.consumer_name && (
+                <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">Receipt Name</span>
+                  <span className="text-xs font-bold text-white text-right truncate">
+                    {activeScanFailAlert.consumer_name}
+                  </span>
+                </div>
+              )}
+              {activeScanFailAlert.db_consumer_name && (
+                <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
+                  <span className="text-[10px] uppercase font-bold text-rose-400 shrink-0">Database Name</span>
+                  <span className="text-xs font-bold text-rose-200 text-right truncate">
+                    {activeScanFailAlert.db_consumer_name}
+                  </span>
+                </div>
+              )}
+
+              {/* Reason Explanation */}
+              <div className="bg-rose-950/40 rounded-xl p-2 border border-rose-500/20 text-[11px] text-rose-200 font-semibold leading-relaxed mt-0.5">
+                {activeScanFailAlert.reason}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2 pt-0.5">
+              {activeScanFailAlert.consumer_number && (
+                <button
+                  type="button"
+                  onClick={() => handleForceAdd()}
+                  className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-2.5 sm:py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Force Add (#{activeScanFailAlert.consumer_number})</span>
+                </button>
+              )}
+
+              <div className="flex gap-2">
+                {activeScanFailAlert.consumer_number && (
+                  <button
+                    type="button"
+                    onClick={handleEditNumber}
+                    className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2 px-2 rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition-all shadow"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Edit</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRetrySnap}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-white font-bold py-2 px-2 rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Retry</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveScanFailAlert(null)}
-                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+                  className="bg-white/10 hover:bg-white/20 text-slate-300 font-semibold py-2 px-3 rounded-xl text-xs transition-all shrink-0"
                 >
-                  <X className="w-4 h-4" />
+                  Skip
                 </button>
               </div>
-
-              {/* Bill Details Box */}
-              <div className="bg-slate-950/80 rounded-2xl p-3 border border-rose-500/30 flex flex-col gap-2">
-                {activeScanFailAlert.consumer_number && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase font-bold text-slate-400">Scanned Number</span>
-                    <span className="font-mono text-base font-black text-amber-400">
-                      #{activeScanFailAlert.consumer_number}
-                    </span>
-                  </div>
-                )}
-                {activeScanFailAlert.consumer_name && (
-                  <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">Receipt Name</span>
-                    <span className="text-xs font-bold text-white text-right truncate">
-                      {activeScanFailAlert.consumer_name}
-                    </span>
-                  </div>
-                )}
-                {activeScanFailAlert.db_consumer_name && (
-                  <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
-                    <span className="text-[10px] uppercase font-bold text-rose-400 shrink-0">Database Name</span>
-                    <span className="text-xs font-bold text-rose-200 text-right truncate">
-                      {activeScanFailAlert.db_consumer_name}
-                    </span>
-                  </div>
-                )}
-
-                {/* Reason Explanation */}
-                <div className="bg-rose-950/40 rounded-xl p-2 border border-rose-500/20 text-[11px] text-rose-200 font-semibold leading-relaxed mt-1">
-                  {activeScanFailAlert.reason}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col gap-2 pt-1">
-                {activeScanFailAlert.consumer_number && (
-                  <button
-                    type="button"
-                    onClick={() => handleForceAdd()}
-                    className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>Force Add This Bill (#{activeScanFailAlert.consumer_number})</span>
-                  </button>
-                )}
-
-                <div className="flex gap-2">
-                  {activeScanFailAlert.consumer_number && (
-                    <button
-                      type="button"
-                      onClick={handleEditNumber}
-                      className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Edit Digits</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRetrySnap}
-                    className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-white font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Retry Snap</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveScanFailAlert(null)}
-                    className="bg-white/10 hover:bg-white/20 text-slate-300 font-semibold py-2.5 px-3 rounded-xl text-xs transition-all shrink-0"
-                  >
-                    Skip
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Double-Bill Scam Alert Notification */}
-        {duplicateScamNotice && (
-          <div className="absolute top-3 left-3 right-3 bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-rose-300 flex items-start gap-2.5 z-40 animate-in zoom-in-95 duration-200">
-            <div className="w-8 h-8 rounded-xl bg-white text-rose-600 flex items-center justify-center shrink-0 font-black shadow-md mt-0.5">
-              ⚠️
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded-full text-rose-200">
-                  Double Bill Scam Detected!
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setDuplicateScamNotice(null)}
-                  className="text-white/80 hover:text-white p-0.5"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <p className="text-xs font-black mt-1 text-white truncate">
-                #{duplicateScamNotice.consumer_number} — {duplicateScamNotice.consumer_name}
-              </p>
-              <div className="mt-1.5 p-2 bg-black/35 rounded-xl border border-white/20 text-xs font-bold text-amber-200">
-                🚨 ALREADY GIVEN BY:{' '}
-                <span className="text-white font-black underline uppercase text-sm">
-                  {duplicateScamNotice.agentName}
-                </span>{' '}
-                {duplicateScamNotice.date ? `(${duplicateScamNotice.date})` : 'today'}
-              </div>
-            </div>
-          </div>
-        )}
+      {/* 4. FLOATING BOTTOM CONTROL DECK OVERLAY */}
+      <div className="relative z-30 mt-auto bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent p-3 pt-4 text-white">
+        <div className="max-w-lg mx-auto flex flex-col gap-2.5">
+          {/* Main Shutter & Photo Snap Button Row */}
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
 
-        {/* Already Added Warning Notification */}
-        {alreadyAddedNotice && (
-          <div className="absolute top-4 left-4 right-4 bg-amber-500 text-slate-950 p-3 rounded-2xl shadow-xl flex items-center gap-2 border border-amber-300 font-bold text-xs z-30 animate-pulse">
-            <AlertCircle className="w-5 h-5 shrink-0 text-slate-950" />
-            <span className="truncate">{alreadyAddedNotice}</span>
-          </div>
-        )}
-
-        {/* Offline Warning Notification Banner */}
-        {!isOnline && !alreadyAddedNotice && (
-          <div className="absolute top-4 left-4 right-4 bg-amber-500 text-slate-950 p-2.5 rounded-2xl shadow-xl flex items-center gap-2.5 border border-amber-300 font-bold text-xs z-30 animate-pulse">
-            <WifiOff className="w-4 h-4 shrink-0 text-slate-950" />
-            <div className="min-w-0">
-              <p className="leading-tight text-[11px] font-black uppercase">Offline Mode</p>
-              <p className="text-[10px] text-slate-900 font-semibold leading-tight">AI Snap requires internet. Enter Cons No in input below.</p>
-            </div>
-          </div>
-        )}
-
-        {/* Live Detected Success Notification Badge */}
-        {lastScanned && !alreadyAddedNotice && (
-          <div className="absolute top-4 left-4 right-4 bg-emerald-600 text-white p-3 rounded-2xl shadow-xl flex items-center gap-2.5 border border-emerald-400/40 z-20">
-            <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-black truncate uppercase tracking-tight">ADDED: #{lastScanned}</p>
-              <p className="text-[10px] text-emerald-100 font-semibold">Matched in master database</p>
-            </div>
-          </div>
-        )}
-
-        {/* Dual Snap Controls: Live 1-Tap Snap & Native Camera / Upload */}
-        <div className="absolute bottom-3 inset-x-0 flex flex-col gap-2 z-20 px-3">
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          <div className="flex items-center gap-2 max-w-sm mx-auto w-full">
+            {/* BIG 1-TAP AI SNAP PRIMARY SHUTTER BUTTON */}
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                performScan();
-              }}
+              onClick={performScan}
               disabled={isProcessing || !isOnline}
-              className={`flex-1 font-black py-3.5 px-4 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-2 border text-xs sm:text-sm uppercase tracking-wide disabled:opacity-60 ${
+              className={`flex-1 font-black py-3.5 px-4 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-2 border text-sm uppercase tracking-wide disabled:opacity-60 ${
                 !isOnline
                   ? 'bg-slate-800 text-amber-300 border-amber-500/40 shadow-none cursor-not-allowed'
-                  : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-slate-950 border-amber-300/80 shadow-orange-500/30'
+                  : 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-600 text-slate-950 border-amber-300 shadow-orange-500/30'
               }`}
             >
               {isProcessing ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" /> Reading...
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" />
+                  <span>Reading...</span>
                 </>
               ) : !isOnline ? (
                 <>
-                  <WifiOff className="w-4 h-4 text-amber-400" /> Offline (Use Input Below)
+                  <WifiOff className="w-5 h-5 text-amber-400" />
+                  <span>Offline (Type Below)</span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4 text-slate-950" /> 1-TAP AI SNAP
+                  <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
+                  <span>1-TAP AI SNAP</span>
                 </>
               )}
             </button>
 
+            {/* Photo / Gallery Upload Button */}
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
+              onClick={() => fileInputRef.current?.click()}
               disabled={isProcessing}
-              className="bg-slate-900/95 hover:bg-slate-800 text-white font-bold py-3.5 px-3.5 rounded-2xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-white/20 text-xs disabled:opacity-50 shrink-0"
+              className="bg-slate-900/90 hover:bg-slate-800 text-white font-bold py-3.5 px-3.5 rounded-2xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-white/20 text-xs disabled:opacity-50 shrink-0"
               title="Snap with phone camera or pick from gallery"
             >
               <Camera className="w-4 h-4 text-amber-400" />
               <span className="text-[11px] font-semibold">Photo</span>
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Failed Scans Tray — persistent list of bills rejected this session */}
-      {failedScanList.length > 0 && (
-        <div className="bg-rose-950/90 backdrop-blur-md border border-rose-500/40 p-2 rounded-2xl mb-2 text-white">
-          <button
-            type="button"
-            onClick={() => setShowFailedList((v) => !v)}
-            className="flex items-center justify-between w-full text-[10px] text-rose-300 px-1 mb-1 font-semibold"
-          >
-            <span className="flex items-center gap-1.5">
-              <AlertCircle className="w-3 h-3 text-rose-400" />
-              {failedScanList.length} Bill{failedScanList.length > 1 ? 's' : ''} NOT Added — Tap to review
-            </span>
-            <span className="text-rose-400 font-bold uppercase tracking-wide">{showFailedList ? 'Hide ▲' : 'Show ▼'}</span>
-          </button>
-          {showFailedList && (
-            <div className="flex flex-col gap-1 mt-1 max-h-28 overflow-y-auto pr-1">
+          {/* Quick Expandable Session Status Bar */}
+          {(scannedSessionList.length > 0 || failedScanList.length > 0) && (
+            <div className="flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
+              <div className="flex items-center gap-2">
+                {scannedSessionList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSessionList((v) => !v);
+                      setShowFailedList(false);
+                    }}
+                    className="text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{scannedSessionList.length} Added</span>
+                  </button>
+                )}
+                {failedScanList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFailedList((v) => !v);
+                      setShowSessionList(false);
+                    }}
+                    className="text-rose-400 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>{failedScanList.length} Failed</span>
+                  </button>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
+                {statusText}
+              </span>
+            </div>
+          )}
+
+          {/* Collapsible Session Added Bills Sheet */}
+          {showSessionList && scannedSessionList.length > 0 && (
+            <div className="bg-slate-900/95 border border-white/15 p-2 rounded-2xl max-h-28 overflow-x-auto flex gap-1.5">
+              {scannedSessionList.map((item, idx) => (
+                <div
+                  key={`${item.consumer_number}-${idx}`}
+                  className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1 text-xs shrink-0 flex items-center gap-1.5"
+                >
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  <span className="font-mono font-bold text-amber-300">#{item.consumer_number}</span>
+                  <span className="text-[11px] text-slate-300 max-w-[100px] truncate">{item.consumer_name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Collapsible Failed Scans Sheet */}
+          {showFailedList && failedScanList.length > 0 && (
+            <div className="bg-rose-950/95 border border-rose-500/40 p-2 rounded-2xl max-h-28 overflow-y-auto flex flex-col gap-1">
               {failedScanList.map((item, idx) => (
                 <div
                   key={`fail-${item.raw_number}-${idx}`}
-                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1.5 flex items-start gap-2"
+                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs"
                 >
-                  <AlertCircle className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1">
-                    <span className="font-mono font-bold text-rose-200 text-xs">#{item.raw_number}</span>
+                    <span className="font-mono font-bold text-rose-200">#{item.raw_number}</span>
                     <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Session Scanned Receipts Horizontal Tray */}
-      {scannedSessionList.length > 0 && (
-        <div className="bg-slate-900/90 backdrop-blur-md border border-white/10 p-2 rounded-2xl mb-2 text-white">
-          <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 mb-1 font-semibold">
-            <span>Bills Added This Session ({scannedSessionList.length}):</span>
-            <span className="text-amber-400 font-bold">Ready for Day End</span>
-          </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-            {scannedSessionList.map((item, idx) => (
-              <div
-                key={`${item.consumer_number}-${idx}`}
-                className="bg-slate-800 border border-white/10 rounded-xl px-2.5 py-1 text-xs shrink-0 flex items-center gap-1.5"
-              >
-                <Check className="w-3 h-3 text-emerald-400" />
-                <span className="font-mono font-bold text-amber-300">#{item.consumer_number}</span>
-                <span className="text-[11px] text-slate-300 max-w-[120px] truncate">{item.consumer_name}</span>
+          {/* Manual Key-in & Finish Session Row */}
+          <div className="flex items-center gap-2">
+            <form onSubmit={handleManualAdd} className="flex-1 flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  ref={manualInputRef}
+                  type="text"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  placeholder="Or type Cons No (e.g. 1842)..."
+                  className="w-full bg-slate-900/90 border border-white/20 rounded-xl pl-8 pr-2.5 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-400 font-medium"
+                />
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+              <button
+                type="submit"
+                disabled={!manualInput.trim() || isProcessing}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1 transition-all active:scale-95 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Add</span>
+              </button>
+            </form>
 
-      {/* Bottom Bar: Manual Key-In & Finish Session */}
-      <div className="flex flex-col gap-2 bg-slate-900/90 backdrop-blur-md border border-white/10 p-3 rounded-2xl text-white">
-        <form onSubmit={handleManualAdd} className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-            <input
-              ref={manualInputRef}
-              type="text"
-              value={manualInput}
-              onChange={(e) => setManualInput(e.target.value)}
-              placeholder="Or type Cons No (e.g. 1842) directly..."
-              className="w-full bg-slate-800/90 border border-white/15 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-400"
-            />
+            <button
+              type="button"
+              onClick={onClose}
+              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all shrink-0 whitespace-nowrap"
+            >
+              Done ({scannedSessionList.length})
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={!manualInput.trim() || isProcessing}
-            className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1 transition-all shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" /> Add
-          </button>
-        </form>
-
-        <div className="flex items-center justify-between pt-1 border-t border-white/10">
-          <div className="min-w-0 pr-2">
-            <span className="text-[11px] font-bold text-slate-300 block truncate">{statusText}</span>
-            <span className="text-[10px] font-semibold">
-              <span className="text-amber-400">{scannedSessionList.length} added</span>
-              {failedScanList.length > 0 && (
-                <span className="text-rose-400 ml-1.5">• {failedScanList.length} failed</span>
-              )}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg shadow-emerald-600/30 active:scale-95 transition-all shrink-0"
-          >
-            Done ({scannedSessionList.length}{failedScanList.length > 0 ? `, ${failedScanList.length} ⚠️` : ''})
-          </button>
         </div>
       </div>
     </div>
