@@ -51,6 +51,14 @@ interface FailedScanItem {
   timestamp: number;
 }
 
+export interface ActiveScanFailAlert {
+  type: 'NOT_FOUND' | 'NAME_MISMATCH' | 'TOO_LONG' | 'BLACKLISTED' | 'NOT_DETECTED';
+  consumer_number?: string;
+  consumer_name?: string;
+  db_consumer_name?: string;
+  reason: string;
+}
+
 const DISTRIBUTOR_BLACKLIST = new Set([
   '169624',
   '23092200',
@@ -158,6 +166,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
   const [failedScanList, setFailedScanList] = useState<FailedScanItem[]>([]);
   const [showFailedList, setShowFailedList] = useState<boolean>(false);
+  const [activeScanFailAlert, setActiveScanFailAlert] = useState<ActiveScanFailAlert | null>(null);
+  const manualInputRef = useRef<HTMLInputElement | null>(null);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
   const [manualInput, setManualInput] = useState<string>('');
   const [isSuccessFlash, setIsSuccessFlash] = useState<boolean>(false);
@@ -297,6 +307,101 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
+  // Direct action handlers for on-screen scan failure alert
+  const handleForceAdd = (overrideNum?: string, overrideName?: string) => {
+    const targetNum = overrideNum || activeScanFailAlert?.consumer_number || '';
+    const cleanNum = cleanAndNormalizeDigits(targetNum);
+    if (!cleanNum) {
+      toast.error('Invalid Consumer Number');
+      return;
+    }
+    const finalName = (overrideName || activeScanFailAlert?.consumer_name || '').trim() || `Customer #${cleanNum}`;
+
+    // Mark as added in local scanned set
+    scannedSetRef.current.add(cleanNum.toLowerCase());
+
+    // Check for double bill scam
+    const otherClaimant = claimedByOtherAgents[cleanNum.toLowerCase()];
+    if (otherClaimant) {
+      playWarningAlarm();
+      setDuplicateScamNotice({
+        consumer_number: cleanNum,
+        consumer_name: finalName,
+        agentName: otherClaimant.agentName,
+        date: otherClaimant.date,
+      });
+    } else {
+      playSuccessBeep();
+    }
+
+    setIsSuccessFlash(true);
+    setTimeout(() => setIsSuccessFlash(false), 400);
+
+    setLastScanned(`${cleanNum} - ${finalName}`);
+    setScannedSessionList((prev) => [
+      { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
+      ...prev,
+    ]);
+
+    // Add to audit log
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const rawLog = localStorage.getItem('bgcls_scanned_receipts_audit_log');
+      const log = rawLog ? JSON.parse(rawLog) : [];
+      log.unshift({
+        consumer_number: cleanNum,
+        consumer_name: finalName,
+        address: 'Directly Verified / Physical Bill',
+        mobile: '',
+        found: true,
+        cylinder_type: '14.2KG_STD',
+        timestamp: Date.now(),
+        date: todayStr,
+        agent_name: (agentName || '').trim().toUpperCase(),
+        agent_id: agentId,
+      });
+      localStorage.setItem('bgcls_scanned_receipts_audit_log', JSON.stringify(log.slice(0, 300)));
+    } catch (_) {}
+
+    // Call onConsumerScanned with found: true so parent pages accept it
+    onConsumerScanned({
+      consumer_number: cleanNum,
+      consumer_name: finalName,
+      address: 'Directly Verified / Physical Bill',
+      mobile: '',
+      found: true,
+      duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+      duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
+    });
+
+    toast.success(`✨ Added #${cleanNum} (${finalName})!`, { id: 'scan-snap' });
+    setStatusText(`Added #${cleanNum}! Ready for next bill`);
+
+    // Remove from failedScanList if present
+    setFailedScanList((prev) => prev.filter((item) => item.raw_number !== cleanNum));
+
+    // Clear alert
+    setActiveScanFailAlert(null);
+  };
+
+  const handleEditNumber = () => {
+    if (activeScanFailAlert?.consumer_number) {
+      setManualInput(activeScanFailAlert.consumer_number);
+    }
+    setActiveScanFailAlert(null);
+    setTimeout(() => {
+      manualInputRef.current?.focus();
+      manualInputRef.current?.select();
+    }, 100);
+  };
+
+  const handleRetrySnap = () => {
+    setActiveScanFailAlert(null);
+    setTimeout(() => {
+      performScan();
+    }, 150);
+  };
+
   // Process a candidate consumer number match
   const processMatchedConsumerNumber = async (
     rawNum: string,
@@ -305,23 +410,35 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const cleanNum = cleanAndNormalizeDigits(rawNum);
 
     if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 12) {
-      if (cleanNum && cleanNum.length > 12) {
-        // Gemini hallucinated extra digits — log it so user can review
-        const failItem: FailedScanItem = {
-          raw_number: cleanNum,
-          reason: `Too long (${cleanNum.length} digits — Gemini may have read extra digits)`,
-          timestamp: Date.now(),
-        };
-        setFailedScanList((prev) => [failItem, ...prev]);
-        toast.error(`⚠️ Scan returned ${cleanNum.length}-digit number — too long. Please check bill manually.`, {
-          id: 'scan-snap',
-          duration: 4000,
-        });
+      playWarningAlarm();
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+      const reason = cleanNum && cleanNum.length > 12
+        ? `Too many digits (${cleanNum.length}). Bharatgas numbers are 1-10 digits.`
+        : 'Could not extract valid digits.';
+      setActiveScanFailAlert({
+        type: 'TOO_LONG',
+        consumer_number: cleanNum,
+        consumer_name: extractedName,
+        reason,
+      });
+      if (cleanNum) {
+        setFailedScanList((prev) => [
+          { raw_number: cleanNum, reason: `Too long (${cleanNum.length} digits)`, timestamp: Date.now() },
+          ...prev,
+        ]);
       }
       return false;
     }
 
     if (DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+      playWarningAlarm();
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      setActiveScanFailAlert({
+        type: 'BLACKLISTED',
+        consumer_number: cleanNum,
+        consumer_name: extractedName,
+        reason: `Ignored distributor / telephone code #${cleanNum}. Aim camera at "Details of Receiver:".`,
+      });
       return false;
     }
 
@@ -329,21 +446,27 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const match = await matchConsumerWithDatabase(cleanNum, extractedName);
 
     // STRICT DATABASE VERIFICATION GUARD:
-    // If consumer is not verified in the database, DO NOT add them!
+    // If consumer is not verified in the database, show prominent alert directly on screen!
     if (!match.found) {
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      const failReason = match.name_verified === false
-        ? `Name mismatch — #${cleanNum} exists in DB but name doesn't match`
-        : `#${cleanNum} not found in agency database`;
-      setAlreadyAddedNotice(`⚠️ ${failReason}. Please check receipt.`);
-      toast.error(`⚠️ ${failReason}. Check paper memo.`, {
-        id: `scan-fail-${cleanNum}`,
-        duration: 6000,
+      playWarningAlarm();
+      if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
+      const isMismatch = match.name_verified === false && Boolean(match.consumer_name);
+      const failReason = isMismatch
+        ? `Receipt has "${extractedName || 'Unknown'}", but Agency Database has "${match.consumer_name}".`
+        : `Consumer #${cleanNum} is NOT found in agency database.`;
+
+      // Trigger direct on-screen popup alert immediately
+      setActiveScanFailAlert({
+        type: isMismatch ? 'NAME_MISMATCH' : 'NOT_FOUND',
+        consumer_number: cleanNum,
+        consumer_name: extractedName || '',
+        db_consumer_name: isMismatch ? match.consumer_name : undefined,
+        reason: failReason,
       });
-      setStatusText(`Consumer #${cleanNum} not verified. Check bill or add manually.`);
-      // Persist to failed scan log so it's visible at end of session
+
+      setStatusText(`Bill #${cleanNum} not verified. Action required above.`);
       setFailedScanList((prev) => [
-        { raw_number: cleanNum, reason: failReason, timestamp: Date.now() },
+        { raw_number: cleanNum, reason: isMismatch ? 'Name mismatch' : 'Not found in database', timestamp: Date.now() },
         ...prev,
       ]);
       return false;
@@ -507,6 +630,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const imgDataUrl = captureCameraFrame();
     if (!imgDataUrl) return;
 
+    setActiveScanFailAlert(null);
     setIsProcessing(true);
     setIsShutterFlash(true);
     setTimeout(() => setIsShutterFlash(false), 200);
@@ -517,6 +641,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const result = await scanBillWithGemini(imgDataUrl);
 
       if (result.error) {
+        playWarningAlarm();
+        setActiveScanFailAlert({
+          type: 'NOT_DETECTED',
+          reason: `AI Notice: ${result.error}`,
+        });
         toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
         setStatusText('Hold bill steady and tap Snap...');
         return;
@@ -530,7 +659,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           return;
         }
       } else {
-        setStatusText('Hold paper steady ~6 inches away...');
+        playWarningAlarm();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        setActiveScanFailAlert({
+          type: 'NOT_DETECTED',
+          reason: 'Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.',
+        });
+        setStatusText('Cons No not detected. Tap Retry or type number.');
         toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
           id: 'scan-snap',
           duration: 3500,
@@ -554,6 +689,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return;
     }
 
+    setActiveScanFailAlert(null);
     setIsProcessing(true);
     setIsShutterFlash(true);
     setTimeout(() => setIsShutterFlash(false), 200);
@@ -564,6 +700,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const result = await scanBillWithGemini(file);
 
       if (result.error) {
+        playWarningAlarm();
+        setActiveScanFailAlert({
+          type: 'NOT_DETECTED',
+          reason: `AI Notice: ${result.error}`,
+        });
         toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
         setStatusText('Hold bill steady and tap Snap...');
         return;
@@ -577,6 +718,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           return;
         }
       } else {
+        playWarningAlarm();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        setActiveScanFailAlert({
+          type: 'NOT_DETECTED',
+          reason: 'Cons No: not detected in photo. Make sure "Details of Receiver:" is clearly visible.',
+        });
         setStatusText('Cons No: not detected in photo...');
         toast.error('Cons No: not detected. Make sure "Details of Receiver:" is clearly visible.', {
           id: 'scan-snap',
@@ -711,6 +858,116 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             <div className="w-7 h-7 border-b-4 border-r-4 border-amber-400 rounded-br-xl" />
           </div>
         </div>
+
+        {/* PROMINENT DIRECT SCAN FAILURE MODAL OVERLAY (STOPS USER IMMEDIATELY ON FAILED BILL) */}
+        {activeScanFailAlert && (
+          <div className="absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-gradient-to-b from-slate-900 via-rose-950/50 to-slate-900 border-2 border-rose-500 rounded-3xl p-4 w-full max-w-sm text-white shadow-[0_0_60px_rgba(244,63,94,0.4)] flex flex-col gap-3">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-rose-500/30 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-rose-400 shrink-0">
+                    <AlertCircle className="w-5 h-5 text-rose-400 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-rose-300 uppercase tracking-wide">
+                      {activeScanFailAlert.type === 'NAME_MISMATCH'
+                        ? '⚠️ Name Mismatch!'
+                        : activeScanFailAlert.type === 'NOT_FOUND'
+                        ? '❌ Not In Database!'
+                        : activeScanFailAlert.type === 'NOT_DETECTED'
+                        ? '🔍 Cons No Not Detected!'
+                        : '⚠️ Bill Not Added!'}
+                    </h3>
+                    <p className="text-[10px] text-slate-300 font-medium">Stop on this bill & choose action</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveScanFailAlert(null)}
+                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Bill Details Box */}
+              <div className="bg-slate-950/80 rounded-2xl p-3 border border-rose-500/30 flex flex-col gap-2">
+                {activeScanFailAlert.consumer_number && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Scanned Number</span>
+                    <span className="font-mono text-base font-black text-amber-400">
+                      #{activeScanFailAlert.consumer_number}
+                    </span>
+                  </div>
+                )}
+                {activeScanFailAlert.consumer_name && (
+                  <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 shrink-0">Receipt Name</span>
+                    <span className="text-xs font-bold text-white text-right truncate">
+                      {activeScanFailAlert.consumer_name}
+                    </span>
+                  </div>
+                )}
+                {activeScanFailAlert.db_consumer_name && (
+                  <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
+                    <span className="text-[10px] uppercase font-bold text-rose-400 shrink-0">Database Name</span>
+                    <span className="text-xs font-bold text-rose-200 text-right truncate">
+                      {activeScanFailAlert.db_consumer_name}
+                    </span>
+                  </div>
+                )}
+
+                {/* Reason Explanation */}
+                <div className="bg-rose-950/40 rounded-xl p-2 border border-rose-500/20 text-[11px] text-rose-200 font-semibold leading-relaxed mt-1">
+                  {activeScanFailAlert.reason}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col gap-2 pt-1">
+                {activeScanFailAlert.consumer_number && (
+                  <button
+                    type="button"
+                    onClick={() => handleForceAdd()}
+                    className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Force Add This Bill (#{activeScanFailAlert.consumer_number})</span>
+                  </button>
+                )}
+
+                <div className="flex gap-2">
+                  {activeScanFailAlert.consumer_number && (
+                    <button
+                      type="button"
+                      onClick={handleEditNumber}
+                      className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Edit Digits</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRetrySnap}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-white font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Retry Snap</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveScanFailAlert(null)}
+                    className="bg-white/10 hover:bg-white/20 text-slate-300 font-semibold py-2.5 px-3 rounded-xl text-xs transition-all shrink-0"
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Double-Bill Scam Alert Notification */}
         {duplicateScamNotice && (
@@ -892,6 +1149,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
+              ref={manualInputRef}
               type="text"
               value={manualInput}
               onChange={(e) => setManualInput(e.target.value)}

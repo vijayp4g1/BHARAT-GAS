@@ -1259,11 +1259,6 @@ export const StaffDayEndSummary: React.FC = () => {
     duplicate_of_agent?: string;
     duplicate_claimed_date?: string;
   }) => {
-    if (!scannedItem.found) {
-      toast.error(`Cannot add #${scannedItem.consumer_number}: Not verified in database.`);
-      return;
-    }
-
     const otherClaimant = scannedItem.duplicate_of_agent
       ? { agentName: scannedItem.duplicate_of_agent, date: scannedItem.duplicate_claimed_date }
       : crossAgentClaimedMap[scannedItem.consumer_number.toLowerCase()];
