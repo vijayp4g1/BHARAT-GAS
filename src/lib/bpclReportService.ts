@@ -431,9 +431,9 @@ export async function fetchAllBpclReportsForDate(
           const parsed = extractBpclReportFromNotes(row.notes);
           if (parsed) {
             const existing = result[normName];
-            const parsedCount = (parsed.online_bills?.length || 0) + (parsed.pending_bills?.length || 0);
-            const existingCount = (existing?.online_bills?.length || 0) + (existing?.pending_bills?.length || 0);
-            if (!existing || parsedCount >= existingCount) {
+            const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
+            const existingTime = new Date(existing?.updated_at || 0).getTime();
+            if (!existing || parsedTime >= existingTime) {
               result[normName] = parsed;
               setLocalBpclReport(dateStr, normName, parsed);
             }
@@ -457,13 +457,14 @@ export async function fetchAllBpclReportsForDate(
           const norm = (parsed.agent_name || '').trim().toUpperCase();
           if (norm) {
             const existing = result[norm];
-            const parsedCount = (parsed.online_bills?.length || 0) + (parsed.pending_bills?.length || 0);
-            const existingCount = (existing?.online_bills?.length || 0) + (existing?.pending_bills?.length || 0);
             if (!existing) {
               result[norm] = parsed;
-            } else if ((parsed.online_bills?.length || 0) > (existing.online_bills?.length || 0) || parsedCount > existingCount) {
-              // Local storage has more online bills or total bills
-              result[norm] = parsed;
+            } else {
+              const localTime = new Date(parsed.updated_at || 0).getTime();
+              const existingTime = new Date(existing.updated_at || 0).getTime();
+              if (localTime > existingTime) {
+                result[norm] = parsed;
+              }
             }
           }
         }

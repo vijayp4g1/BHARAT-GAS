@@ -860,6 +860,13 @@ export const StaffDayEndSummary: React.FC = () => {
     );
   };
 
+  // Helper to check if a consumer number is registered in BPCL online_bills for the active boy
+  const isBpclOnlineBill = useCallback((consumerNo: string): boolean => {
+    if (!activeBpclReport?.online_bills) return false;
+    const norm = consumerNo.trim().toLowerCase();
+    return activeBpclReport.online_bills.some((b) => b.consumer_number.trim().toLowerCase() === norm);
+  }, [activeBpclReport]);
+
   // 1-click Add a Pending BPCL Bill into Completed Deliveries
   const handleAddPendingBillToScanned = async (bill: BpclBillItem) => {
     if (entries.some((e) => e.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase())) {
@@ -868,6 +875,11 @@ export const StaffDayEndSummary: React.FC = () => {
     }
 
     const match = await matchConsumerWithDatabase(bill.consumer_number, bill.consumer_name);
+    const isOnline =
+      isBpclOnlineBill(bill.consumer_number) ||
+      /PayNBook|Online/i.test(bill.refill_type || '') ||
+      /Online Paid/i.test(bill.status || '');
+
     const newEntry: ItemEntry = {
       consumer_id: match.consumer_id,
       consumer_number: match.consumer_number || bill.consumer_number,
@@ -877,7 +889,7 @@ export const StaffDayEndSummary: React.FC = () => {
       found: match.found,
       source: 'manual',
       cylinder_type: '14.2KG_STD',
-      payment_mode: 'CASH',
+      payment_mode: isOnline ? 'UPI' : 'CASH',
       empty_collected: true,
       scanned_at: new Date().toISOString(),
     };
@@ -890,13 +902,6 @@ export const StaffDayEndSummary: React.FC = () => {
     }
     toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
   };
-
-  // Helper to check if a consumer number is registered in BPCL online_bills for the active boy
-  const isBpclOnlineBill = useCallback((consumerNo: string): boolean => {
-    if (!activeBpclReport?.online_bills) return false;
-    const norm = consumerNo.trim().toLowerCase();
-    return activeBpclReport.online_bills.some((b) => b.consumer_number.trim().toLowerCase() === norm);
-  }, [activeBpclReport]);
 
   // Auto-convert any scanned bills that are confirmed as BPCL Online (PayNBook) from CASH to UPI
   const autoConvertOnlineBills = useCallback((
@@ -1201,16 +1206,19 @@ export const StaffDayEndSummary: React.FC = () => {
       return;
     }
 
-    // Anti-Fraud Warning Guard: Check if there are duplicate bills claimed by another delivery boy
+    // Anti-Fraud Warning Guard: Check if there are duplicate bills claimed (today or last 7 days)
     const duplicateList = entries.filter((e) => {
       return e.duplicate_of_agent || crossAgentClaimedMap[e.consumer_number.toLowerCase()];
     });
 
     if (duplicateList.length > 0) {
       const firstDup = duplicateList[0];
-      const claimantName = firstDup.duplicate_of_agent || crossAgentClaimedMap[firstDup.consumer_number.toLowerCase()]?.agentName || 'another delivery boy';
+      const firstClaimant = crossAgentClaimedMap[firstDup.consumer_number.toLowerCase()];
+      const duplicateNotice = firstClaimant
+        ? formatDuplicateClaimNotice(firstClaimant, reportDate)
+        : `already given by ${firstDup.duplicate_of_agent || 'another delivery boy'}`;
       const proceed = window.confirm(
-        `🚨 DOUBLE BILL SCAM ALERT!\n\n${duplicateList.length} bill(s) in this list were ALREADY SUBMITTED by other delivery boys!\n\nExample: Bill #${firstDup.consumer_number} (${firstDup.consumer_name}) was already given by ${claimantName.toUpperCase()}.\n\nAre you sure staff wants to save duplicate bills for ${selectedBoy.name}?`
+        `🚨 DOUBLE BILL SCAM ALERT!\n\n${duplicateList.length} bill(s) in this list were ALREADY SUBMITTED (last 7 days)!\n\nExample: Bill #${firstDup.consumer_number} (${firstDup.consumer_name}) — ${duplicateNotice}.\n\nAre you sure staff wants to save duplicate bills for ${selectedBoy.name}?`
       );
       if (!proceed) {
         toast.error('Save cancelled to prevent double-crediting duplicate bills.');
