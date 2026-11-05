@@ -16,12 +16,17 @@ import {
   Loader2,
   ChevronDown,
   Printer,
-  Zap
+  Zap,
+  Pencil,
+  Edit2,
+  Layers,
+  ListFilter
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
   deleteBpclBill, 
   addBpclBillManually, 
+  updateBpclBill,
   type BpclBillItem, 
   type BpclReportData 
 } from '../lib/bpclReportService';
@@ -63,6 +68,12 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   // Manual Add Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
   const [manualType, setManualType] = useState<'PENDING' | 'ONLINE'>('PENDING');
+  const [addSourceMode, setAddSourceMode] = useState<'PICK_TODAY' | 'SEARCH_DB'>('PICK_TODAY');
+  const [todayFilterQuery, setTodayFilterQuery] = useState<string>('');
+  const [todayPaymentFilter, setTodayPaymentFilter] = useState<'ALL' | 'CASH' | 'UPI'>('ALL');
+  const [addedInModalSet, setAddedInModalSet] = useState<Set<string>>(new Set());
+
+  // Search 33k database state
   const [manualConsNo, setManualConsNo] = useState<string>('');
   const [manualName, setManualName] = useState<string>('');
   const [manualAddress, setManualAddress] = useState<string>('');
@@ -73,6 +84,20 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   const [isSearchingDb, setIsSearchingDb] = useState<boolean>(false);
   const [isDbMatched, setIsDbMatched] = useState<boolean>(false);
   const [isSubmittingManual, setIsSubmittingManual] = useState<boolean>(false);
+  const [dbSuggestions, setDbSuggestions] = useState<any[]>([]);
+
+  // Edit Bill Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [editingOriginalNumber, setEditingOriginalNumber] = useState<string>('');
+  const [editingOriginalType, setEditingOriginalType] = useState<'PENDING' | 'ONLINE'>('ONLINE');
+  const [editType, setEditType] = useState<'PENDING' | 'ONLINE'>('ONLINE');
+  const [editConsNo, setEditConsNo] = useState<string>('');
+  const [editName, setEditName] = useState<string>('');
+  const [editMemo, setEditMemo] = useState<string>('');
+  const [editOrder, setEditOrder] = useState<string>('');
+  const [editDate, setEditDate] = useState<string>(reportDate);
+  const [editRefillType, setEditRefillType] = useState<string>('PayNBook Apps');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState<boolean>(false);
 
   const pendingBills = report?.pending_bills || [];
   const onlineBills = report?.online_bills || [];
@@ -270,6 +295,108 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
       toast.error('Failed to add bill manually');
     } finally {
       setIsSubmittingManual(false);
+    }
+  };
+
+  // 1-Click Quick Add from Today's Scanned Deliveries
+  const handleQuickAddFromToday = async (entry: DayEndEntry, targetType: 'PENDING' | 'ONLINE') => {
+    try {
+      const cleanNum = entry.consumer_number.trim();
+      const newBill: BpclBillItem = {
+        consumer_number: cleanNum,
+        consumer_name: entry.consumer_name || 'Consumer',
+        book_date: reportDate,
+        refill_type: targetType === 'ONLINE' ? 'PayNBook Apps' : undefined,
+        status: targetType === 'PENDING' ? 'Delivery Pending' : 'Online Bill (Delivery Done)',
+        type: targetType,
+      };
+
+      const updated = await addBpclBillManually(
+        reportDate,
+        agentName,
+        newBill,
+        report?.agent_id
+      );
+
+      if (onReportUpdated) {
+        onReportUpdated(updated);
+      }
+
+      // Automatically convert scanned bill payment from CASH to Online (UPI) in Day End
+      if (targetType === 'ONLINE' && onConvertBillToOnline) {
+        onConvertBillToOnline(cleanNum);
+      }
+
+      setAddedInModalSet((prev) => new Set(prev).add(cleanNum.toLowerCase()));
+      toast.success(`⚡ Added #${cleanNum} (${entry.consumer_name}) to ${targetType === 'ONLINE' ? 'Online Bills' : 'Pending Bills'}!`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to add bill');
+    }
+  };
+
+  // Open Edit Modal prefilled with existing bill data
+  const handleOpenEditModal = (bill: BpclBillItem) => {
+    setEditingOriginalNumber(bill.consumer_number);
+    setEditingOriginalType(bill.type);
+    setEditType(bill.type);
+    setEditConsNo(bill.consumer_number);
+    setEditName(bill.consumer_name || '');
+    setEditMemo(bill.cash_memo || '');
+    setEditOrder(bill.order_no || '');
+    setEditDate(bill.book_date || reportDate);
+    setEditRefillType(bill.refill_type || 'PayNBook Apps');
+    setIsEditModalOpen(true);
+  };
+
+  // Submit Edit Bill Form
+  const handleSubmitEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCons = editConsNo.trim();
+    if (!cleanCons) {
+      toast.error('Please enter a consumer number');
+      return;
+    }
+
+    setIsSubmittingEdit(true);
+    try {
+      const updatedItem: BpclBillItem = {
+        consumer_number: cleanCons,
+        consumer_name: editName.trim() || 'Consumer',
+        cash_memo: editMemo.trim() || undefined,
+        order_no: editOrder.trim() || undefined,
+        book_date: editDate.trim() || reportDate,
+        refill_type: editType === 'ONLINE' ? (editRefillType.trim() || 'PayNBook Apps') : undefined,
+        status: editType === 'PENDING' ? 'Delivery Pending' : 'Online Bill (Delivery Done)',
+        type: editType,
+      };
+
+      const updated = await updateBpclBill(
+        reportDate,
+        agentName,
+        editingOriginalNumber,
+        editingOriginalType,
+        updatedItem,
+        report?.agent_id
+      );
+
+      if (onReportUpdated) {
+        onReportUpdated(updated);
+      }
+
+      // If switched to Online or updated as Online, convert Day End delivery payment from CASH to Online (UPI)
+      if (editType === 'ONLINE' && onConvertBillToOnline) {
+        onConvertBillToOnline(cleanCons);
+      }
+
+      toast.success(`Updated #${cleanCons} in ${editType.toLowerCase()} bills!`);
+      setIsEditModalOpen(false);
+      setActiveTab(editType);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to update bill');
+    } finally {
+      setIsSubmittingEdit(false);
     }
   };
 
@@ -676,6 +803,16 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                       </button>
                     )}
 
+                    {/* Edit Bill Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditModal(bill)}
+                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-700 border border-slate-200 hover:border-blue-300 transition-colors"
+                      title="Edit this bill details or switch category"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+
                     {/* Delete / Remove Bill Button */}
                     <button
                       type="button"
@@ -696,23 +833,23 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   )}
 
       {/* ========================================================================= */}
-      {/* MANUAL ADD BILL MODAL (EASY MANUAL ENTRY WITH 33K DATABASE AUTO-MATCH)     */}
+      {/* ADD BILL MODAL (1-CLICK PICK FROM TODAY'S DELIVERIES OR SEARCH 33K DB)    */}
       {/* ========================================================================= */}
       {isManualModalOpen && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[110] flex items-center justify-center p-3 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100 max-h-[90vh]">
             {/* Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/90">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/90 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-500/30">
                   <Plus className="w-4 h-4 text-blue-400" />
                 </div>
                 <div>
                   <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight">
-                    Add Bill Manually
+                    Add {manualType === 'ONLINE' ? 'Online (PayNBook)' : 'Pending'} Bill
                   </h3>
                   <p className="text-[10px] text-slate-400">
-                    Add single pending or online bill for {agentName}
+                    For {agentName} • {reportDate}
                   </p>
                 </div>
               </div>
@@ -726,32 +863,420 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
               </button>
             </div>
 
+            {/* Sub-Header Category Switcher & Source Mode Tabs */}
+            <div className="p-3 bg-slate-950/50 border-b border-slate-800 space-y-2.5 shrink-0">
+              {/* Category Switcher */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setManualType('ONLINE')}
+                  className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                    manualType === 'ONLINE'
+                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
+                      : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:bg-slate-800'
+                  }`}
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>🌐 Online (PayNBook)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setManualType('PENDING')}
+                  className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                    manualType === 'PENDING'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30'
+                      : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:bg-slate-800'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>⚠️ Delivery Pending</span>
+                </button>
+              </div>
+
+              {/* Source Mode Switcher Tabs */}
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setAddSourceMode('PICK_TODAY')}
+                  className={`flex-1 py-1.5 px-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    addSourceMode === 'PICK_TODAY'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-300" />
+                  <span>1-Click from Today ({scannedEntries.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAddSourceMode('SEARCH_DB')}
+                  className={`flex-1 py-1.5 px-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    addSourceMode === 'SEARCH_DB'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Search 33k DB / Type</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TAB 1: 1-CLICK PICK FROM TODAY'S SCANNED DELIVERIES */}
+            {addSourceMode === 'PICK_TODAY' && (
+              <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2.5">
+                {/* Search & Filter Bar */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Quick filter (type customer name or digits)..."
+                      value={todayFilterQuery}
+                      onChange={(e) => setTodayFilterQuery(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none font-sans"
+                    />
+                    {todayFilterQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setTodayFilterQuery('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Payment Filter Pills */}
+                  <div className="flex bg-slate-950 rounded-xl p-0.5 border border-slate-800 text-[10px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setTodayPaymentFilter('ALL')}
+                      className={`px-2 py-1 rounded-lg ${todayPaymentFilter === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                    >
+                      All ({scannedEntries.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTodayPaymentFilter('CASH')}
+                      className={`px-2 py-1 rounded-lg ${todayPaymentFilter === 'CASH' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'}`}
+                    >
+                      CASH ({scannedEntries.filter((e) => e.payment_mode === 'CASH').length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of Today's Deliveries */}
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                  {scannedEntries.length === 0 ? (
+                    <div className="text-center py-10 text-slate-500 text-xs">
+                      <p>No bills scanned yet today for {agentName}.</p>
+                      <button
+                        type="button"
+                        onClick={() => setAddSourceMode('SEARCH_DB')}
+                        className="mt-2 text-blue-400 font-bold hover:underline"
+                      >
+                        Search 33k database instead →
+                      </button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const list = scannedEntries.filter((entry) => {
+                        if (todayFilterQuery.trim()) {
+                          const q = todayFilterQuery.trim().toLowerCase();
+                          const matchNum = entry.consumer_number.toLowerCase().includes(q);
+                          const matchName = (entry.consumer_name || '').toLowerCase().includes(q);
+                          if (!matchNum && !matchName) return false;
+                        }
+                        if (todayPaymentFilter === 'CASH') return entry.payment_mode === 'CASH';
+                        if (todayPaymentFilter === 'UPI') return entry.payment_mode === 'UPI';
+                        return true;
+                      });
+
+                      if (list.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-slate-500 text-xs">
+                            No bills match "{todayFilterQuery}".
+                          </div>
+                        );
+                      }
+
+                      return list.map((entry, idx) => {
+                        const cleanNum = entry.consumer_number.trim().toLowerCase();
+                        const isAlreadyOnline = onlineBills.some(
+                          (b) => b.consumer_number.trim().toLowerCase() === cleanNum
+                        );
+                        const isAlreadyPending = pendingBills.some(
+                          (b) => b.consumer_number.trim().toLowerCase() === cleanNum
+                        );
+                        const isAddedThisSession = addedInModalSet.has(cleanNum);
+
+                        const isTargetAlreadyAdded = manualType === 'ONLINE'
+                          ? (isAlreadyOnline || isAddedThisSession)
+                          : (isAlreadyPending || isAddedThisSession);
+
+                        return (
+                          <div
+                            key={`today-${entry.consumer_number}-${idx}`}
+                            className="bg-slate-950/80 hover:bg-slate-950 border border-slate-800 rounded-2xl p-2.5 flex items-center justify-between gap-2.5 transition-all"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono font-black text-amber-400 text-xs">
+                                  #{entry.consumer_number}
+                                </span>
+                                <span
+                                  className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                    entry.payment_mode === 'UPI'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  }`}
+                                >
+                                  {entry.payment_mode === 'UPI' ? 'Online (UPI)' : 'CASH'}
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-xs text-slate-200 truncate mt-0.5">
+                                {entry.consumer_name || 'Consumer'}
+                              </h4>
+                              {entry.address && (
+                                <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                                  📍 {entry.address}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* 1-Click Action Button */}
+                            <div className="shrink-0">
+                              {isTargetAlreadyAdded ? (
+                                <span className="text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 rounded-xl flex items-center gap-1">
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Added</span>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickAddFromToday(entry, manualType)}
+                                  className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all ${
+                                    manualType === 'ONLINE'
+                                      ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+                                      : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
+                                  }`}
+                                >
+                                  <Zap className="w-3.5 h-3.5 fill-current" />
+                                  <span>+ Make {manualType === 'ONLINE' ? 'Online' : 'Pending'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()
+                  )}
+                </div>
+
+                {/* Footer with Done button */}
+                <div className="pt-2 border-t border-slate-800 flex items-center justify-between shrink-0">
+                  <span className="text-[11px] text-slate-400 font-semibold">
+                    {addedInModalSet.size > 0 ? (
+                      <span className="text-emerald-400 font-bold">
+                        ⚡ Added {addedInModalSet.size} bill{addedInModalSet.size > 1 ? 's' : ''} to {manualType.toLowerCase()} list
+                      </span>
+                    ) : (
+                      'Tap any bill to add instantly without typing'
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsManualModalOpen(false)}
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: SEARCH 33K DATABASE / TYPE CUSTOM NUMBER */}
+            {addSourceMode === 'SEARCH_DB' && (
+              <form onSubmit={handleSubmitManual} className="p-4 space-y-3.5 overflow-y-auto max-h-[65vh]">
+                {/* Consumer Number Input with live 33k database indicator */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      Consumer Number *
+                    </label>
+                    {isSearchingDb ? (
+                      <span className="text-[10px] text-blue-400 font-bold flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Searching 33k DB...
+                      </span>
+                    ) : isDbMatched ? (
+                      <span className="text-[10px] text-emerald-400 font-black flex items-center gap-0.5">
+                        <UserCheck className="w-3 h-3" /> Auto-matched in Database!
+                      </span>
+                    ) : null}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="e.g. 173 or 12384"
+                    value={manualConsNo}
+                    onChange={(e) => setManualConsNo(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+
+                {/* Customer Name */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Customer Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. B LALITHA"
+                    value={manualName}
+                    onChange={(e) => setManualName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  />
+                  {manualAddress && (
+                    <p className="text-[10px] text-slate-400 truncate mt-1">
+                      📍 {manualAddress}
+                    </p>
+                  )}
+                </div>
+
+                {/* Cash Memo & Order No */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Cash Memo No
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 115694"
+                      value={manualMemo}
+                      onChange={(e) => setManualMemo(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Order No
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 104110"
+                      value={manualOrder}
+                      onChange={(e) => setManualOrder(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Book Date & Refill Type */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Book Date
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="DD/MM/YYYY"
+                      value={manualDate}
+                      onChange={(e) => setManualDate(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Refill Type
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="PayNBook Apps"
+                      value={manualRefillType}
+                      onChange={(e) => setManualRefillType(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsManualModalOpen(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingManual || !manualConsNo.trim()}
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-xs shadow-md shadow-blue-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    {isSubmittingManual ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Plus className="w-4 h-4 stroke-[3]" />
+                    )}
+                    <span>Add to {manualType === 'PENDING' ? 'Pending' : 'Online'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* EDIT BILL MODAL (MODIFY NUMBER, NAME, MEMO OR SWITCH PENDING ⇄ ONLINE)    */}
+      {/* ========================================================================= */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[110] flex items-center justify-center p-3 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/90">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs border border-amber-500/30">
+                  <Pencil className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight">
+                    Edit Bill #{editingOriginalNumber}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    Modify details or switch category for {agentName}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center hover:bg-slate-700 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
             {/* Form */}
-            <form onSubmit={handleSubmitManual} className="p-4 space-y-3.5 overflow-y-auto max-h-[75vh]">
-              {/* Type Switcher */}
+            <form onSubmit={handleSubmitEdit} className="p-4 space-y-3.5 overflow-y-auto max-h-[75vh]">
+              {/* Category Switcher */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                  Bill Category
+                  Category (Switch Pending ⇄ Online)
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setManualType('PENDING')}
+                    onClick={() => setEditType('ONLINE')}
                     className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
-                      manualType === 'PENDING'
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
-                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
-                    }`}
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>⚠️ Delivery Pending</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setManualType('ONLINE')}
-                    className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
-                      manualType === 'ONLINE'
+                      editType === 'ONLINE'
                         ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20'
                         : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
                     }`}
@@ -759,33 +1284,33 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     <Globe className="w-3.5 h-3.5" />
                     <span>🌐 Online (PayNBook)</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditType('PENDING')}
+                    className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      editType === 'PENDING'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>⚠️ Delivery Pending</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Consumer Number Input with live 33k database indicator */}
+              {/* Consumer Number Input */}
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Consumer Number *
-                  </label>
-                  {isSearchingDb ? (
-                    <span className="text-[10px] text-blue-400 font-bold flex items-center gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Searching 33k DB...
-                    </span>
-                  ) : isDbMatched ? (
-                    <span className="text-[10px] text-emerald-400 font-black flex items-center gap-0.5">
-                      <UserCheck className="w-3 h-3" /> Auto-matched in Database!
-                    </span>
-                  ) : null}
-                </div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Consumer Number *
+                </label>
                 <input
                   type="text"
                   required
-                  autoFocus
-                  placeholder="e.g. 173 or 12384"
-                  value={manualConsNo}
-                  onChange={(e) => setManualConsNo(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  value={editConsNo}
+                  onChange={(e) => setEditConsNo(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
                 />
               </div>
 
@@ -796,16 +1321,10 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. B LALITHA"
-                  value={manualName}
-                  onChange={(e) => setManualName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
                 />
-                {manualAddress && (
-                  <p className="text-[10px] text-slate-400 truncate mt-1">
-                    📍 {manualAddress}
-                  </p>
-                )}
               </div>
 
               {/* Cash Memo & Order No */}
@@ -817,9 +1336,9 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   <input
                     type="text"
                     placeholder="e.g. 115694"
-                    value={manualMemo}
-                    onChange={(e) => setManualMemo(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    value={editMemo}
+                    onChange={(e) => setEditMemo(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
                   />
                 </div>
 
@@ -830,9 +1349,9 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   <input
                     type="text"
                     placeholder="e.g. 104110"
-                    value={manualOrder}
-                    onChange={(e) => setManualOrder(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    value={editOrder}
+                    onChange={(e) => setEditOrder(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -846,9 +1365,9 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   <input
                     type="text"
                     placeholder="DD/MM/YYYY"
-                    value={manualDate}
-                    onChange={(e) => setManualDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-600 focus:outline-none"
                   />
                 </div>
 
@@ -859,9 +1378,9 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   <input
                     type="text"
                     placeholder="PayNBook Apps"
-                    value={manualRefillType}
-                    onChange={(e) => setManualRefillType(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
+                    value={editRefillType}
+                    onChange={(e) => setEditRefillType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -870,22 +1389,22 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsManualModalOpen(false)}
+                  onClick={() => setIsEditModalOpen(false)}
                   className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingManual || !manualConsNo.trim()}
-                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-xs shadow-md shadow-blue-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  disabled={isSubmittingEdit || !editConsNo.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md shadow-amber-500/30 flex items-center justify-center gap-1.5 transition-all"
                 >
-                  {isSubmittingManual ? (
+                  {isSubmittingEdit ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <Plus className="w-4 h-4 stroke-[3]" />
+                    <Check className="w-4 h-4 stroke-[3]" />
                   )}
-                  <span>Add to {manualType === 'PENDING' ? 'Pending' : 'Online'}</span>
+                  <span>Save Changes</span>
                 </button>
               </div>
             </form>

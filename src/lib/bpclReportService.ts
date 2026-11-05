@@ -440,6 +440,73 @@ export async function addBpclBillManually(
 }
 
 /**
+ * Update an existing BPCL bill (edit details, or switch between PENDING and ONLINE)
+ */
+export async function updateBpclBill(
+  dateStr: string,
+  agentName: string,
+  originalConsumerNumber: string,
+  originalType: 'PENDING' | 'ONLINE',
+  updatedBill: BpclBillItem,
+  agentId?: string
+): Promise<BpclReportData> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: true,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const origNum = originalConsumerNumber.trim().toLowerCase();
+
+  // Remove the original bill from its list
+  let updatedPending = current.pending_bills.filter(
+    (b) => !(b.consumer_number.trim().toLowerCase() === origNum && b.type === originalType)
+  );
+  let updatedOnline = current.online_bills.filter(
+    (b) => !(b.consumer_number.trim().toLowerCase() === origNum && b.type === originalType)
+  );
+
+  // Add the updated bill to the target list (handles switching category if type changed)
+  if (updatedBill.type === 'PENDING') {
+    // Avoid duplicate in target list
+    updatedPending = updatedPending.filter(
+      (b) => b.consumer_number.trim().toLowerCase() !== updatedBill.consumer_number.trim().toLowerCase()
+    );
+    updatedPending.unshift(updatedBill);
+  } else {
+    updatedOnline = updatedOnline.filter(
+      (b) => b.consumer_number.trim().toLowerCase() !== updatedBill.consumer_number.trim().toLowerCase()
+    );
+    updatedOnline.unshift(updatedBill);
+  }
+
+  const updatedReport: BpclReportData = {
+    ...current,
+    checked_done: true,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    updated_at: new Date().toISOString(),
+  };
+
+  await saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: current.checked_done,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+
+  return updatedReport;
+}
+
+/**
  * Delete a single BPCL bill (Pending or Online)
  */
 export async function deleteBpclBill(
