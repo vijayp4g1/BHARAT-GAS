@@ -186,10 +186,18 @@ export const StaffDayEndSummary: React.FC = () => {
           baseArchived.delete(normName);
         }
       });
+
+      // Any delivery boy who has bills recorded cannot be "no supply"
+      Object.entries(rosterSummaries).forEach(([normName, sum]) => {
+        if (sum && sum.total_deliveries > 0) {
+          baseNoSupply.delete(normName);
+        }
+      });
+
       setArchivedBoyNames(baseArchived);
       setNoSupplyBoyNames(baseNoSupply);
     } catch (_) {}
-  }, [reportDate, bpclReportsMap]);
+  }, [reportDate, bpclReportsMap, rosterSummaries]);
 
   // 1-Click Toggle for Delivery Boy Archive
   const handleToggleArchive = async (boyName: string, boyId?: string, forceStatus?: boolean) => {
@@ -243,8 +251,14 @@ export const StaffDayEndSummary: React.FC = () => {
   // 1-Click Toggle for Delivery Boy "No Supply Today"
   const handleToggleNoSupply = async (boyName: string, boyId?: string, forceStatus?: boolean) => {
     const norm = boyName.trim().toUpperCase();
+    const boyHasBills = (rosterSummaries[norm]?.total_deliveries ?? 0) > 0;
     const isCurrentlyNoSupply = noSupplyBoyNames.has(norm);
     const nextStatus = forceStatus !== undefined ? forceStatus : !isCurrentlyNoSupply;
+
+    if (nextStatus && boyHasBills) {
+      toast.error(`Cannot mark ${boyName} as No Supply because bills are already recorded!`, { id: `nosupply-${norm}` });
+      return;
+    }
 
     // 1. Instant local reactive update
     setNoSupplyBoyNames((prev) => {
@@ -294,21 +308,29 @@ export const StaffDayEndSummary: React.FC = () => {
     return archivedBoyNames.has(selectedBoy.name.trim().toUpperCase());
   }, [selectedBoy, archivedBoyNames]);
 
+  const isCurrentBoyHasBills = useMemo(() => {
+    if (!selectedBoy) return false;
+    const norm = selectedBoy.name.trim().toUpperCase();
+    return entries.length > 0 || ((rosterSummaries[norm]?.total_deliveries ?? 0) > 0);
+  }, [selectedBoy, entries.length, rosterSummaries]);
+
   const isCurrentBoyNoSupply = useMemo(() => {
     if (!selectedBoy) return false;
+    if (isCurrentBoyHasBills) return false;
     return noSupplyBoyNames.has(selectedBoy.name.trim().toUpperCase());
-  }, [selectedBoy, noSupplyBoyNames]);
+  }, [selectedBoy, noSupplyBoyNames, isCurrentBoyHasBills]);
 
   const activeBoys = useMemo(() => {
     const query = boySearchQuery.trim().toLowerCase();
     return deliveryBoys.filter((boy) => {
       const norm = boy.name.trim().toUpperCase();
       const isArchived = archivedBoyNames.has(norm);
-      const isNoSupply = noSupplyBoyNames.has(norm);
+      const boyHasBills = (rosterSummaries[norm]?.total_deliveries ?? 0) > 0;
+      const isNoSupply = noSupplyBoyNames.has(norm) && !boyHasBills;
       const matchesSearch = !query || boy.name.toLowerCase().includes(query);
       return !isArchived && !isNoSupply && matchesSearch;
     });
-  }, [deliveryBoys, archivedBoyNames, noSupplyBoyNames, boySearchQuery]);
+  }, [deliveryBoys, archivedBoyNames, noSupplyBoyNames, boySearchQuery, rosterSummaries]);
 
   const archivedBoys = useMemo(() => {
     const query = boySearchQuery.trim().toLowerCase();
@@ -324,11 +346,12 @@ export const StaffDayEndSummary: React.FC = () => {
     const query = boySearchQuery.trim().toLowerCase();
     return deliveryBoys.filter((boy) => {
       const norm = boy.name.trim().toUpperCase();
-      const isNoSupply = noSupplyBoyNames.has(norm);
+      const boyHasBills = (rosterSummaries[norm]?.total_deliveries ?? 0) > 0;
+      const isNoSupply = noSupplyBoyNames.has(norm) && !boyHasBills;
       const matchesSearch = !query || boy.name.toLowerCase().includes(query);
       return isNoSupply && matchesSearch;
     });
-  }, [deliveryBoys, noSupplyBoyNames, boySearchQuery]);
+  }, [deliveryBoys, noSupplyBoyNames, boySearchQuery, rosterSummaries]);
 
   const totalDownsideCount = archivedBoys.length + noSupplyBoys.length;
 
@@ -1917,19 +1940,21 @@ export const StaffDayEndSummary: React.FC = () => {
                   </button>
                 )}
 
-                {/* No Supply */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleNoSupply(boy.name, boy.id, true);
-                  }}
-                  className="px-2.5 py-1 rounded-xl border border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
-                  title="Delivery boy did not go for supply today -> move to downside"
-                >
-                  <Ban className="w-3.5 h-3.5 text-slate-500" />
-                  <span>No Supply</span>
-                </button>
+                {/* No Supply (Strictly only for delivery boys with 0 bills who did not go for supply) */}
+                {!hasBills && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleNoSupply(boy.name, boy.id, true);
+                    }}
+                    className="px-2.5 py-1 rounded-xl border border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                    title="Delivery boy did not go for supply today -> move to downside"
+                  >
+                    <Ban className="w-3.5 h-3.5 text-slate-500" />
+                    <span>No Supply</span>
+                  </button>
+                )}
 
                 {/* Archive */}
                 <button
@@ -2421,24 +2446,26 @@ export const StaffDayEndSummary: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => {
-                  handleToggleNoSupply(selectedBoy.name, selectedBoy.id, !isCurrentBoyNoSupply);
-                  if (!isCurrentBoyNoSupply) {
-                    setActiveTab('ROSTER');
-                  }
-                }}
-                className={`flex-1 sm:flex-initial justify-center active:scale-95 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-xs transition-all border ${
-                  isCurrentBoyNoSupply
-                    ? 'bg-rose-50 text-rose-800 border-rose-300'
-                    : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-800 border-slate-300'
-                }`}
-                title={isCurrentBoyNoSupply ? "Resume supply for this boy" : "Mark no supply & return to roster downside"}
-              >
-                <Ban className="w-3.5 h-3.5 text-rose-500" />
-                <span>{isCurrentBoyNoSupply ? 'No Supply' : 'No Supply'}</span>
-              </button>
+              {!isCurrentBoyHasBills && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleToggleNoSupply(selectedBoy.name, selectedBoy.id, !isCurrentBoyNoSupply);
+                    if (!isCurrentBoyNoSupply) {
+                      setActiveTab('ROSTER');
+                    }
+                  }}
+                  className={`flex-1 sm:flex-initial justify-center active:scale-95 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-xs transition-all border ${
+                    isCurrentBoyNoSupply
+                      ? 'bg-rose-50 text-rose-800 border-rose-300'
+                      : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-800 border-slate-300'
+                  }`}
+                  title={isCurrentBoyNoSupply ? "Resume supply for this boy" : "Mark no supply & return to roster downside"}
+                >
+                  <Ban className="w-3.5 h-3.5 text-rose-500" />
+                  <span>{isCurrentBoyNoSupply ? 'Resume Supply' : 'No Supply'}</span>
+                </button>
+              )}
 
               <button
                 type="button"
