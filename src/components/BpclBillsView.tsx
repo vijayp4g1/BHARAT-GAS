@@ -73,7 +73,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   const [manualType, setManualType] = useState<'PENDING' | 'ONLINE'>('PENDING');
   const [addSourceMode, setAddSourceMode] = useState<'PICK_TODAY' | 'SEARCH_DB'>('PICK_TODAY');
   const [todayFilterQuery, setTodayFilterQuery] = useState<string>('');
-  const [todayPaymentFilter, setTodayPaymentFilter] = useState<'ALL' | 'CASH' | 'UPI'>('ALL');
+  const [todayPaymentFilter, setTodayPaymentFilter] = useState<'ALL' | 'CASH' | 'ONLINE'>('ALL');
   const [addedInModalSet, setAddedInModalSet] = useState<Set<string>>(new Set());
 
   // Search 33k database state
@@ -649,7 +649,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     {onlineCashConflicts.length} Online Bill{onlineCashConflicts.length > 1 ? 's' : ''} Scanned as CASH
                   </span>
                   <p className="text-[10px] text-rose-100 truncate">
-                    BPCL confirms these as PayNBook Online. Convert payment to Online (UPI)?
+                    BPCL confirms these as PayNBook Online. Convert payment to Online?
                   </p>
                 </div>
               </div>
@@ -793,7 +793,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                             type="button"
                             onClick={() => onConvertBillToOnline(bill.consumer_number)}
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg font-black text-[10px] flex items-center gap-1 shadow-xs transition-all shrink-0 ml-auto"
-                            title="Convert payment from CASH to Online (UPI) in Day End"
+                            title="Convert payment from CASH to Online in Day End"
                           >
                             <Zap className="w-3 h-3 text-amber-300 fill-amber-300" />
                             <span>Convert to Online</span>
@@ -980,6 +980,13 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     >
                       CASH ({scannedEntries.filter((e) => e.payment_mode === 'CASH').length})
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setTodayPaymentFilter('ONLINE')}
+                      className={`px-2 py-1 rounded-lg ${todayPaymentFilter === 'ONLINE' ? 'bg-blue-600 text-white font-black' : 'text-slate-400'}`}
+                    >
+                      ONLINE ({scannedEntries.filter((e) => e.payment_mode === 'UPI').length})
+                    </button>
                   </div>
                 </div>
 
@@ -1006,7 +1013,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                           if (!matchNum && !matchName) return false;
                         }
                         if (todayPaymentFilter === 'CASH') return entry.payment_mode === 'CASH';
-                        if (todayPaymentFilter === 'UPI') return entry.payment_mode === 'UPI';
+                        if (todayPaymentFilter === 'ONLINE') return entry.payment_mode === 'UPI';
                         return true;
                       });
 
@@ -1045,11 +1052,11 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                                 <span
                                   className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
                                     entry.payment_mode === 'UPI'
-                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                                       : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                                   }`}
                                 >
-                                  {entry.payment_mode === 'UPI' ? 'Online (UPI)' : 'CASH'}
+                                  {entry.payment_mode === 'UPI' ? 'ONLINE' : 'CASH'}
                                 </span>
                               </div>
                               <h4 className="font-bold text-xs text-slate-200 truncate mt-0.5">

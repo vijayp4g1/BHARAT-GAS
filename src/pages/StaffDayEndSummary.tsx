@@ -941,10 +941,10 @@ export const StaffDayEndSummary: React.FC = () => {
       return updated;
     });
     setHasUnsavedChanges(true);
-    toast.success(`⚡ Converted #${consumerNo} to Online (UPI)!`);
+    toast.success(`⚡ Converted #${consumerNo} to Online!`);
   }, [selectedBoy, reportDate, triggerAutoSave]);
 
-  // Handler to convert ALL online conflicts to Online (UPI)
+  // Handler to convert ALL online conflicts to Online
   const handleConvertAllOnlineConflicts = useCallback(() => {
     if (!activeBpclReport || !selectedBoy) return;
     const { updatedEntries, convertedCount } = autoConvertOnlineBills(entries, activeBpclReport);
@@ -952,13 +952,13 @@ export const StaffDayEndSummary: React.FC = () => {
       setEntries(updatedEntries);
       setHasUnsavedChanges(true);
       triggerAutoSave(updatedEntries, selectedBoy, reportDate);
-      toast.success(`⚡ Converted ${convertedCount} bill${convertedCount > 1 ? 's' : ''} to Online (UPI)!`);
+      toast.success(`⚡ Converted ${convertedCount} bill${convertedCount > 1 ? 's' : ''} to Online!`);
     } else {
-      toast('All online bills are already marked as Online (UPI)', { icon: 'ℹ️' });
+      toast('All online bills are already marked as Online', { icon: 'ℹ️' });
     }
   }, [activeBpclReport, entries, selectedBoy, reportDate, triggerAutoSave, autoConvertOnlineBills]);
 
-  // Effect: Automatically convert any CASH bill to Online (UPI) whenever BPCL online_bills or entries change
+  // Effect: Automatically convert any CASH bill to Online whenever BPCL online_bills or entries change
   useEffect(() => {
     if (!activeBpclReport?.online_bills || activeBpclReport.online_bills.length === 0) return;
     if (entries.length === 0 || !selectedBoy) return;
@@ -969,7 +969,7 @@ export const StaffDayEndSummary: React.FC = () => {
       setHasUnsavedChanges(true);
       triggerAutoSave(updatedEntries, selectedBoy, reportDate);
       toast.success(
-        `⚡ Automatically converted ${convertedCount} online bill${convertedCount > 1 ? 's' : ''} to Online (UPI)!`,
+        `⚡ Automatically converted ${convertedCount} online bill${convertedCount > 1 ? 's' : ''} to Online!`,
         { id: 'auto-convert-online-toast' }
       );
     }
@@ -1730,12 +1730,12 @@ export const StaffDayEndSummary: React.FC = () => {
     text += `📅 *Date:* ${dateFormatted}\n`;
     text += `📊 *Total Bills Scanned:* ${entries.length}\n`;
     text += `🔹 Domestic 14.2kg: ${kpis.count14kg} | 10kg Lite: ${kpis.count10kg} | 19kg Comm: ${kpis.count19kg}\n`;
-    text += `💵 Cash: ${kpis.cashCount} | 📲 UPI: ${kpis.upiCount} | ⏳ Due: ${kpis.dueCount} | 🔄 Empties: ${kpis.emptiesCollected}\n\n`;
+    text += `💵 Cash: ${kpis.cashCount} | 🌐 Online: ${kpis.upiCount} | ⏳ Due: ${kpis.dueCount} | 🔄 Empties: ${kpis.emptiesCollected}\n\n`;
 
     text += `*Bills List:*\n`;
     entries.forEach((item, index) => {
       const typeLabel = item.cylinder_type === '10KG_LITE' ? '[10kg]' : item.cylinder_type === '19KG_COMM' ? '[19kg]' : '[14.2kg]';
-      text += `${index + 1}. #${item.consumer_number} - ${item.consumer_name} ${typeLabel} (${item.payment_mode})\n`;
+      text += `${index + 1}. #${item.consumer_number} - ${item.consumer_name} ${typeLabel} (${item.payment_mode === 'UPI' ? 'Online' : item.payment_mode})\n`;
     });
 
     const cleanPhone = supervisorPhone.replace(/[^0-9]/g, '');
@@ -1932,7 +1932,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 <span>Std: <b>{summary.domestic_14kg}</b></span>
                 {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
                 <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
-                <span className="text-blue-700 font-bold">UPI: {summary.upi_count}</span>
+                <span className="text-blue-700 font-bold">Online: {summary.upi_count}</span>
                 {summary.due_count > 0 && <span className="text-rose-600 font-bold">Due: {summary.due_count}</span>}
               </div>
               {hasScams && (
@@ -2695,7 +2695,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 <span className="text-sm sm:text-base font-black text-emerald-950">{kpis.cashCount}</span>
               </div>
               <div className="bg-indigo-50/80 rounded-xl p-1.5 sm:p-2 border border-indigo-100">
-                <span className="text-[9px] sm:text-[10px] font-bold text-indigo-600 block uppercase truncate">UPI</span>
+                <span className="text-[9px] sm:text-[10px] font-bold text-indigo-600 block uppercase truncate">Online</span>
                 <span className="text-sm sm:text-base font-black text-indigo-950">{kpis.upiCount}</span>
               </div>
             </div>
@@ -3125,9 +3125,9 @@ export const StaffDayEndSummary: React.FC = () => {
                                     ? 'bg-blue-100 text-blue-700 border-blue-300'
                                     : 'bg-rose-100 text-rose-700 border-rose-300'
                                 }`}
-                                title="Tap to change payment mode"
+                                title="Tap to change payment mode (Cash / Online / Due)"
                               >
-                                {item.payment_mode}
+                                {item.payment_mode === 'UPI' ? 'Online' : item.payment_mode === 'CASH' ? 'Cash' : item.payment_mode === 'DUE' ? 'Due' : item.payment_mode}
                               </button>
 
                               {/* Empty Cylinder Toggle */}
