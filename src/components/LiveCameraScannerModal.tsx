@@ -128,7 +128,7 @@ function playWarningAlarm() {
 }
 
 function cleanAndNormalizeDigits(raw: string): string {
-  return raw
+  const digits = raw
     .toUpperCase()
     .replace(/I|L|\|/g, '1')
     .replace(/O|Q/g, '0')
@@ -138,6 +138,9 @@ function cleanAndNormalizeDigits(raw: string): string {
     .replace(/G/g, '6')
     .replace(/T/g, '7')
     .replace(/[^0-9]/g, '');
+
+  const unpadded = digits.replace(/^0+/, '');
+  return unpadded || digits;
 }
 
 export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({

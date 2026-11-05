@@ -1078,7 +1078,7 @@ export const StaffDayEndSummary: React.FC = () => {
       }
     }
 
-    const match = await matchConsumerWithDatabase(cleanInput, cleanInput);
+    const match = await matchConsumerWithDatabase(cleanInput);
     if (match.found) {
       if (entries.some((e) => e.consumer_number.toLowerCase() === match.consumer_number.toLowerCase())) {
         toast.error(`Consumer #${match.consumer_number} is already added`);

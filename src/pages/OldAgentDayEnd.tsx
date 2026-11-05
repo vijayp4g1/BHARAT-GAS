@@ -986,7 +986,7 @@ export const OldAgentDayEnd: React.FC = () => {
       toast.error(`🚨 SCAM ALERT: #${cleanInput} was already claimed by ${claimant.agentName} today!`);
     }
 
-    const match = await matchConsumerWithDatabase(cleanInput, cleanInput);
+    const match = await matchConsumerWithDatabase(cleanInput);
 
     if (match.found) {
       if (entries.some((e) => e.consumer_number.toLowerCase() === match.consumer_number.toLowerCase())) {
@@ -1058,7 +1058,7 @@ export const OldAgentDayEnd: React.FC = () => {
         }
 
         const claimant = crossAgentClaimedMap[token.toLowerCase()];
-        const match = await matchConsumerWithDatabase(token, token);
+        const match = await matchConsumerWithDatabase(token);
         if (match.found) {
           toAdd.push({
             consumer_id: match.consumer_id,

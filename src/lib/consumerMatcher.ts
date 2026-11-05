@@ -36,18 +36,61 @@ export interface MatchResult {
 }
 
 /**
- * Checks if two names have matching significant words
+ * Computes Levenshtein distance between two strings
+ */
+function getLevenshteinDistance(a: string, b: string): number {
+  const an = a ? a.length : 0;
+  const bn = b ? b.length : 0;
+  if (an === 0) return bn;
+  if (bn === 0) return an;
+  const matrix: number[][] = Array.from({ length: bn + 1 }, () => Array(an + 1).fill(0));
+  for (let i = 0; i <= an; i++) matrix[0][i] = i;
+  for (let j = 0; j <= bn; j++) matrix[j][0] = j;
+
+  for (let j = 1; j <= bn; j++) {
+    for (let i = 1; i <= an; i++) {
+      if (a[i - 1] === b[j - 1]) {
+        matrix[j][i] = matrix[j - 1][i - 1];
+      } else {
+        matrix[j][i] = Math.min(
+          matrix[j - 1][i] + 1,
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i - 1] + 1
+        );
+      }
+    }
+  }
+  return matrix[bn][an];
+}
+
+/**
+ * Checks if two individual name tokens are fuzzy matches (substring, common prefix, or Levenshtein distance <= 2).
+ */
+export function areWordsSimilar(w1: string, w2: string): boolean {
+  if (!w1 || !w2) return false;
+  if (w1 === w2) return true;
+  if (w1.length >= 3 && w2.includes(w1)) return true;
+  if (w2.length >= 3 && w1.includes(w2)) return true;
+  // Prefix matching for Indian name roots (e.g. VENKAT, LAKSHM, CHAND)
+  if (w1.length >= 4 && w2.length >= 4 && (w1.startsWith(w2.slice(0, 4)) || w2.startsWith(w1.slice(0, 4)))) return true;
+  const minLen = Math.min(w1.length, w2.length);
+  const maxLen = Math.max(w1.length, w2.length);
+  if (minLen >= 4) {
+    const dist = getLevenshteinDistance(w1, w2);
+    if (dist <= (maxLen >= 6 ? 2 : 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * Checks if two names have matching significant words (with fuzzy tolerance for dot-matrix OCR errors).
  */
 export function areNamesSimilar(name1: string, name2: string): boolean {
   if (!name1 || !name2) return false;
   const words1 = cleanNameWords(name1);
   const words2 = cleanNameWords(name2);
   if (words1.length === 0 || words2.length === 0) return false;
-  return words1.some((w1) =>
-    words2.some(
-      (w2) => w1 === w2 || (w1.length >= 3 && w2.includes(w1)) || (w2.length >= 3 && w1.includes(w2))
-    )
-  );
+  return words1.some((w1) => words2.some((w2) => areWordsSimilar(w1, w2)));
 }
 
 /**
@@ -59,11 +102,11 @@ export function cleanNameWords(raw: string): string[] {
     new Set(
       raw
         .toUpperCase()
-        .replace(/\b(MR|MRS|MS|MISS|SMT|SHRI|DR|M\/S)\.?\b/g, '')
+        .replace(/\b(MR|MRS|MS|MISS|SMT|SHRI|DR|M\/S|WO|W\/O|SO|S\/O|DO|D\/O)\.?\b/g, '')
         .replace(/[^A-Z0-9\s]/g, ' ')
         .trim()
         .split(/\s+/)
-        .filter((w) => w.length >= 2 && !/^(AND|THE|FOR|NOT|GAS|LPG|BHARAT|CONSUMER|SIDDHARTHA|RECEIPT|BILL|NAME)$/.test(w))
+        .filter((w) => w.length >= 2 && !/^(AND|THE|FOR|NOT|GAS|LPG|BHARAT|CONSUMER|SIDDHARTHA|RECEIPT|BILL|NAME|DETAILS|RECEIVER|FRESH|DOMESTIC|CYLINDER|DELIVERY)$/.test(w))
     )
   );
 }
@@ -291,21 +334,32 @@ export async function matchConsumerWithDatabase(
   rawNum: string,
   rawName?: string
 ): Promise<MatchResult> {
-  const cleanNum = (rawNum || '').replace(/[^0-9]/g, '');
+  const digitsOnly = (rawNum || '').replace(/[^0-9]/g, '');
+  const unpadded = digitsOnly.replace(/^0+/, '');
+  const cleanNum = unpadded || digitsOnly;
   const cleanName = (rawName || '').trim();
 
   // Helper to query consumer by number (Dexie first, then remote Supabase)
   async function findByNumber(num: string): Promise<Consumer | null> {
     if (!num) return null;
-    const local = await db.consumers.where('consumer_number').equalsIgnoreCase(num).first();
-    if (local) return local;
+    const rawClean = num.replace(/[^0-9]/g, '');
+    const unpaddedVal = rawClean.replace(/^0+/, '');
+    const numCandidates = Array.from(new Set([rawClean, unpaddedVal].filter(Boolean)));
 
+    // 1. Check local Dexie IndexedDB
+    for (const cNum of numCandidates) {
+      const local = await db.consumers.where('consumer_number').equalsIgnoreCase(cNum).first();
+      if (local) return local;
+    }
+
+    // 2. Check remote Supabase manager_consumer_summary view
     if (navigator.onLine) {
       try {
         const { data } = await supabase
           .from('manager_consumer_summary')
           .select('id, consumer_number, consumer_name, address, mobile')
-          .eq('consumer_number', num)
+          .in('consumer_number', numCandidates)
+          .limit(1)
           .maybeSingle();
 
         if (data) {
@@ -450,14 +504,15 @@ export async function matchConsumerWithDatabase(
           }
         }
 
-        // If names completely conflict, return with mismatch warning (found: false for safety)
+        // Consumer number was directly found in agency database!
+        // Accept the consumer with found: true so valid bills are not blocked by OCR noise on names.
         return {
           consumer_id: directConsumer.id,
           consumer_number: directConsumer.consumer_number,
           consumer_name: directConsumer.consumer_name,
           address: directConsumer.address || '',
           mobile: directConsumer.mobile || '',
-          found: false, // Prevent adding mismatched customer
+          found: true,
           name_verified: false,
         };
       }
