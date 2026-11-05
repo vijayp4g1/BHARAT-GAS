@@ -358,7 +358,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 6mm 8mm 6mm 8mm;
+            margin: 7mm 10mm 7mm 10mm;
           }
           /* Strictly hide Day End page, navigation bars, docks and non-print controls */
           .day-end-main-page,
@@ -376,7 +376,7 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            font-size: 8.5pt !important;
+            font-size: 8pt !important;
             line-height: 1.15 !important;
           }
           .print-modal-container {
@@ -394,7 +394,8 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             margin: 0 !important;
             overflow: visible !important;
           }
-          .print-sheet-content {
+          .print-sheet-content,
+          #printable-online-bills-sheet {
             padding: 0 !important;
             margin: 0 !important;
             width: 100% !important;
@@ -406,30 +407,34 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             width: 100% !important;
             border-collapse: collapse !important;
             page-break-inside: auto;
+            table-layout: fixed !important;
           }
           thead {
             display: table-header-group !important;
           }
+          /* Print table footer only at the very end of all bills, not stamped on every page */
           tfoot {
-            display: table-footer-group !important;
+            display: table-row-group !important;
           }
           tr {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            height: 15.5px !important;
           }
           td, th {
-            padding-top: 1.2px !important;
-            padding-bottom: 1.2px !important;
+            padding-top: 1.5px !important;
+            padding-bottom: 1.5px !important;
             padding-left: 3px !important;
             padding-right: 3px !important;
-            font-size: 8pt !important;
+            font-size: 7.5pt !important;
             line-height: 1.15 !important;
+          }
+          td:first-child, th:first-child {
+            padding-left: 4px !important;
           }
           .signature-section {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            margin-top: 12px !important;
+            margin-top: 8px !important;
           }
         }
       `}</style>
@@ -585,14 +590,14 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
         <div id="printable-online-bills-sheet" className="p-3 sm:p-5 overflow-y-auto flex-1 bg-white text-slate-950 print-sheet-content print:p-0 print:overflow-visible font-sans">
           
           {/* Official Agency Letterhead Header - Sleek & Compact (No Big Letters) */}
-          <div className="border-b border-black pb-1.5 mb-2 text-center print:pb-1 print:mb-1.5">
-            <h1 className="text-base sm:text-lg font-black uppercase tracking-tight text-black print:text-[12pt] print:leading-tight">
+          <div className="border-b border-black pb-1.5 mb-2 text-center print:pb-1 print:mb-1">
+            <h1 className="text-base sm:text-lg font-black uppercase tracking-tight text-black print:text-[11pt] print:leading-tight">
               SIDDHARTHA BHARAT GAS
             </h1>
-            <h2 className="text-[11px] sm:text-xs font-bold uppercase tracking-wide text-slate-800 mt-0.5 print:text-[8.5pt] print:leading-tight">
+            <h2 className="text-[11px] sm:text-xs font-bold uppercase tracking-wide text-slate-800 mt-0.5 print:text-[8pt] print:leading-tight">
               DAILY ONLINE BILLS (PAYNBOOK APPS) SUBMISSION REPORT
             </h2>
-            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-700 mt-1 px-1 border-t border-slate-300 pt-1 flex-wrap gap-1 print:text-[7.5pt]">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-700 mt-1 px-1 border-t border-slate-300 pt-1 flex-wrap gap-1 print:text-[7pt] print:pt-0.5 print:mt-0.5">
               <span>📅 <b>DATE:</b> {formattedDate}</span>
               <span>🏢 <b>REFILL TYPE:</b> PayNBook Apps (Online Paid)</span>
               <span>📊 <b>TOTAL ONLINE BILLS:</b> <b className="text-black">{displayedBills.length}</b></span>
@@ -600,20 +605,20 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           </div>
 
           {/* Delivery Boy Summary Pill Box - Compact 1-liner */}
-          <div className="mb-2 p-1.5 bg-slate-50 rounded-lg border border-slate-300 print:border-slate-400 text-[10px] print:text-[7.5pt] print:p-1 print:mb-1.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold text-slate-900 uppercase tracking-wider text-[9px] print:text-[7.5pt]">
+          <div className="mb-2 p-1.5 bg-slate-50 rounded-lg border border-slate-300 print:border-slate-400 text-[10px] print:text-[7pt] print:p-0.5 print:mb-1">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="font-bold text-slate-900 uppercase tracking-wider text-[9px] print:text-[7pt]">
                 BOYS BREAKDOWN:
               </span>
               {Object.entries(boyBreakdown).map(([bName, data]) => (
                 <span
                   key={bName}
-                  className="bg-white border border-slate-300 text-slate-900 px-1.5 py-0.2 rounded font-semibold text-[9.5px] print:text-[7.5pt]"
+                  className="bg-white border border-slate-300 text-slate-900 px-1 py-0.2 rounded font-semibold text-[9px] print:text-[6.8pt]"
                 >
                   #{data.serial} <b>{bName}:</b> {data.count}
                 </span>
               ))}
-              <span className="bg-black text-white px-2 py-0.2 rounded font-bold text-[9.5px] print:text-[7.5pt] ml-auto">
+              <span className="bg-black text-white px-1.5 py-0.2 rounded font-bold text-[9px] print:text-[7pt] ml-auto">
                 TOTAL: {allOnlineBills.length} BILLS
               </span>
             </div>
@@ -628,16 +633,16 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             /* =================================================================== */
             /* SINGLE FULL-WIDTH TABLE: 50 rows per side, 100 on front & back      */
             /* =================================================================== */
-            <div className="border border-black rounded-md overflow-hidden mb-3">
-              <table className="w-full text-left border-collapse text-[10px] print:text-[8pt]">
+            <div className="border border-black rounded-md overflow-hidden mb-3 print:overflow-visible print:border-black print:rounded-none">
+              <table className="w-full table-fixed text-left border-collapse text-[10px] print:text-[8pt]">
                 <thead>
                   <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[9px] print:text-[7.5pt] tracking-wider">
-                    <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
-                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
-                    <th className="py-1 px-2 border-r border-slate-400">Customer Name</th>
-                    <th className="py-1 px-1.5 border-r border-slate-400 w-24 text-center">Delivery Boy</th>
-                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-20 text-center">Cash Memo</th>
-                    <th className="py-1 px-1.5 font-mono w-20 text-center">Order No</th>
+                    <th className="py-1 px-1 border-r border-slate-400 w-[6%] text-center">S.No</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-[16%] text-center">Consumer No</th>
+                    <th className="py-1 px-2 border-r border-slate-400 w-[34%] text-left">Customer Name</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 w-[22%] text-center whitespace-nowrap">Delivery Boy</th>
+                    <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-[11%] text-center">Cash Memo</th>
+                    <th className="py-1 px-1.5 font-mono w-[11%] text-center">Order No</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
@@ -646,22 +651,22 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                       key={`${bill.consumer_number}-${index}`}
                       className="hover:bg-slate-50 print:hover:bg-transparent"
                     >
-                      <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7.5pt]">
+                      <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7.5pt] truncate">
                         {index + 1}
                       </td>
-                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[8pt] text-center">
+                      <td className="py-0.5 px-1 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9px] print:text-[7.5pt] text-center truncate">
                         #{bill.consumer_number}
                       </td>
-                      <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[8pt]">
+                      <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9px] print:text-[7.5pt]">
                         {bill.consumer_name || 'Consumer'}
                       </td>
-                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7.5pt] text-center">
+                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7.5pt] text-center whitespace-nowrap truncate">
                         #{bill.deliveryBoySerial} {bill.deliveryBoy}
                       </td>
-                      <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center">
+                      <td className="py-0.5 px-1 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center truncate">
                         {bill.cash_memo || '-'}
                       </td>
-                      <td className="py-0.5 px-1.5 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center">
+                      <td className="py-0.5 px-1 font-mono text-slate-700 text-[8.5px] print:text-[7.5pt] text-center truncate">
                         {bill.order_no || '-'}
                       </td>
                     </tr>
@@ -685,29 +690,29 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
             /* =================================================================== */
             <div className="grid grid-cols-2 gap-2 mb-3">
               {/* Left Column Table */}
-              <div className="border border-black rounded-md overflow-hidden">
-                <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
+              <div className="border border-black rounded-md overflow-hidden print:overflow-visible print:border-black print:rounded-none">
+                <table className="w-full table-fixed text-left border-collapse text-[10px] print:text-[7.5pt]">
                   <thead>
                     <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
-                      <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
-                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
-                      <th className="py-1 px-1.5 border-r border-slate-400">Customer Name</th>
-                      <th className="py-1 px-1.5 w-20 text-center">Boy</th>
+                      <th className="py-1 px-1 border-r border-slate-400 w-[9%] text-center">S.No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-[26%] text-center">Consumer No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 w-[41%] text-left">Customer Name</th>
+                      <th className="py-1 px-1.5 w-[24%] text-center whitespace-nowrap">Boy</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-300">
                     {leftColBills.map((bill, index) => (
                       <tr key={`left-${bill.consumer_number}-${index}`}>
-                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
+                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt] truncate">
                           {index + 1}
                         </td>
-                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9px] print:text-[7pt] text-center truncate">
                           #{bill.consumer_number}
                         </td>
-                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9px] print:text-[7pt]">
                           {bill.consumer_name || 'Consumer'}
                         </td>
-                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7pt] text-center">
+                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8px] print:text-[7pt] text-center whitespace-nowrap truncate">
                           #{bill.deliveryBoySerial} {bill.deliveryBoy}
                         </td>
                       </tr>
@@ -717,29 +722,29 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
               </div>
 
               {/* Right Column Table */}
-              <div className="border border-black rounded-md overflow-hidden">
-                <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
+              <div className="border border-black rounded-md overflow-hidden print:overflow-visible print:border-black print:rounded-none">
+                <table className="w-full table-fixed text-left border-collapse text-[10px] print:text-[7.5pt]">
                   <thead>
                     <tr className="bg-slate-200 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
-                      <th className="py-1 px-1 border-r border-slate-400 w-8 text-center">S.No</th>
-                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-24 text-center">Consumer No</th>
-                      <th className="py-1 px-1.5 border-r border-slate-400">Customer Name</th>
-                      <th className="py-1 px-1.5 w-20 text-center">Boy</th>
+                      <th className="py-1 px-1 border-r border-slate-400 w-[9%] text-center">S.No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 font-mono w-[26%] text-center">Consumer No</th>
+                      <th className="py-1 px-1.5 border-r border-slate-400 w-[41%] text-left">Customer Name</th>
+                      <th className="py-1 px-1.5 w-[24%] text-center whitespace-nowrap">Boy</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-300">
                     {rightColBills.map((bill, index) => (
                       <tr key={`right-${bill.consumer_number}-${index}`}>
-                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
+                        <td className="py-0.5 px-1 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt] truncate">
                           {halfLength + index + 1}
                         </td>
-                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9px] print:text-[7pt] text-center truncate">
                           #{bill.consumer_number}
                         </td>
-                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                        <td className="py-0.5 px-1.5 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9px] print:text-[7pt]">
                           {bill.consumer_name || 'Consumer'}
                         </td>
-                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8.5px] print:text-[7pt] text-center">
+                        <td className="py-0.5 px-1.5 font-semibold text-slate-800 uppercase text-[8px] print:text-[7pt] text-center whitespace-nowrap truncate">
                           #{bill.deliveryBoySerial} {bill.deliveryBoy}
                         </td>
                       </tr>
@@ -767,39 +772,39 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
                 if (boyBills.length === 0) return null;
 
                 return (
-                  <div key={boyName} className="border border-black rounded-md overflow-hidden">
+                  <div key={boyName} className="border border-black rounded-md overflow-hidden print:overflow-visible print:border-black print:rounded-none">
                     <div className="bg-slate-800 text-white p-1.5 flex items-center justify-between text-[10px] font-bold print:bg-slate-200 print:text-black print:border-b print:border-black print:text-[7.5pt]">
                       <span className="uppercase tracking-wide">
                         DELIVERY BOY: #{boyBreakdown[boyName].serial} {boyName}
                       </span>
                       <span>{boyBills.length} Online Bills</span>
                     </div>
-                    <table className="w-full text-left border-collapse text-[10px] print:text-[7.5pt]">
+                    <table className="w-full table-fixed text-left border-collapse text-[10px] print:text-[7.5pt]">
                       <thead>
                         <tr className="bg-slate-100 border-b border-black text-black uppercase font-bold text-[8.5px] print:text-[7pt]">
-                          <th className="py-0.5 px-1.5 border-r border-slate-300 w-9 text-center">S.No</th>
-                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-28">Consumer No</th>
-                          <th className="py-0.5 px-2 border-r border-slate-300">Customer Name</th>
-                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-24">Cash Memo</th>
-                          <th className="py-0.5 px-2 font-mono text-center w-24">Order No</th>
+                          <th className="py-0.5 px-1.5 border-r border-slate-300 w-[7%] text-center">S.No</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-[20%]">Consumer No</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300 w-[45%] text-left">Customer Name</th>
+                          <th className="py-0.5 px-2 border-r border-slate-300 font-mono text-center w-[14%]">Cash Memo</th>
+                          <th className="py-0.5 px-2 font-mono text-center w-[14%]">Order No</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-300">
                         {boyBills.map((bill, index) => (
                           <tr key={`${bill.consumer_number}-${index}`}>
-                            <td className="py-0.5 px-1.5 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt]">
+                            <td className="py-0.5 px-1.5 border-r border-slate-300 text-center font-semibold text-slate-700 text-[8.5px] print:text-[7pt] truncate">
                               {index + 1}
                             </td>
-                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9.5px] print:text-[7.5pt] text-center">
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono font-bold text-slate-950 text-[9px] print:text-[7.5pt] text-center truncate">
                               #{bill.consumer_number}
                             </td>
-                            <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9.5px] print:text-[7.5pt]">
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-medium text-slate-900 uppercase truncate text-[9px] print:text-[7.5pt]">
                               {bill.consumer_name || 'Consumer'}
                             </td>
-                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center">
+                            <td className="py-0.5 px-2 border-r border-slate-300 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center truncate">
                               {bill.cash_memo || '-'}
                             </td>
-                            <td className="py-0.5 px-2 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center">
+                            <td className="py-0.5 px-2 font-mono text-slate-700 text-[8.5px] print:text-[7pt] text-center truncate">
                               {bill.order_no || '-'}
                             </td>
                           </tr>
@@ -813,23 +818,23 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           )}
 
           {/* Official Signatures Section for Office / Xerox Submission - Compact */}
-          <div className="mt-4 pt-2 border-t border-black grid grid-cols-3 gap-3 text-center text-[10px] print:text-[8pt] signature-section print:mt-3 print:pt-2">
+          <div className="mt-4 pt-2 border-t border-black grid grid-cols-3 gap-3 text-center text-[10px] print:text-[7.5pt] signature-section print:mt-2 print:pt-1.5">
             <div>
-              <p className="font-bold text-slate-800 mb-4 print:mb-3">Prepared By (Staff):</p>
+              <p className="font-bold text-slate-800 mb-3 print:mb-1.5">Prepared By (Staff):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Signature & Date</span>
+                <span className="font-mono text-[9px] print:text-[6.5pt] text-slate-600">Signature & Date</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-4 print:mb-3">Verified By (Manager):</p>
+              <p className="font-bold text-slate-800 mb-3 print:mb-1.5">Verified By (Manager):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Signature & Seal</span>
+                <span className="font-mono text-[9px] print:text-[6.5pt] text-slate-600">Signature & Seal</span>
               </div>
             </div>
             <div>
-              <p className="font-bold text-slate-800 mb-4 print:mb-3">Submitted To (BPCL Office):</p>
+              <p className="font-bold text-slate-800 mb-3 print:mb-1.5">Submitted To (BPCL Office):</p>
               <div className="border-t border-dotted border-black pt-1">
-                <span className="font-mono text-[9px] print:text-[7pt] text-slate-600">Officer Signature & Stamp</span>
+                <span className="font-mono text-[9px] print:text-[6.5pt] text-slate-600">Officer Signature & Stamp</span>
               </div>
             </div>
           </div>
