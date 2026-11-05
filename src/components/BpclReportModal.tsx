@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   FileText, 
@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import { 
   parseBpclReportText, 
   saveBpclReportToCloud, 
+  sanitizeRawTextWithActiveBills,
   type BpclBillItem, 
   type BpclReportData 
 } from '../lib/bpclReportService';
@@ -39,11 +40,32 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   existingReport,
   onSaved,
 }) => {
-  const [rawText, setRawText] = useState<string>(existingReport?.raw_text || '');
+  const [rawText, setRawText] = useState<string>(() => {
+    if (!existingReport?.raw_text) return '';
+    return sanitizeRawTextWithActiveBills(
+      existingReport.raw_text,
+      existingReport.pending_bills,
+      existingReport.online_bills
+    );
+  });
   const [markCheckedDone, setMarkCheckedDone] = useState<boolean>(
     existingReport?.checked_done ?? true
   );
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (existingReport?.raw_text) {
+      setRawText(
+        sanitizeRawTextWithActiveBills(
+          existingReport.raw_text,
+          existingReport.pending_bills,
+          existingReport.online_bills
+        )
+      );
+    } else {
+      setRawText('');
+    }
+  }, [existingReport?.raw_text, existingReport?.pending_bills, existingReport?.online_bills]);
 
   if (!isOpen) return null;
 

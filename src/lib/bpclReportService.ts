@@ -52,7 +52,15 @@ export function extractBpclReportFromNotes(notes: string | null | undefined): Bp
       raw = raw.split(SCANNED_TAG)[0];
     }
     const jsonStr = raw.trim();
-    return JSON.parse(jsonStr);
+    const parsed: BpclReportData = JSON.parse(jsonStr);
+    if (parsed && parsed.raw_text) {
+      parsed.raw_text = sanitizeRawTextWithActiveBills(
+        parsed.raw_text,
+        parsed.pending_bills,
+        parsed.online_bills
+      );
+    }
+    return parsed;
   } catch (e) {
     console.warn('Failed to parse BPCL report from notes:', e);
     return null;
@@ -161,12 +169,189 @@ export function parseBpclReportText(rawText: string): {
 }
 
 /**
+ * Removes a specific bill's text block from the raw BPCL report text.
+ * Keeps the remaining text, section headers, and formatting completely clean.
+ */
+export function removeBillFromRawText(
+  rawText: string | undefined | null,
+  consumerNumber: string,
+  billType?: 'PENDING' | 'ONLINE'
+): string {
+  if (!rawText || !rawText.trim()) return '';
+  const num = consumerNumber.trim();
+  const escapedNum = num.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const billPattern =
+    '(?:\\r?\\n)*[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*' +
+    escapedNum +
+    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook)|$))';
+
+  if (!billType) {
+    return rawText
+      .replace(new RegExp(billPattern, 'i'), '')
+      .replace(/(\r?\n){3,}/g, '\n\n')
+      .trim();
+  }
+
+  // Section-aware removal
+  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+  const sections = rawText.split(sectionSplitter);
+
+  const updatedSections = sections.map((sec) => {
+    let secType: 'PENDING' | 'ONLINE' = 'PENDING';
+    if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
+      secType = 'ONLINE';
+    } else if (/Delivery Pending/i.test(sec)) {
+      secType = 'PENDING';
+    }
+
+    if (secType !== billType) {
+      return sec;
+    }
+
+    return sec.replace(new RegExp(billPattern, 'i'), '');
+  });
+
+  return updatedSections
+    .join('')
+    .replace(/(\r?\n){3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Formats a single BpclBillItem as standard BPCL text chunk.
+ */
+export function formatBpclBillBlock(bill: BpclBillItem): string {
+  const lines: string[] = [
+    `*Consumer No:* ${bill.consumer_number}`,
+    `*Customer Name:* ${bill.consumer_name || 'Consumer'}`,
+  ];
+  if (bill.order_no) lines.push(`Order No: ${bill.order_no}`);
+  if (bill.refill_type) lines.push(`Refill Type: ${bill.refill_type}`);
+  if (bill.book_date) lines.push(`Book Date: ${bill.book_date}`);
+  if (bill.cash_memo) lines.push(`Cash Memo: ${bill.cash_memo}`);
+  if (bill.status) lines.push(`Status: ${bill.status}`);
+  return lines.join('\n');
+}
+
+/**
+ * Appends a bill block to the raw BPCL text under the appropriate section.
+ */
+export function appendBillToRawText(
+  rawText: string | undefined | null,
+  bill: BpclBillItem
+): string {
+  const current = (rawText || '').trim();
+  const billBlock = formatBpclBillBlock(bill);
+
+  if (!current) {
+    const header =
+      bill.type === 'PENDING'
+        ? '*BPCL Status Report: Delivery Pending*'
+        : '*BPCL Status Report: Online Bills (PayNBook)*';
+    return `${header}\n\n${billBlock}`;
+  }
+
+  const targetRegex =
+    bill.type === 'PENDING' ? /Delivery Pending/i : /Online Bills|PayNBook|Online Paid/i;
+
+  if (targetRegex.test(current)) {
+    const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+    const sections = current.split(sectionSplitter);
+    let inserted = false;
+    const updatedSections = sections.map((sec) => {
+      if (inserted) return sec;
+      let secType: 'PENDING' | 'ONLINE' = 'PENDING';
+      if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
+        secType = 'ONLINE';
+      }
+      if (secType === bill.type) {
+        inserted = true;
+        return `${sec.trim()}\n\n${billBlock}\n`;
+      }
+      return sec;
+    });
+    return updatedSections
+      .join('\n\n')
+      .replace(/(\r?\n){3,}/g, '\n\n')
+      .trim();
+  } else {
+    const header =
+      bill.type === 'PENDING'
+        ? '*BPCL Status Report: Delivery Pending*'
+        : '*BPCL Status Report: Online Bills (PayNBook)*';
+    return `${current}\n\n${header}\n\n${billBlock}`;
+  }
+}
+
+/**
+ * Synchronizes rawText with active pending and online bills,
+ * purging any deleted/stale bills that might linger in the raw report text.
+ */
+export function sanitizeRawTextWithActiveBills(
+  rawText: string | undefined | null,
+  pendingBills?: BpclBillItem[],
+  onlineBills?: BpclBillItem[]
+): string {
+  if (!rawText || !rawText.trim()) return '';
+  if (!pendingBills && !onlineBills) return rawText;
+
+  const activePendingSet = new Set(
+    (pendingBills || []).map((b) => b.consumer_number.trim().toLowerCase())
+  );
+  const activeOnlineSet = new Set(
+    (onlineBills || []).map((b) => b.consumer_number.trim().toLowerCase())
+  );
+
+  const billPattern =
+    '(?:\\r?\\n)*[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*' +
+    '([0-9a-zA-Z]+)' +
+    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook)|$))';
+
+  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+  const sections = rawText.split(sectionSplitter);
+
+  const cleanedSections = sections.map((sec) => {
+    let secType: 'PENDING' | 'ONLINE' = 'PENDING';
+    if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
+      secType = 'ONLINE';
+    } else if (/Delivery Pending/i.test(sec)) {
+      secType = 'PENDING';
+    }
+
+    const activeSet = secType === 'PENDING' ? activePendingSet : activeOnlineSet;
+
+    return sec.replace(new RegExp(billPattern, 'gi'), (match, consNo) => {
+      const cleanNo = (consNo || '').trim().toLowerCase();
+      if (!activeSet.has(cleanNo)) {
+        return '';
+      }
+      return match;
+    });
+  });
+
+  return cleanedSections
+    .join('')
+    .replace(/(\r?\n){3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Retrieve local cached BPCL report for a delivery boy
  */
 export function getLocalBpclReport(dateStr: string, agentName: string): BpclReportData | null {
   try {
     const raw = localStorage.getItem(getStorageKey(dateStr, agentName));
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const data: BpclReportData = JSON.parse(raw);
+    if (data && data.raw_text) {
+      data.raw_text = sanitizeRawTextWithActiveBills(
+        data.raw_text,
+        data.pending_bills,
+        data.online_bills
+      );
+    }
+    return data;
   } catch {
     return null;
   }
@@ -445,11 +630,14 @@ export async function addBpclBillManually(
     updatedOnline.unshift(bill);
   }
 
+  const updatedRawText = appendBillToRawText(current.raw_text, bill);
+
   const updatedReport: BpclReportData = {
     ...current,
     checked_done: true,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
+    raw_text: updatedRawText,
     updated_at: new Date().toISOString(),
   };
 
@@ -460,7 +648,7 @@ export async function addBpclBillManually(
     checked_done: true,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
-    raw_text: current.raw_text,
+    raw_text: updatedRawText,
     checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
   });
 
@@ -512,11 +700,19 @@ export async function updateBpclBill(
     updatedOnline.unshift(updatedBill);
   }
 
+  let updatedRawText = removeBillFromRawText(
+    current.raw_text,
+    originalConsumerNumber,
+    originalType
+  );
+  updatedRawText = appendBillToRawText(updatedRawText, updatedBill);
+
   const updatedReport: BpclReportData = {
     ...current,
     checked_done: true,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
+    raw_text: updatedRawText,
     updated_at: new Date().toISOString(),
   };
 
@@ -527,7 +723,7 @@ export async function updateBpclBill(
     checked_done: current.checked_done,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
-    raw_text: current.raw_text,
+    raw_text: updatedRawText,
     checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
   });
 
@@ -562,10 +758,13 @@ export async function deleteBpclBill(
     ? current.online_bills.filter((b) => b.consumer_number.trim().toLowerCase() !== cleanNum)
     : current.online_bills;
 
+  const updatedRawText = removeBillFromRawText(current.raw_text, consumerNumber, billType);
+
   const updatedReport: BpclReportData = {
     ...current,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
+    raw_text: updatedRawText,
     updated_at: new Date().toISOString(),
   };
 
@@ -576,7 +775,7 @@ export async function deleteBpclBill(
     checked_done: current.checked_done,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
-    raw_text: current.raw_text,
+    raw_text: updatedRawText,
     checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
   });
 
@@ -637,10 +836,20 @@ export async function clearPendingBillAndMarkDelivered(
     }
   }
 
+  let updatedRawText = removeBillFromRawText(current.raw_text, consumerNumber, 'PENDING');
+  if (isOnlinePaid && pendingBill) {
+    updatedRawText = appendBillToRawText(updatedRawText, {
+      ...pendingBill,
+      status: 'Online Bill (Delivery Done)',
+      type: 'ONLINE',
+    });
+  }
+
   const updatedReport: BpclReportData = {
     ...current,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
+    raw_text: updatedRawText,
     updated_at: new Date().toISOString(),
   };
 
@@ -651,7 +860,7 @@ export async function clearPendingBillAndMarkDelivered(
     checked_done: current.checked_done,
     pending_bills: updatedPending,
     online_bills: updatedOnline,
-    raw_text: current.raw_text,
+    raw_text: updatedRawText,
     checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
   });
 
