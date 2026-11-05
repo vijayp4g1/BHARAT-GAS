@@ -62,6 +62,7 @@ import {
 import { BpclReportModal } from '../components/BpclReportModal';
 import { BpclBillsView } from '../components/BpclBillsView';
 import { ExportOnlineBillsModal } from '../components/ExportOnlineBillsModal';
+import { ExportPendingBillsModal } from '../components/ExportPendingBillsModal';
 
 export type ItemEntry = DayEndEntry;
 
@@ -134,11 +135,19 @@ export const StaffDayEndSummary: React.FC = () => {
   const [activeBpclReport, setActiveBpclReport] = useState<BpclReportData | null>(null);
   const [isBpclModalOpen, setIsBpclModalOpen] = useState<boolean>(false);
   const [isExportOnlineModalOpen, setIsExportOnlineModalOpen] = useState<boolean>(false);
+  const [isExportPendingModalOpen, setIsExportPendingModalOpen] = useState<boolean>(false);
 
   // Total online bills count across all delivery boys for this date
   const totalRosterOnlineCount = useMemo(() => {
     return Object.values(bpclReportsMap).reduce((acc, rep) => {
       return acc + (rep?.online_bills?.length || 0);
+    }, 0);
+  }, [bpclReportsMap]);
+
+  // Total pending bills count across all delivery boys for this date
+  const totalRosterPendingCount = useMemo(() => {
+    return Object.values(bpclReportsMap).reduce((acc, rep) => {
+      return acc + (rep?.pending_bills?.length || 0);
     }, 0);
   }, [bpclReportsMap]);
 
@@ -2247,6 +2256,17 @@ export const StaffDayEndSummary: React.FC = () => {
                 <p className="text-[11px] text-slate-500">Every staff member sees live scanned bills here</p>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
+                {totalRosterPendingCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsExportPendingModalOpen(true)}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all active:scale-95 shadow-2xs"
+                    title="Print or Export All Delivery Pending Bills"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Pending Bills ({totalRosterPendingCount})</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsExportOnlineModalOpen(true)}
@@ -2266,37 +2286,74 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
             </div>
 
-            {/* Export All Online Bills Big Xerox Banner */}
-            <button
-              type="button"
-              onClick={() => setIsExportOnlineModalOpen(true)}
-              className="w-full mb-3 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-indigo-700/20 border-2 border-indigo-400/40 flex items-center justify-between gap-2 transition-all"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-950 text-indigo-300 flex items-center justify-center font-black shrink-0 shadow-md border border-indigo-400/30">
-                  <Printer className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-300 animate-pulse" />
-                </div>
-                <div className="min-w-0 text-left">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[9px] font-black uppercase bg-slate-950 text-amber-300 px-1.5 py-0.2 rounded font-mono">
-                      XEROX PRINT
-                    </span>
-                    <h3 className="text-xs font-black uppercase text-white truncate">
-                      Export All Online Bills
-                    </h3>
+            {/* Export Xerox Banners: Pending Bills & Online Bills */}
+            <div className={`grid gap-2 mb-3 ${totalRosterPendingCount > 0 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              {/* Export All Pending Bills Banner */}
+              {totalRosterPendingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsExportPendingModalOpen(true)}
+                  className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-amber-600/20 border-2 border-amber-300/40 flex items-center justify-between gap-2 transition-all text-left"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-950 text-amber-300 flex items-center justify-center font-black shrink-0 shadow-md border border-amber-400/30">
+                      <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 animate-pulse" />
+                    </div>
+                    <div className="min-w-0 text-left">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-black uppercase bg-slate-950 text-amber-300 px-1.5 py-0.2 rounded font-mono">
+                          XEROX PRINT
+                        </span>
+                        <h3 className="text-xs font-black uppercase text-white truncate">
+                          Export Pending Bills
+                        </h3>
+                      </div>
+                      <p className="text-[11px] text-amber-100 font-medium truncate mt-0.5">
+                        Print pending sheet for all delivery boys ({deliveryBoys.length} boys)
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-indigo-100 font-medium truncate mt-0.5">
-                    Print single submission sheet for all delivery boys ({deliveryBoys.length} boys)
-                  </p>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="bg-slate-950 text-amber-300 text-[11px] sm:text-xs font-black px-2 sm:px-2.5 py-1 rounded-xl shadow-sm whitespace-nowrap border border-amber-400/30">
+                      {totalRosterPendingCount} <span className="hidden sm:inline">Pending Bills</span><span className="sm:hidden">Pending</span>
+                    </span>
+                    <span className="text-amber-200 text-sm">&rarr;</span>
+                  </div>
+                </button>
+              )}
+
+              {/* Export All Online Bills Big Xerox Banner */}
+              <button
+                type="button"
+                onClick={() => setIsExportOnlineModalOpen(true)}
+                className="bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-indigo-700/20 border-2 border-indigo-400/40 flex items-center justify-between gap-2 transition-all text-left"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-950 text-indigo-300 flex items-center justify-center font-black shrink-0 shadow-md border border-indigo-400/30">
+                    <Printer className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-300 animate-pulse" />
+                  </div>
+                  <div className="min-w-0 text-left">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-black uppercase bg-slate-950 text-amber-300 px-1.5 py-0.2 rounded font-mono">
+                        XEROX PRINT
+                      </span>
+                      <h3 className="text-xs font-black uppercase text-white truncate">
+                        Export All Online Bills
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-indigo-100 font-medium truncate mt-0.5">
+                      Print single submission sheet for all delivery boys ({deliveryBoys.length} boys)
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <span className="bg-amber-400 text-slate-950 text-[11px] sm:text-xs font-black px-2 sm:px-2.5 py-1 rounded-xl shadow-sm whitespace-nowrap">
-                  {totalRosterOnlineCount} <span className="hidden sm:inline">Online Bills</span><span className="sm:hidden">Online</span>
-                </span>
-                <span className="text-indigo-200 text-sm">&rarr;</span>
-              </div>
-            </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="bg-amber-400 text-slate-950 text-[11px] sm:text-xs font-black px-2 sm:px-2.5 py-1 rounded-xl shadow-sm whitespace-nowrap">
+                    {totalRosterOnlineCount} <span className="hidden sm:inline">Online Bills</span><span className="sm:hidden">Online</span>
+                  </span>
+                  <span className="text-indigo-200 text-sm">&rarr;</span>
+                </div>
+              </button>
+            </div>
 
             {/* Total Scams Alert Banner in Roster */}
             {totalRosterScamsCount > 0 && (
@@ -2626,6 +2683,7 @@ export const StaffDayEndSummary: React.FC = () => {
             onToggleCheckedDone={handleToggleActiveCheckedDone}
             onAddBillToScanned={handleAddPendingBillToScanned}
             onOpenExportAllOnline={() => setIsExportOnlineModalOpen(true)}
+            onOpenExportAllPending={() => setIsExportPendingModalOpen(true)}
             onConvertBillToOnline={handleConvertBillToOnline}
             onConvertAllOnlineConflicts={handleConvertAllOnlineConflicts}
             onReportUpdated={(newRep) => {
@@ -3157,6 +3215,17 @@ export const StaffDayEndSummary: React.FC = () => {
         <ExportOnlineBillsModal
           isOpen={isExportOnlineModalOpen}
           onClose={() => setIsExportOnlineModalOpen(false)}
+          reportDate={reportDate}
+          deliveryBoys={deliveryBoys}
+          bpclReportsMap={bpclReportsMap}
+        />
+      )}
+
+      {/* Export All Pending Bills Sheet Modal */}
+      {isExportPendingModalOpen && (
+        <ExportPendingBillsModal
+          isOpen={isExportPendingModalOpen}
+          onClose={() => setIsExportPendingModalOpen(false)}
           reportDate={reportDate}
           deliveryBoys={deliveryBoys}
           bpclReportsMap={bpclReportsMap}

@@ -44,6 +44,7 @@ interface BpclBillsViewProps {
   onAddBillToScanned?: (bill: BpclBillItem) => void;
   onReportUpdated?: (report: BpclReportData) => void;
   onOpenExportAllOnline?: () => void;
+  onOpenExportAllPending?: () => void;
   onConvertBillToOnline?: (consumerNo: string) => void;
   onConvertAllOnlineConflicts?: () => void;
 }
@@ -58,6 +59,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   onAddBillToScanned,
   onReportUpdated,
   onOpenExportAllOnline,
+  onOpenExportAllPending,
   onConvertBillToOnline,
   onConvertAllOnlineConflicts,
 }) => {
@@ -609,7 +611,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   <span>Copy CSV</span>
                 </button>
 
-                {onOpenExportAllOnline && (
+                {activeTab === 'ONLINE' && onOpenExportAllOnline && (
                   <button
                     type="button"
                     onClick={onOpenExportAllOnline}
@@ -617,6 +619,18 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                     title="Print or Export all delivery boys online bills"
                   >
                     <Printer className="w-3 h-3 text-indigo-600" />
+                    <span>Print All</span>
+                  </button>
+                )}
+
+                {activeTab === 'PENDING' && onOpenExportAllPending && (
+                  <button
+                    type="button"
+                    onClick={onOpenExportAllPending}
+                    className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-xl text-[11px] font-black flex items-center gap-1 transition-colors"
+                    title="Print or Export all delivery boys pending bills"
+                  >
+                    <Printer className="w-3 h-3 text-amber-700" />
                     <span>Print All</span>
                   </button>
                 )}
