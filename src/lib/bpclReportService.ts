@@ -198,11 +198,12 @@ export function removeBillFromRawText(
   const sections = rawText.split(sectionSplitter);
 
   const updatedSections = sections.map((sec) => {
+    const firstLine = sec.trim().split(/\r?\n/)[0] || '';
     let secType: 'PENDING' | 'ONLINE' = 'PENDING';
-    if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
-      secType = 'ONLINE';
-    } else if (/Delivery Pending/i.test(sec)) {
+    if (/Delivery Pending/i.test(firstLine)) {
       secType = 'PENDING';
+    } else if (/Online Bills|PayNBook|Online Paid/i.test(firstLine)) {
+      secType = 'ONLINE';
     }
 
     if (secType !== billType) {
@@ -312,11 +313,12 @@ export function sanitizeRawTextWithActiveBills(
   const sections = rawText.split(sectionSplitter);
 
   const cleanedSections = sections.map((sec) => {
+    const firstLine = sec.trim().split(/\r?\n/)[0] || '';
     let secType: 'PENDING' | 'ONLINE' = 'PENDING';
-    if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
-      secType = 'ONLINE';
-    } else if (/Delivery Pending/i.test(sec)) {
+    if (/Delivery Pending/i.test(firstLine)) {
       secType = 'PENDING';
+    } else if (/Online Bills|PayNBook|Online Paid/i.test(firstLine)) {
+      secType = 'ONLINE';
     }
 
     const activeSet = secType === 'PENDING' ? activePendingSet : activeOnlineSet;
