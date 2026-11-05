@@ -23,6 +23,7 @@ export interface BpclReportData {
   checked_done: boolean;
   checked_at?: string;
   checked_by?: string;
+  archived?: boolean;
   pending_bills: BpclBillItem[];
   online_bills: BpclBillItem[];
   raw_text?: string;
@@ -271,6 +272,7 @@ export async function saveBpclReportToCloud(payload: {
   agentName: string;
   agentId?: string;
   checked_done: boolean;
+  archived?: boolean;
   pending_bills: BpclBillItem[];
   online_bills: BpclBillItem[];
   raw_text?: string;
@@ -286,6 +288,7 @@ export async function saveBpclReportToCloud(payload: {
     checked_done: payload.checked_done,
     checked_at: payload.checked_done ? nowIso : undefined,
     checked_by: payload.checked_by || localStorage.getItem('bgcls_agent_name') || 'Staff',
+    archived: payload.archived,
     pending_bills: payload.pending_bills,
     online_bills: payload.online_bills,
     raw_text: payload.raw_text,
@@ -581,6 +584,41 @@ export async function toggleBillsCheckedDone(
     agentName: normName,
     agentId,
     checked_done: nextStatus,
+    archived: current.archived,
+    pending_bills: current.pending_bills,
+    online_bills: current.online_bills,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+}
+
+/**
+ * Fast 1-click toggle for Delivery Boy "Archived / Completed" status
+ */
+export async function toggleBoyArchived(
+  dateStr: string,
+  agentName: string,
+  agentId?: string,
+  explicitStatus?: boolean
+): Promise<boolean> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: false,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const nextStatus = explicitStatus !== undefined ? explicitStatus : !current.archived;
+
+  return saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: current.checked_done,
+    archived: nextStatus,
     pending_bills: current.pending_bills,
     online_bills: current.online_bills,
     raw_text: current.raw_text,
