@@ -146,12 +146,28 @@ export const StaffDayEndSummary: React.FC = () => {
   const [isExportOnlineModalOpen, setIsExportOnlineModalOpen] = useState<boolean>(false);
   const [isExportPendingModalOpen, setIsExportPendingModalOpen] = useState<boolean>(false);
 
-  // Total online bills count across all delivery boys for this date
+  // Total online bills count across all delivery boys for this date.
+  // Uses AI report (bpclReportsMap) as the primary source when available.
+  // Falls back to scanned bill upi_count (rosterSummaries) for boys without an AI report,
+  // so the header count always reflects the true total.
   const totalRosterOnlineCount = useMemo(() => {
-    return Object.values(bpclReportsMap).reduce((acc, rep) => {
-      return acc + (rep?.online_bills?.length || 0);
-    }, 0);
-  }, [bpclReportsMap]);
+    let total = 0;
+    const allNames = new Set([
+      ...Object.keys(bpclReportsMap),
+      ...Object.keys(rosterSummaries),
+    ]);
+    allNames.forEach((normName) => {
+      const bpclCount = bpclReportsMap[normName]?.online_bills?.length;
+      if (bpclCount != null) {
+        // AI report is available — use its online_bills count (authoritative)
+        total += bpclCount;
+      } else {
+        // No AI report for this boy — fall back to scanned UPI count
+        total += rosterSummaries[normName]?.upi_count || 0;
+      }
+    });
+    return total;
+  }, [bpclReportsMap, rosterSummaries]);
 
   // Total pending bills count across all delivery boys for this date
   const totalRosterPendingCount = useMemo(() => {
