@@ -24,6 +24,7 @@ export interface BpclReportData {
   checked_at?: string;
   checked_by?: string;
   archived?: boolean;
+  no_supply?: boolean;
   pending_bills: BpclBillItem[];
   online_bills: BpclBillItem[];
   raw_text?: string;
@@ -273,6 +274,7 @@ export async function saveBpclReportToCloud(payload: {
   agentId?: string;
   checked_done: boolean;
   archived?: boolean;
+  no_supply?: boolean;
   pending_bills: BpclBillItem[];
   online_bills: BpclBillItem[];
   raw_text?: string;
@@ -289,6 +291,7 @@ export async function saveBpclReportToCloud(payload: {
     checked_at: payload.checked_done ? nowIso : undefined,
     checked_by: payload.checked_by || localStorage.getItem('bgcls_agent_name') || 'Staff',
     archived: payload.archived,
+    no_supply: payload.no_supply,
     pending_bills: payload.pending_bills,
     online_bills: payload.online_bills,
     raw_text: payload.raw_text,
@@ -619,6 +622,42 @@ export async function toggleBoyArchived(
     agentId,
     checked_done: current.checked_done,
     archived: nextStatus,
+    no_supply: nextStatus ? false : current.no_supply,
+    pending_bills: current.pending_bills,
+    online_bills: current.online_bills,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+}
+
+/**
+ * Fast 1-click toggle for Delivery Boy "No Supply Today" status
+ */
+export async function toggleBoyNoSupply(
+  dateStr: string,
+  agentName: string,
+  agentId?: string,
+  explicitStatus?: boolean
+): Promise<boolean> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: false,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const nextStatus = explicitStatus !== undefined ? explicitStatus : !current.no_supply;
+
+  return saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: current.checked_done,
+    archived: nextStatus ? false : current.archived, // If marked no-supply, clear archived
+    no_supply: nextStatus,
     pending_bills: current.pending_bills,
     online_bills: current.online_bills,
     raw_text: current.raw_text,

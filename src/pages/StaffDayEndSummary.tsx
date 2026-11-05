@@ -34,7 +34,8 @@ import {
   Clock,
   Globe,
   Printer,
-  Archive
+  Archive,
+  Ban
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -54,6 +55,7 @@ import {
   fetchAllBpclReportsForDate, 
   toggleBillsCheckedDone, 
   toggleBoyArchived,
+  toggleBoyNoSupply,
   type BpclReportData, 
   type BpclBillItem 
 } from '../lib/bpclReportService';
@@ -152,20 +154,40 @@ export const StaffDayEndSummary: React.FC = () => {
       return new Set();
     }
   });
+
+  // No Supply Delivery Boys State for selected date (did not go for delivery, moved to downside)
+  const [noSupplyBoyNames, setNoSupplyBoyNames] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(`bgcls_no_supply_boys_${todayIso}`);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
   const [isArchivedCollapsed, setIsArchivedCollapsed] = useState<boolean>(false);
 
-  // Sync archivedBoyNames when reportDate changes or bpclReportsMap is fetched
+  // Sync archivedBoyNames and noSupplyBoyNames when reportDate changes or bpclReportsMap is fetched
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(`bgcls_archived_boys_${reportDate}`);
-      const baseSet = stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+      const storedArchived = localStorage.getItem(`bgcls_archived_boys_${reportDate}`);
+      const baseArchived = storedArchived ? new Set<string>(JSON.parse(storedArchived)) : new Set<string>();
+
+      const storedNoSupply = localStorage.getItem(`bgcls_no_supply_boys_${reportDate}`);
+      const baseNoSupply = storedNoSupply ? new Set<string>(JSON.parse(storedNoSupply)) : new Set<string>();
 
       Object.entries(bpclReportsMap).forEach(([normName, rep]) => {
         if (rep?.archived) {
-          baseSet.add(normName);
+          baseArchived.add(normName);
+          baseNoSupply.delete(normName);
+        }
+        if (rep?.no_supply) {
+          baseNoSupply.add(normName);
+          baseArchived.delete(normName);
         }
       });
-      setArchivedBoyNames(baseSet);
+      setArchivedBoyNames(baseArchived);
+      setNoSupplyBoyNames(baseNoSupply);
     } catch (_) {}
   }, [reportDate, bpclReportsMap]);
 
@@ -190,6 +212,16 @@ export const StaffDayEndSummary: React.FC = () => {
     });
 
     if (nextStatus) {
+      // Clear no-supply if archiving
+      setNoSupplyBoyNames((prev) => {
+        if (!prev.has(norm)) return prev;
+        const next = new Set(prev);
+        next.delete(norm);
+        try {
+          localStorage.setItem(`bgcls_no_supply_boys_${reportDate}`, JSON.stringify(Array.from(next)));
+        } catch (_) {}
+        return next;
+      });
       toast.success(`📦 Archived ${boyName}! Moved to downside.`, { id: `archive-${norm}` });
     } else {
       toast.success(`↩️ Restored ${boyName} to Active Roster.`, { id: `archive-${norm}` });
@@ -208,20 +240,75 @@ export const StaffDayEndSummary: React.FC = () => {
     }
   };
 
+  // 1-Click Toggle for Delivery Boy "No Supply Today"
+  const handleToggleNoSupply = async (boyName: string, boyId?: string, forceStatus?: boolean) => {
+    const norm = boyName.trim().toUpperCase();
+    const isCurrentlyNoSupply = noSupplyBoyNames.has(norm);
+    const nextStatus = forceStatus !== undefined ? forceStatus : !isCurrentlyNoSupply;
+
+    // 1. Instant local reactive update
+    setNoSupplyBoyNames((prev) => {
+      const next = new Set(prev);
+      if (nextStatus) {
+        next.add(norm);
+      } else {
+        next.delete(norm);
+      }
+      try {
+        localStorage.setItem(`bgcls_no_supply_boys_${reportDate}`, JSON.stringify(Array.from(next)));
+      } catch (_) {}
+      return next;
+    });
+
+    if (nextStatus) {
+      // Clear archive if marking no-supply
+      setArchivedBoyNames((prev) => {
+        if (!prev.has(norm)) return prev;
+        const next = new Set(prev);
+        next.delete(norm);
+        try {
+          localStorage.setItem(`bgcls_archived_boys_${reportDate}`, JSON.stringify(Array.from(next)));
+        } catch (_) {}
+        return next;
+      });
+      toast.success(`🚫 Marked ${boyName} as No Supply Today! Moved to downside.`, { id: `nosupply-${norm}` });
+    } else {
+      toast.success(`↩️ Restored ${boyName} to Active Roster.`, { id: `nosupply-${norm}` });
+    }
+
+    // 2. Persist to cloud in background
+    try {
+      await toggleBoyNoSupply(reportDate, boyName, boyId, nextStatus);
+      const updated = await fetchAllBpclReportsForDate(reportDate);
+      setBpclReportsMap(updated);
+      if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
+        setActiveBpclReport(updated[norm] || null);
+      }
+    } catch (err) {
+      console.warn('Could not persist no supply status to cloud:', err);
+    }
+  };
+
   const isCurrentBoyArchived = useMemo(() => {
     if (!selectedBoy) return false;
     return archivedBoyNames.has(selectedBoy.name.trim().toUpperCase());
   }, [selectedBoy, archivedBoyNames]);
+
+  const isCurrentBoyNoSupply = useMemo(() => {
+    if (!selectedBoy) return false;
+    return noSupplyBoyNames.has(selectedBoy.name.trim().toUpperCase());
+  }, [selectedBoy, noSupplyBoyNames]);
 
   const activeBoys = useMemo(() => {
     const query = boySearchQuery.trim().toLowerCase();
     return deliveryBoys.filter((boy) => {
       const norm = boy.name.trim().toUpperCase();
       const isArchived = archivedBoyNames.has(norm);
+      const isNoSupply = noSupplyBoyNames.has(norm);
       const matchesSearch = !query || boy.name.toLowerCase().includes(query);
-      return !isArchived && matchesSearch;
+      return !isArchived && !isNoSupply && matchesSearch;
     });
-  }, [deliveryBoys, archivedBoyNames, boySearchQuery]);
+  }, [deliveryBoys, archivedBoyNames, noSupplyBoyNames, boySearchQuery]);
 
   const archivedBoys = useMemo(() => {
     const query = boySearchQuery.trim().toLowerCase();
@@ -232,6 +319,18 @@ export const StaffDayEndSummary: React.FC = () => {
       return isArchived && matchesSearch;
     });
   }, [deliveryBoys, archivedBoyNames, boySearchQuery]);
+
+  const noSupplyBoys = useMemo(() => {
+    const query = boySearchQuery.trim().toLowerCase();
+    return deliveryBoys.filter((boy) => {
+      const norm = boy.name.trim().toUpperCase();
+      const isNoSupply = noSupplyBoyNames.has(norm);
+      const matchesSearch = !query || boy.name.toLowerCase().includes(query);
+      return isNoSupply && matchesSearch;
+    });
+  }, [deliveryBoys, noSupplyBoyNames, boySearchQuery]);
+
+  const totalDownsideCount = archivedBoys.length + noSupplyBoys.length;
 
   // Serial Number (#1..#17) for active selected delivery boy
   const selectedBoyIndex = useMemo(() => {
@@ -1543,7 +1642,7 @@ export const StaffDayEndSummary: React.FC = () => {
     });
   }, [entries, listFilterTab, listSearchQuery]);
 
-  // Filtered delivery boys for dropdown (active boys first, archived boys at bottom)
+  // Filtered delivery boys for dropdown (active boys first, archived and no-supply boys at bottom)
   const filteredBoys = useMemo(() => {
     let list = deliveryBoys;
     if (boySearchQuery.trim()) {
@@ -1551,16 +1650,23 @@ export const StaffDayEndSummary: React.FC = () => {
       list = deliveryBoys.filter((b) => b.name.toLowerCase().includes(q) || b.username.toLowerCase().includes(q));
     }
     return [...list].sort((a, b) => {
-      const aArch = archivedBoyNames.has(a.name.trim().toUpperCase());
-      const bArch = archivedBoyNames.has(b.name.trim().toUpperCase());
-      if (aArch && !bArch) return 1;
-      if (!aArch && bArch) return -1;
+      const aNorm = a.name.trim().toUpperCase();
+      const bNorm = b.name.trim().toUpperCase();
+      const aDown = archivedBoyNames.has(aNorm) || noSupplyBoyNames.has(aNorm);
+      const bDown = archivedBoyNames.has(bNorm) || noSupplyBoyNames.has(bNorm);
+      if (aDown && !bDown) return 1;
+      if (!aDown && bDown) return -1;
       return 0;
     });
-  }, [deliveryBoys, boySearchQuery, archivedBoyNames]);
+  }, [deliveryBoys, boySearchQuery, archivedBoyNames, noSupplyBoyNames]);
 
-  // Render single delivery boy card (used in both Active list and Archived downside list)
-  const renderDeliveryBoyCard = (boy: DeliveryBoy, index: number, isArchived: boolean) => {
+  // Render single delivery boy card (used in Active list, Archived downside list, and No-Supply downside list)
+  const renderDeliveryBoyCard = (
+    boy: DeliveryBoy,
+    index: number,
+    isArchived: boolean = false,
+    isNoSupply: boolean = false
+  ) => {
     const normName = boy.name.trim().toUpperCase();
     const summary = rosterSummaries[normName];
     const hasBills = summary && summary.total_deliveries > 0;
@@ -1577,7 +1683,10 @@ export const StaffDayEndSummary: React.FC = () => {
     // 3. Checked done with 0 pending bills -> verified emerald/teal
     // 4. Zero bills recorded -> clean neutral slate
     // 5. Archived card -> clean neutral muted slate/emerald with clear archived indication
-    const cardStyle = isArchived
+    // 6. No-Supply card -> soft muted slate-rose dashed border indicating non-supplying today
+    const cardStyle = isNoSupply
+      ? 'bg-rose-50/40 border border-dashed border-rose-200 hover:bg-rose-50/70 shadow-none opacity-85'
+      : isArchived
       ? 'bg-slate-100/80 border border-slate-300 hover:bg-slate-100 shadow-none'
       : hasScams
       ? 'bg-rose-50/95 border-2 border-rose-400 hover:bg-rose-100/90 shadow-sm shadow-rose-500/10'
@@ -1589,7 +1698,9 @@ export const StaffDayEndSummary: React.FC = () => {
       ? 'bg-emerald-50/60 border-2 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400 shadow-xs'
       : 'bg-slate-50/70 border border-slate-200 hover:bg-slate-100';
 
-    const avatarStyle = isArchived
+    const avatarStyle = isNoSupply
+      ? 'bg-slate-200 text-rose-700 font-bold border border-rose-200'
+      : isArchived
       ? 'bg-slate-300 text-slate-700 font-bold'
       : hasScams
       ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-md'
@@ -1625,8 +1736,12 @@ export const StaffDayEndSummary: React.FC = () => {
                   </span>
                 )}
 
-                {/* Archive Status Badge or Bills Checked Done */}
-                {isArchived ? (
+                {/* Status Badges: No Supply / Archived / Checked Done / Mark Checked */}
+                {isNoSupply ? (
+                  <span className="text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
+                    <Ban className="w-2.5 h-2.5 text-rose-600" /> NO SUPPLY TODAY
+                  </span>
+                ) : isArchived ? (
                   <span className="text-[10px] font-black bg-slate-800 text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
                     <Archive className="w-2.5 h-2.5" /> ARCHIVED
                   </span>
@@ -1648,23 +1763,38 @@ export const StaffDayEndSummary: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
-                      const updated = await fetchAllBpclReportsForDate(reportDate);
-                      setBpclReportsMap(updated);
-                      if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
-                        setActiveBpclReport(updated[normName] || null);
-                      }
-                      toast.success(`Marked bills checked done for ${boy.name}`);
-                    }}
-                    className="text-[10px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 px-2 py-0.5 rounded-full transition-all shadow-2xs"
-                    title="Click to mark bills checked done"
-                  >
-                    ⚪ Mark Checked
-                  </button>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
+                        const updated = await fetchAllBpclReportsForDate(reportDate);
+                        setBpclReportsMap(updated);
+                        if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
+                          setActiveBpclReport(updated[normName] || null);
+                        }
+                        toast.success(`Marked bills checked done for ${boy.name}`);
+                      }}
+                      className="text-[10px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 px-2 py-0.5 rounded-full transition-all shadow-2xs"
+                      title="Click to mark bills checked done"
+                    >
+                      ⚪ Mark Checked
+                    </button>
+                    {!hasBills && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleNoSupply(boy.name, boy.id, true);
+                        }}
+                        className="text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 hover:border-rose-300 px-2 py-0.5 rounded-full flex items-center gap-1 transition-all shadow-2xs"
+                        title="Delivery boy did not go for supply today -> move to downside"
+                      >
+                        <Ban className="w-2.5 h-2.5 text-rose-600" /> No Supply Today &darr;
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {/* Pending Bills Counter Badge */}
@@ -1710,14 +1840,29 @@ export const StaffDayEndSummary: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <p className="text-[11px] text-slate-400 mt-0.5">No bills recorded yet for this date</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {isNoSupply ? 'Did not go for cylinder delivery today' : 'No bills recorded yet for this date'}
+                </p>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Archive / Unarchive Button */}
-            {isArchived ? (
+            {/* Downside Action Buttons: Resume / Unarchive / Archive / No Supply */}
+            {isNoSupply ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleNoSupply(boy.name, boy.id, false);
+                }}
+                className="px-2.5 py-1.5 rounded-xl border border-rose-200 hover:border-emerald-500 bg-white hover:bg-emerald-50 text-rose-700 hover:text-emerald-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
+                title="Resume supply / Move back to active list"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                <span className="hidden sm:inline">Resume Supply</span>
+              </button>
+            ) : isArchived ? (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1731,18 +1876,32 @@ export const StaffDayEndSummary: React.FC = () => {
                 <span className="hidden sm:inline">Unarchive</span>
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleArchive(boy.name, boy.id, true);
-                }}
-                className="px-2.5 py-1.5 rounded-xl border border-slate-300 hover:border-amber-400 bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
-                title="Archive this delivery boy (move to downside)"
-              >
-                <Archive className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">Archive</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleNoSupply(boy.name, boy.id, true);
+                  }}
+                  className="px-2 py-1.5 rounded-xl border border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
+                  title="Did not go for supply today (move to downside)"
+                >
+                  <Ban className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="hidden md:inline">No Supply</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleArchive(boy.name, boy.id, true);
+                  }}
+                  className="px-2 py-1.5 rounded-xl border border-slate-300 hover:border-amber-400 bg-white hover:bg-amber-50 text-slate-600 hover:text-amber-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
+                  title="Archive this delivery boy (move to downside)"
+                >
+                  <Archive className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="hidden md:inline">Archive</span>
+                </button>
+              </>
             )}
 
             <button
@@ -1943,6 +2102,16 @@ export const StaffDayEndSummary: React.FC = () => {
                           #{idx + 1}
                         </span>
                         <span className="font-bold">{boy.name}</span>
+                        {archivedBoyNames.has(normName) && (
+                          <span className="text-[9px] bg-slate-700 text-amber-300 font-mono font-bold px-1.5 py-0.5 rounded-full">
+                            📦 ARCHIVED
+                          </span>
+                        )}
+                        {noSupplyBoyNames.has(normName) && (
+                          <span className="text-[9px] bg-rose-950 text-rose-300 border border-rose-800 font-mono font-bold px-1.5 py-0.5 rounded-full">
+                            🚫 NO SUPPLY
+                          </span>
+                        )}
                         {hasScams && (
                           <span className="text-[9px] bg-rose-600 text-white font-black px-1.5 py-0.2 rounded-full animate-pulse">
                             🚨 {scamInfo.scamCount} SCAM
@@ -2063,7 +2232,7 @@ export const StaffDayEndSummary: React.FC = () => {
               <div className="space-y-6">
                 {/* 1. ACTIVE DELIVERY BOYS SECTION (TOP) */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between px-1 mb-1.5">
+                  <div className="flex items-center justify-between px-1 mb-1.5 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-blue-600" />
@@ -2073,10 +2242,19 @@ export const StaffDayEndSummary: React.FC = () => {
                         {activeBoys.length} Remaining
                       </span>
                     </div>
-                    {archivedBoys.length > 0 && (
-                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> {archivedBoys.length} Archived Downside
-                      </span>
+                    {totalDownsideCount > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {archivedBoys.length > 0 && (
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> {archivedBoys.length} Archived
+                          </span>
+                        )}
+                        {noSupplyBoys.length > 0 && (
+                          <span className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <Ban className="w-3 h-3 text-rose-600" /> {noSupplyBoys.length} No Supply
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -2086,36 +2264,46 @@ export const StaffDayEndSummary: React.FC = () => {
                         <CheckCircle2 className="w-6 h-6" />
                       </div>
                       <h3 className="text-sm font-black text-slate-900 uppercase">
-                        All Delivery Boys Checked & Archived! 🎉
+                        All Delivery Boys Checked & Cleared! 🎉
                       </h3>
                       <p className="text-xs text-slate-600 font-medium mt-1 max-w-sm mx-auto">
-                        Every delivery boy's bills have been completely verified and moved to the archived section below.
+                        Every delivery boy's bills have been verified or moved to downside ({archivedBoys.length} archived, {noSupplyBoys.length} no supply).
                       </p>
                     </div>
                   ) : (
-                    activeBoys.map((boy, index) => renderDeliveryBoyCard(boy, index, false))
+                    activeBoys.map((boy, index) => renderDeliveryBoyCard(boy, index, false, false))
                   )}
                 </div>
 
-                {/* 2. ARCHIVED / COMPLETED DELIVERY BOYS SECTION ("DOWNSIDE TOTALLY") */}
-                {archivedBoys.length > 0 && (
-                  <div className="pt-5 border-t-2 border-dashed border-slate-300">
-                    <div className="flex items-center justify-between mb-3 px-1">
+                {/* 2. DOWNSIDE DELIVERY BOYS SECTION (ARCHIVED & NO SUPPLY) */}
+                {totalDownsideCount > 0 && (
+                  <div className="pt-5 border-t-2 border-dashed border-slate-300 space-y-3">
+                    <div className="flex items-center justify-between mb-2 px-1">
                       <div className="flex items-center gap-2.5">
                         <div className="w-7 h-7 rounded-xl bg-slate-900 text-amber-300 flex items-center justify-center font-black shadow-sm">
                           <Archive className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                              Archived Delivery Boys
+                              Downside Delivery Boys
                             </h3>
                             <span className="text-[10px] font-black bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
-                              {archivedBoys.length} Downside
+                              {totalDownsideCount} Downside
                             </span>
+                            {archivedBoys.length > 0 && (
+                              <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                📦 {archivedBoys.length} Archived
+                              </span>
+                            )}
+                            {noSupplyBoys.length > 0 && (
+                              <span className="text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full">
+                                🚫 {noSupplyBoys.length} No Supply
+                              </span>
+                            )}
                           </div>
                           <p className="text-[10px] text-slate-500 font-medium">
-                            Completely checked delivery boys moved to the bottom
+                            Checked completed & non-supplying boys moved to bottom
                           </p>
                         </div>
                       </div>
@@ -2125,14 +2313,46 @@ export const StaffDayEndSummary: React.FC = () => {
                         onClick={() => setIsArchivedCollapsed(!isArchivedCollapsed)}
                         className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all"
                       >
-                        {isArchivedCollapsed ? `Show (${archivedBoys.length})` : 'Collapse'}
+                        {isArchivedCollapsed ? `Show (${totalDownsideCount})` : 'Collapse'}
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isArchivedCollapsed ? '' : 'rotate-180'}`} />
                       </button>
                     </div>
 
                     {!isArchivedCollapsed && (
-                      <div className="space-y-2 opacity-95 hover:opacity-100 transition-opacity">
-                        {archivedBoys.map((boy, index) => renderDeliveryBoyCard(boy, index, true))}
+                      <div className="space-y-4">
+                        {/* Sub-group: No Supply Boys */}
+                        {noSupplyBoys.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2 px-1">
+                              <span className="text-[11px] font-black uppercase tracking-wider text-rose-700 flex items-center gap-1">
+                                <Ban className="w-3 h-3 text-rose-600" /> No Supply Today ({noSupplyBoys.length})
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                — Did not go for cylinder delivery
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {noSupplyBoys.map((boy, index) => renderDeliveryBoyCard(boy, index, false, true))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sub-group: Archived / Checked Boys */}
+                        {archivedBoys.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2 px-1">
+                              <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                                <Archive className="w-3 h-3 text-amber-600" /> Checked & Archived ({archivedBoys.length})
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                — Bills verification completed
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {archivedBoys.map((boy, index) => renderDeliveryBoyCard(boy, index, true, false))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2175,7 +2395,26 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  handleToggleNoSupply(selectedBoy.name, selectedBoy.id, !isCurrentBoyNoSupply);
+                  if (!isCurrentBoyNoSupply) {
+                    setActiveTab('ROSTER');
+                  }
+                }}
+                className={`active:scale-95 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all border ${
+                  isCurrentBoyNoSupply
+                    ? 'bg-rose-50 text-rose-800 border-rose-300'
+                    : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-800 border-slate-300'
+                }`}
+                title={isCurrentBoyNoSupply ? "Resume supply for this boy" : "Mark no supply & return to roster downside"}
+              >
+                <Ban className="w-3.5 h-3.5 text-rose-500" />
+                <span>{isCurrentBoyNoSupply ? 'No Supply' : 'No Supply & Return'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
