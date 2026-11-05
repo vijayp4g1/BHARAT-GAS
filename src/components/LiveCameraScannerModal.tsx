@@ -45,6 +45,12 @@ interface ScannedSessionItem {
   timestamp: number;
 }
 
+interface FailedScanItem {
+  raw_number: string;
+  reason: string;
+  timestamp: number;
+}
+
 const DISTRIBUTOR_BLACKLIST = new Set([
   '169624',
   '23092200',
@@ -150,6 +156,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   } | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
+  const [failedScanList, setFailedScanList] = useState<FailedScanItem[]>([]);
+  const [showFailedList, setShowFailedList] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
   const [manualInput, setManualInput] = useState<string>('');
   const [isSuccessFlash, setIsSuccessFlash] = useState<boolean>(false);
@@ -296,7 +304,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   ): Promise<boolean> => {
     const cleanNum = cleanAndNormalizeDigits(rawNum);
 
-    if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 10) {
+    if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 12) {
+      if (cleanNum && cleanNum.length > 12) {
+        // Gemini hallucinated extra digits — log it so user can review
+        const failItem: FailedScanItem = {
+          raw_number: cleanNum,
+          reason: `Too long (${cleanNum.length} digits — Gemini may have read extra digits)`,
+          timestamp: Date.now(),
+        };
+        setFailedScanList((prev) => [failItem, ...prev]);
+        toast.error(`⚠️ Scan returned ${cleanNum.length}-digit number — too long. Please check bill manually.`, {
+          id: 'scan-snap',
+          duration: 4000,
+        });
+      }
       return false;
     }
 
@@ -311,12 +332,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // If consumer is not verified in the database, DO NOT add them!
     if (!match.found) {
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      setAlreadyAddedNotice(`⚠️ #${cleanNum} not found in database! Please check receipt.`);
-      toast.error(`⚠️ #${cleanNum} not found in agency database. Check paper memo.`, {
-        id: 'scan-snap',
-        duration: 4000,
+      const failReason = match.name_verified === false
+        ? `Name mismatch — #${cleanNum} exists in DB but name doesn't match`
+        : `#${cleanNum} not found in agency database`;
+      setAlreadyAddedNotice(`⚠️ ${failReason}. Please check receipt.`);
+      toast.error(`⚠️ ${failReason}. Check paper memo.`, {
+        id: `scan-fail-${cleanNum}`,
+        duration: 6000,
       });
-      setStatusText(`Consumer #${cleanNum} not found in database. Check bill or type manually.`);
+      setStatusText(`Consumer #${cleanNum} not verified. Check bill or add manually.`);
+      // Persist to failed scan log so it's visible at end of session
+      setFailedScanList((prev) => [
+        { raw_number: cleanNum, reason: failReason, timestamp: Date.now() },
+        ...prev,
+      ]);
       return false;
     }
 
@@ -802,6 +831,39 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         </div>
       </div>
 
+      {/* Failed Scans Tray — persistent list of bills rejected this session */}
+      {failedScanList.length > 0 && (
+        <div className="bg-rose-950/90 backdrop-blur-md border border-rose-500/40 p-2 rounded-2xl mb-2 text-white">
+          <button
+            type="button"
+            onClick={() => setShowFailedList((v) => !v)}
+            className="flex items-center justify-between w-full text-[10px] text-rose-300 px-1 mb-1 font-semibold"
+          >
+            <span className="flex items-center gap-1.5">
+              <AlertCircle className="w-3 h-3 text-rose-400" />
+              {failedScanList.length} Bill{failedScanList.length > 1 ? 's' : ''} NOT Added — Tap to review
+            </span>
+            <span className="text-rose-400 font-bold uppercase tracking-wide">{showFailedList ? 'Hide ▲' : 'Show ▼'}</span>
+          </button>
+          {showFailedList && (
+            <div className="flex flex-col gap-1 mt-1 max-h-28 overflow-y-auto pr-1">
+              {failedScanList.map((item, idx) => (
+                <div
+                  key={`fail-${item.raw_number}-${idx}`}
+                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1.5 flex items-start gap-2"
+                >
+                  <AlertCircle className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <span className="font-mono font-bold text-rose-200 text-xs">#{item.raw_number}</span>
+                    <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Session Scanned Receipts Horizontal Tray */}
       {scannedSessionList.length > 0 && (
         <div className="bg-slate-900/90 backdrop-blur-md border border-white/10 p-2 rounded-2xl mb-2 text-white">
@@ -849,15 +911,18 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         <div className="flex items-center justify-between pt-1 border-t border-white/10">
           <div className="min-w-0 pr-2">
             <span className="text-[11px] font-bold text-slate-300 block truncate">{statusText}</span>
-            <span className="text-[10px] text-amber-400 font-semibold">
-              {scannedSessionList.length} receipts scanned this session
+            <span className="text-[10px] font-semibold">
+              <span className="text-amber-400">{scannedSessionList.length} added</span>
+              {failedScanList.length > 0 && (
+                <span className="text-rose-400 ml-1.5">• {failedScanList.length} failed</span>
+              )}
             </span>
           </div>
           <button
             onClick={onClose}
             className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg shadow-emerald-600/30 active:scale-95 transition-all shrink-0"
           >
-            Done ({scannedSessionList.length})
+            Done ({scannedSessionList.length}{failedScanList.length > 0 ? `, ${failedScanList.length} ⚠️` : ''})
           </button>
         </div>
       </div>
