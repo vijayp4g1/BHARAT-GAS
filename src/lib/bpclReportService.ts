@@ -234,8 +234,13 @@ export async function fetchAllBpclReportsForDate(
         if (row.notes) {
           const parsed = extractBpclReportFromNotes(row.notes);
           if (parsed) {
-            result[normName] = parsed;
-            setLocalBpclReport(dateStr, normName, parsed);
+            const existing = result[normName];
+            const parsedCount = (parsed.online_bills?.length || 0) + (parsed.pending_bills?.length || 0);
+            const existingCount = (existing?.online_bills?.length || 0) + (existing?.pending_bills?.length || 0);
+            if (!existing || parsedCount >= existingCount) {
+              result[normName] = parsed;
+              setLocalBpclReport(dateStr, normName, parsed);
+            }
           }
         }
       });
@@ -254,8 +259,16 @@ export async function fetchAllBpclReportsForDate(
         if (raw) {
           const parsed = JSON.parse(raw);
           const norm = (parsed.agent_name || '').trim().toUpperCase();
-          if (norm && !result[norm]) {
-            result[norm] = parsed;
+          if (norm) {
+            const existing = result[norm];
+            const parsedCount = (parsed.online_bills?.length || 0) + (parsed.pending_bills?.length || 0);
+            const existingCount = (existing?.online_bills?.length || 0) + (existing?.pending_bills?.length || 0);
+            if (!existing) {
+              result[norm] = parsed;
+            } else if ((parsed.online_bills?.length || 0) > (existing.online_bills?.length || 0) || parsedCount > existingCount) {
+              // Local storage has more online bills or total bills
+              result[norm] = parsed;
+            }
           }
         }
       }
@@ -533,12 +546,87 @@ export async function deleteBpclBill(
   };
 
   const cleanNum = consumerNumber.trim().toLowerCase();
+  const updatedPending = billType === 'PENDING'
+    ? current.pending_bills.filter((b) => b.consumer_number.trim().toLowerCase() !== cleanNum)
+    : current.pending_bills;
+  const updatedOnline = billType === 'ONLINE'
+    ? current.online_bills.filter((b) => b.consumer_number.trim().toLowerCase() !== cleanNum)
+    : current.online_bills;
+
+  const updatedReport: BpclReportData = {
+    ...current,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    updated_at: new Date().toISOString(),
+  };
+
+  await saveBpclReportToCloud({
+    dateStr,
+    agentName: normName,
+    agentId,
+    checked_done: current.checked_done,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: current.raw_text,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+
+  return updatedReport;
+}
+
+/**
+ * 1-Click "Delivered & Clear" for a Pending Bill:
+ * Clears it from pending_bills, and if it was an online paid bill (PayNBook/Online),
+ * ensures it is preserved in online_bills as "Online Bill (Delivery Done)" so it's
+ * counted in Xerox Online export and never lost!
+ */
+export async function clearPendingBillAndMarkDelivered(
+  dateStr: string,
+  agentName: string,
+  consumerNumber: string,
+  agentId?: string
+): Promise<BpclReportData> {
+  const normName = agentName.trim().toUpperCase();
+  const current = (await fetchBpclReport(dateStr, normName, agentId)) || {
+    agent_name: normName,
+    agent_id: agentId,
+    report_date: dateStr,
+    checked_done: true,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  const cleanNum = consumerNumber.trim().toLowerCase();
+  const pendingBill = current.pending_bills.find(
+    (b) => b.consumer_number.trim().toLowerCase() === cleanNum
+  );
   const updatedPending = current.pending_bills.filter(
     (b) => b.consumer_number.trim().toLowerCase() !== cleanNum
   );
-  const updatedOnline = current.online_bills.filter(
-    (b) => b.consumer_number.trim().toLowerCase() !== cleanNum
+
+  let updatedOnline = [...current.online_bills];
+  const isOnlinePaid = pendingBill && (
+    /PayNBook|Online/i.test(pendingBill.refill_type || '') ||
+    /Online Paid/i.test(pendingBill.status || '')
   );
+
+  if (isOnlinePaid && pendingBill) {
+    const existingIdx = updatedOnline.findIndex(
+      (b) => b.consumer_number.trim().toLowerCase() === cleanNum
+    );
+    if (existingIdx >= 0) {
+      updatedOnline[existingIdx] = {
+        ...updatedOnline[existingIdx],
+        status: 'Online Bill (Delivery Done)',
+      };
+    } else {
+      updatedOnline.unshift({
+        ...pendingBill,
+        status: 'Online Bill (Delivery Done)',
+        type: 'ONLINE',
+      });
+    }
+  }
 
   const updatedReport: BpclReportData = {
     ...current,

@@ -25,6 +25,7 @@ import {
 import toast from 'react-hot-toast';
 import { 
   deleteBpclBill, 
+  clearPendingBillAndMarkDelivered,
   addBpclBillManually, 
   updateBpclBill,
   type BpclBillItem, 
@@ -222,17 +223,17 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   };
 
   // 1-Click "Delivered & Clear" for a Pending Bill:
-  // Adds it to completed scanned deliveries and immediately removes it from pending bills!
+  // Adds it to completed scanned deliveries and immediately removes it from pending bills,
+  // while preserving it in online_bills (as Delivery Done) so it's never lost from Xerox online export!
   const handleDeliveredAndClear = async (bill: BpclBillItem) => {
     try {
       if (onAddBillToScanned) {
         onAddBillToScanned(bill);
       }
-      const updated = await deleteBpclBill(
+      const updated = await clearPendingBillAndMarkDelivered(
         reportDate,
         agentName,
         bill.consumer_number,
-        'PENDING',
         report?.agent_id
       );
       if (onReportUpdated) {

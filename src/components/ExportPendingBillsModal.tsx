@@ -42,9 +42,11 @@ export const ExportPendingBillsModal: React.FC<ExportPendingBillsModalProps> = (
   // Gather ALL pending bills across all delivery boys for this date
   const allPendingBills: PendingBillEntry[] = [];
   const boyBreakdown: Record<string, { count: number; serial: number }> = {};
+  const processedNorms = new Set<string>();
 
   deliveryBoys.forEach((boy, idx) => {
     const norm = boy.name.trim().toUpperCase();
+    processedNorms.add(norm);
     const rep = bpclReportsMap[norm];
     const pendingList = rep?.pending_bills || [];
 
@@ -57,6 +59,23 @@ export const ExportPendingBillsModal: React.FC<ExportPendingBillsModalProps> = (
           deliveryBoySerial: idx + 1,
         });
       });
+    }
+  });
+
+  // Safeguard: Check any additional keys in bpclReportsMap not covered by deliveryBoys
+  let extraSerial = deliveryBoys.length + 1;
+  Object.entries(bpclReportsMap).forEach(([normName, rep]) => {
+    if (!processedNorms.has(normName) && rep?.pending_bills && rep.pending_bills.length > 0) {
+      const displayName = rep.agent_name || normName;
+      boyBreakdown[displayName] = { count: rep.pending_bills.length, serial: extraSerial };
+      rep.pending_bills.forEach((bill) => {
+        allPendingBills.push({
+          ...bill,
+          deliveryBoy: displayName,
+          deliveryBoySerial: extraSerial,
+        });
+      });
+      extraSerial++;
     }
   });
 
@@ -850,3 +869,4 @@ export const ExportPendingBillsModal: React.FC<ExportPendingBillsModalProps> = (
     </div>
   );
 };
+

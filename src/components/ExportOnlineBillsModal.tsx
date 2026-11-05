@@ -41,9 +41,11 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
   // Gather ALL online bills across all delivery boys for this date
   const allOnlineBills: OnlineBillEntry[] = [];
   const boyBreakdown: Record<string, { count: number; serial: number }> = {};
+  const processedNorms = new Set<string>();
 
   deliveryBoys.forEach((boy, idx) => {
     const norm = boy.name.trim().toUpperCase();
+    processedNorms.add(norm);
     const rep = bpclReportsMap[norm];
     const onlineList = rep?.online_bills || [];
 
@@ -56,6 +58,23 @@ export const ExportOnlineBillsModal: React.FC<ExportOnlineBillsModalProps> = ({
           deliveryBoySerial: idx + 1,
         });
       });
+    }
+  });
+
+  // Safeguard: Check any additional keys in bpclReportsMap not covered by deliveryBoys
+  let extraSerial = deliveryBoys.length + 1;
+  Object.entries(bpclReportsMap).forEach(([normName, rep]) => {
+    if (!processedNorms.has(normName) && rep?.online_bills && rep.online_bills.length > 0) {
+      const displayName = rep.agent_name || normName;
+      boyBreakdown[displayName] = { count: rep.online_bills.length, serial: extraSerial };
+      rep.online_bills.forEach((bill) => {
+        allOnlineBills.push({
+          ...bill,
+          deliveryBoy: displayName,
+          deliveryBoySerial: extraSerial,
+        });
+      });
+      extraSerial++;
     }
   });
 
