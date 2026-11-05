@@ -516,7 +516,7 @@ export const StaffDayEndSummary: React.FC = () => {
               agentName: pastClaim.agentName,
               date: pastClaim.date,
               isSameAgent: pastClaim.agentName.trim().toUpperCase() === normName,
-            });
+            }, reportDate);
             dupWithSet.add(notice.shortNotice);
             return;
           }
@@ -1343,7 +1343,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
     const otherClaimant = crossAgentClaimedMap[consumer.consumer_number.toLowerCase()];
     if (otherClaimant) {
-      const notice = formatDuplicateClaimNotice(otherClaimant);
+      const notice = formatDuplicateClaimNotice(otherClaimant, reportDate);
       toast.error(
         `🚨 DOUBLE BILL ALERT! #${consumer.consumer_number} was ${notice.shortNotice}!`,
         { duration: 8000, id: 'duplicate-alert' }
@@ -1401,7 +1401,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
       const otherClaimant = crossAgentClaimedMap[match.consumer_number.toLowerCase()] || crossAgentClaimedMap[cleanInput.toLowerCase()];
       if (otherClaimant) {
-        const notice = formatDuplicateClaimNotice(otherClaimant);
+        const notice = formatDuplicateClaimNotice(otherClaimant, reportDate);
         toast.error(
           `🚨 DOUBLE BILL ALERT! #${match.consumer_number} was ${notice.shortNotice}!`,
           { duration: 8000, id: 'duplicate-alert' }
@@ -1435,7 +1435,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
     const otherClaimantUnverified = crossAgentClaimedMap[cleanInput.toLowerCase()];
     if (otherClaimantUnverified) {
-      const notice = formatDuplicateClaimNotice(otherClaimantUnverified);
+      const notice = formatDuplicateClaimNotice(otherClaimantUnverified, reportDate);
       toast.error(
         `🚨 DOUBLE BILL ALERT! #${cleanInput} was ${notice.shortNotice}!`,
         { duration: 8000, id: 'duplicate-alert' }

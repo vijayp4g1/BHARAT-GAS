@@ -578,14 +578,22 @@ export async function fetchPast7DaysBills(
   const result: Record<string, PastClaimantInfo> = {};
 
   try {
-    const targetDate = new Date(reportDateStr);
+    const [yStr, mStr, dStr] = reportDateStr.split('-').map(Number);
+    const targetDate = new Date(yStr, (mStr || 1) - 1, dStr || 1, 12, 0, 0);
+
     const startDate = new Date(targetDate);
     startDate.setDate(targetDate.getDate() - daysBack);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const yS = startDate.getFullYear();
+    const mS = String(startDate.getMonth() + 1).padStart(2, '0');
+    const dS = String(startDate.getDate()).padStart(2, '0');
+    const startDateStr = `${yS}-${mS}-${dS}`;
 
     const prevDate = new Date(targetDate);
     prevDate.setDate(targetDate.getDate() - 1);
-    const prevDateStr = prevDate.toISOString().split('T')[0];
+    const yP = prevDate.getFullYear();
+    const mP = String(prevDate.getMonth() + 1).padStart(2, '0');
+    const dP = String(prevDate.getDate()).padStart(2, '0');
+    const prevDateStr = `${yP}-${mP}-${dP}`;
 
     // Query settlements in the 7-day range preceding reportDate
     const { data, error } = await adminClient
@@ -635,11 +643,14 @@ export async function fetchPast7DaysBills(
 /**
  * Format duplicate claim details for user-facing alerts and badges (e.g. "04-11-2026 (Yesterday)").
  */
-export function formatDuplicateClaimNotice(claimant: {
-  agentName: string;
-  date: string;
-  isSameAgent?: boolean;
-}): {
+export function formatDuplicateClaimNotice(
+  claimant: {
+    agentName: string;
+    date: string;
+    isSameAgent?: boolean;
+  },
+  referenceDateStr?: string
+): {
   formattedDate: string;
   relativeText: string;
   shortNotice: string;
@@ -650,11 +661,19 @@ export function formatDuplicateClaimNotice(claimant: {
 
   let relativeText = '';
   if (claimant.date) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const cDate = new Date(claimant.date);
-    cDate.setHours(0, 0, 0, 0);
-    const diffDays = Math.round((today.getTime() - cDate.getTime()) / (1000 * 60 * 60 * 24));
+    let refDate: Date;
+    if (referenceDateStr) {
+      const [ry, rm, rd] = referenceDateStr.split('-').map(Number);
+      refDate = new Date(ry, (rm || 1) - 1, rd || 1, 12, 0, 0);
+    } else {
+      refDate = new Date();
+      refDate.setHours(12, 0, 0, 0);
+    }
+
+    const [cy, cm, cd] = claimant.date.split('-').map(Number);
+    const cDate = new Date(cy, (cm || 1) - 1, cd || 1, 12, 0, 0);
+
+    const diffDays = Math.round((refDate.getTime() - cDate.getTime()) / (1000 * 60 * 60 * 24));
     if (diffDays === 0) relativeText = 'Today';
     else if (diffDays === 1) relativeText = 'Yesterday';
     else if (diffDays > 1) relativeText = `${diffDays} days ago`;
