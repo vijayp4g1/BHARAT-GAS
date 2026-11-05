@@ -543,3 +543,139 @@ export async function saveDayEndReportToDatabase(payload: {
 
   return { success: true };
 }
+
+export interface PastClaimantInfo {
+  agentName: string;
+  agentId?: string;
+  date: string;
+  consumerName?: string;
+  paymentMode?: string;
+  cylinderType?: string;
+  isPast7Days?: boolean;
+  isSameAgent?: boolean;
+}
+
+/**
+ * Retrieve local cached past 7 days bills map
+ */
+export function getLocalPast7DaysBills(reportDateStr: string): Record<string, PastClaimantInfo> {
+  try {
+    const raw = localStorage.getItem(`bgcls_past_7days_bills_${reportDateStr}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Fetch all bills submitted across the preceding 7 days (from reportDate - 7 days to reportDate - 1 day).
+ * Detects if a bill was ALREADY given in the past 7 days by the same delivery boy or another boy.
+ */
+export async function fetchPast7DaysBills(
+  reportDateStr: string,
+  daysBack: number = 7
+): Promise<Record<string, PastClaimantInfo>> {
+  const result: Record<string, PastClaimantInfo> = {};
+
+  try {
+    const targetDate = new Date(reportDateStr);
+    const startDate = new Date(targetDate);
+    startDate.setDate(targetDate.getDate() - daysBack);
+    const startDateStr = startDate.toISOString().split('T')[0];
+
+    const prevDate = new Date(targetDate);
+    prevDate.setDate(targetDate.getDate() - 1);
+    const prevDateStr = prevDate.toISOString().split('T')[0];
+
+    // Query settlements in the 7-day range preceding reportDate
+    const { data, error } = await adminClient
+      .from('staff_cylinder_settlements')
+      .select('agent_name, agent_id, settlement_date, notes')
+      .gte('settlement_date', startDateStr)
+      .lte('settlement_date', prevDateStr)
+      .order('settlement_date', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      data.forEach((row) => {
+        const parsed = extractScannedBillsFromNotes(row.notes);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((bill) => {
+            if (bill && bill.consumer_number) {
+              const clean = bill.consumer_number.trim().toLowerCase();
+              // Retain the latest past submission date
+              if (!result[clean]) {
+                result[clean] = {
+                  agentName: row.agent_name || 'Delivery Boy',
+                  agentId: row.agent_id,
+                  date: row.settlement_date,
+                  consumerName: bill.consumer_name,
+                  paymentMode: bill.payment_mode,
+                  cylinderType: bill.cylinder_type,
+                  isPast7Days: true,
+                };
+              }
+            }
+          });
+        }
+      });
+
+      // Cache locally for fast instant access on next load
+      try {
+        localStorage.setItem(`bgcls_past_7days_bills_${reportDateStr}`, JSON.stringify(result));
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn('Failed to fetch past 7 days bills from cloud, falling back to local cache:', err);
+    return getLocalPast7DaysBills(reportDateStr);
+  }
+
+  return result;
+}
+
+/**
+ * Format duplicate claim details for user-facing alerts and badges (e.g. "04-11-2026 (Yesterday)").
+ */
+export function formatDuplicateClaimNotice(claimant: {
+  agentName: string;
+  date: string;
+  isSameAgent?: boolean;
+}): {
+  formattedDate: string;
+  relativeText: string;
+  shortNotice: string;
+  fullWarning: string;
+} {
+  const [y, m, d] = (claimant.date || '').split('-');
+  const formattedDate = d && m && y ? `${d}-${m}-${y}` : claimant.date;
+
+  let relativeText = '';
+  if (claimant.date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cDate = new Date(claimant.date);
+    cDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((today.getTime() - cDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) relativeText = 'Today';
+    else if (diffDays === 1) relativeText = 'Yesterday';
+    else if (diffDays > 1) relativeText = `${diffDays} days ago`;
+    else if (diffDays < 0) relativeText = `${Math.abs(diffDays)} days ahead`;
+  }
+
+  const agentUpper = claimant.agentName.trim().toUpperCase();
+  const relSuffix = relativeText ? ` (${relativeText})` : '';
+
+  const shortNotice = claimant.isSameAgent
+    ? `Already given by ${agentUpper} on ${formattedDate}${relSuffix}`
+    : `Already given by ${agentUpper} on ${formattedDate}${relSuffix}`;
+
+  const fullWarning = claimant.isSameAgent
+    ? `This bill was already submitted by ${agentUpper} on ${formattedDate}${relSuffix}! A delivery boy cannot submit the same bill twice within 7 days.`
+    : `This bill was already submitted by ${agentUpper} on ${formattedDate}${relSuffix}! Another delivery boy cannot submit the same bill.`;
+
+  return {
+    formattedDate,
+    relativeText,
+    shortNotice,
+    fullWarning,
+  };
+}

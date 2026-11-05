@@ -34,7 +34,7 @@ interface LiveCameraScannerModalProps {
     duplicate_claimed_date?: string;
   }) => void;
   existingNumbers: string[];
-  claimedByOtherAgents?: Record<string, { agentName: string; date?: string; consumerName?: string }>;
+  claimedByOtherAgents?: Record<string, { agentName: string; date?: string; consumerName?: string; isPast7Days?: boolean; isSameAgent?: boolean }>;
   agentName?: string;
   agentId?: string;
 }
@@ -164,6 +164,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     consumer_name: string;
     agentName: string;
     date?: string;
+    isSameAgent?: boolean;
   } | null>(null);
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
@@ -333,7 +334,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         consumer_name: finalName,
         agentName: otherClaimant.agentName,
         date: otherClaimant.date,
+        isSameAgent: otherClaimant.isSameAgent,
       });
+      const [y, m, d] = (otherClaimant.date || '').split('-');
+      const formattedDate = d && m && y ? `${d}-${m}-${y}` : otherClaimant.date;
+      toast.error(
+        `🚨 DOUBLE BILL ALERT! Bill #${cleanNum} (${finalName}) was ALREADY GIVEN by ${otherClaimant.agentName.toUpperCase()} on ${formattedDate}!`,
+        { id: 'scam-alert', duration: 7000 }
+      );
     } else {
       playSuccessBeep();
     }
@@ -521,10 +529,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         consumer_name: finalName,
         agentName: otherClaimant.agentName,
         date: otherClaimant.date,
+        isSameAgent: otherClaimant.isSameAgent,
       });
 
+      const [y, m, d] = (otherClaimant.date || '').split('-');
+      const formattedDate = d && m && y ? `${d}-${m}-${y}` : otherClaimant.date;
+
       toast.error(
-        `🚨 DOUBLE BILL SCAM ALERT! Bill #${resolvedNum} (${finalName}) was ALREADY GIVEN BY ${otherClaimant.agentName.toUpperCase()}!`,
+        `🚨 DOUBLE BILL ALERT! Bill #${resolvedNum} (${finalName}) was ALREADY GIVEN by ${otherClaimant.agentName.toUpperCase()} on ${formattedDate}!`,
         { id: 'scam-alert', duration: 8000 }
       );
     } else {
@@ -889,6 +901,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 </p>
                 <p className="text-[10px] text-amber-200 font-bold">
                   ALREADY GIVEN BY: <span className="underline uppercase text-white font-black">{duplicateScamNotice.agentName}</span>
+                  {duplicateScamNotice.date && (
+                    <span className="ml-1 text-white font-semibold">
+                      on {(() => {
+                        const [y, m, d] = duplicateScamNotice.date.split('-');
+                        return d && m && y ? `${d}-${m}-${y}` : duplicateScamNotice.date;
+                      })()}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>

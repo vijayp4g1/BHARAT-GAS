@@ -46,8 +46,12 @@ import {
   fetchAllDayEndReportsForDate, 
   fetchDayEndReportForAgent, 
   saveDayEndReportToDatabase, 
+  fetchPast7DaysBills,
+  getLocalPast7DaysBills,
+  formatDuplicateClaimNotice,
   type DayEndEntry, 
-  type DayEndReportSummary 
+  type DayEndReportSummary,
+  type PastClaimantInfo
 } from '../lib/dayEndService';
 import type { DeliveryBoy } from '../lib/agentService';
 import { 
@@ -123,6 +127,11 @@ export const StaffDayEndSummary: React.FC = () => {
   // Multi-Agent Roster Cache for selected date
   const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
   const [isLoadingRoster, setIsLoadingRoster] = useState<boolean>(true);
+
+  // Past 7 Days Bills Cache for cross-day double-bill scam & duplicate protection
+  const [past7DaysBillsMap, setPast7DaysBillsMap] = useState<Record<string, PastClaimantInfo>>(() => {
+    return getLocalPast7DaysBills(todayIso);
+  });
 
   // Active Delivery Boy's Bills state
   const [entries, setEntries] = useState<ItemEntry[]>([]);
@@ -387,39 +396,58 @@ export const StaffDayEndSummary: React.FC = () => {
   const sessionClientIdRef = useRef<string>(Math.random().toString(36).substring(2) + Date.now().toString(36));
 
   // Anti-Fraud / Double-Bill Scam Detection:
-  // Map of consumer_number -> { agentName, date, consumerName } for all bills already submitted by OTHER delivery boys
+  // Map of consumer_number -> PastClaimantInfo
+  // Checks all bills submitted in the PRECEDING 7 DAYS (by same or other boys) PLUS bills submitted TODAY by OTHER boys!
   const crossAgentClaimedMap = useMemo(() => {
-    const map: Record<string, { agentName: string; date: string; consumerName?: string }> = {};
-    if (!rosterSummaries) return map;
+    const map: Record<string, PastClaimantInfo> = {};
 
     const currentAgentName = selectedBoy ? selectedBoy.name.trim().toUpperCase() : '';
     const currentAgentId = selectedBoy ? selectedBoy.id : '';
 
-    Object.values(rosterSummaries).forEach((report) => {
-      const reportAgentName = (report.agent_name || '').trim().toUpperCase();
-      const reportAgentId = report.agent_id || '';
+    // 1. Populate from preceding 7 days bills (flags same boy or other boys!)
+    if (past7DaysBillsMap) {
+      Object.entries(past7DaysBillsMap).forEach(([cleanCons, pastInfo]) => {
+        const pastAgentName = (pastInfo.agentName || '').trim().toUpperCase();
+        const isSame = pastAgentName === currentAgentName;
+        map[cleanCons] = {
+          ...pastInfo,
+          isPast7Days: true,
+          isSameAgent: isSame,
+        };
+      });
+    }
 
-      // Skip current active delivery boy so we don't flag self
-      if (reportAgentName === currentAgentName || (currentAgentId && reportAgentId === currentAgentId)) {
-        return;
-      }
+    // 2. Check bills already submitted TODAY by OTHER delivery boys
+    if (rosterSummaries) {
+      Object.values(rosterSummaries).forEach((report) => {
+        const reportAgentName = (report.agent_name || '').trim().toUpperCase();
+        const reportAgentId = report.agent_id || '';
 
-      if (Array.isArray(report.entries)) {
-        report.entries.forEach((entry) => {
-          if (entry.consumer_number) {
-            const clean = entry.consumer_number.trim().toLowerCase();
-            map[clean] = {
-              agentName: report.agent_name,
-              date: report.report_date,
-              consumerName: entry.consumer_name,
-            };
-          }
-        });
-      }
-    });
+        // Skip current active delivery boy for today's entries
+        if (reportAgentName === currentAgentName || (currentAgentId && reportAgentId === currentAgentId)) {
+          return;
+        }
+
+        if (Array.isArray(report.entries)) {
+          report.entries.forEach((entry) => {
+            if (entry.consumer_number) {
+              const clean = entry.consumer_number.trim().toLowerCase();
+              map[clean] = {
+                agentName: report.agent_name,
+                agentId: report.agent_id,
+                date: report.report_date,
+                consumerName: entry.consumer_name,
+                isPast7Days: false,
+                isSameAgent: false,
+              };
+            }
+          });
+        }
+      });
+    }
 
     return map;
-  }, [rosterSummaries, selectedBoy]);
+  }, [rosterSummaries, past7DaysBillsMap, selectedBoy]);
 
   // Count how many bills in the current list are double-bills from other delivery boys
   const duplicateScamCount = useMemo(() => {
@@ -479,20 +507,34 @@ export const StaffDayEndSummary: React.FC = () => {
       if (summary && Array.isArray(summary.entries)) {
         summary.entries.forEach((entry) => {
           const clean = (entry.consumer_number || '').trim().toLowerCase();
+
+          // 1. Check if this bill was already submitted in the last 7 days!
+          const pastClaim = past7DaysBillsMap ? past7DaysBillsMap[clean] : undefined;
+          if (pastClaim) {
+            count++;
+            const notice = formatDuplicateClaimNotice({
+              agentName: pastClaim.agentName,
+              date: pastClaim.date,
+              isSameAgent: pastClaim.agentName.trim().toUpperCase() === normName,
+            });
+            dupWithSet.add(notice.shortNotice);
+            return;
+          }
+
           const occurrences = globalDuplicateBillsMap[clean] || [];
           const otherOccurrences = occurrences.filter(
             (o) => o.agentName.trim().toUpperCase() !== normName
           );
 
           if (otherOccurrences.length > 0 || entry.duplicate_of_agent) {
-            // 1. If entry explicitly has duplicate_of_agent, this entry is definitely a scam duplicate!
+            // 2. If entry explicitly has duplicate_of_agent, this entry is definitely a scam duplicate!
             if (entry.duplicate_of_agent) {
               count++;
               dupWithSet.add(entry.duplicate_of_agent);
               return;
             }
 
-            // 2. If another delivery boy explicitly marked this bill as duplicate of THIS boy,
+            // 3. If another delivery boy explicitly marked this bill as duplicate of THIS boy,
             // then THIS boy is the original legitimate submitter!
             const isVictimOfDuplicate = otherOccurrences.some(
               (o) => o.duplicateOfAgent && o.duplicateOfAgent.trim().toUpperCase() === normName
@@ -501,7 +543,7 @@ export const StaffDayEndSummary: React.FC = () => {
               return;
             }
 
-            // 3. Fallback: Check who submitted it first chronologically
+            // 4. Fallback: Check who submitted it first chronologically
             const sorted = [...occurrences].sort((a, b) => {
               const tA = a.scannedAt ? new Date(a.scannedAt).getTime() : (a.reportUpdatedAt ? new Date(a.reportUpdatedAt).getTime() : 0);
               const tB = b.scannedAt ? new Date(b.scannedAt).getTime() : (b.reportUpdatedAt ? new Date(b.reportUpdatedAt).getTime() : 0);
@@ -526,7 +568,7 @@ export const StaffDayEndSummary: React.FC = () => {
     });
 
     return stats;
-  }, [deliveryBoys, rosterSummaries, globalDuplicateBillsMap]);
+  }, [deliveryBoys, rosterSummaries, past7DaysBillsMap, globalDuplicateBillsMap]);
 
   // Total scam bills detected across all delivery boys on this date
   const totalRosterScamsCount = useMemo(() => {
@@ -592,18 +634,20 @@ export const StaffDayEndSummary: React.FC = () => {
     initialize();
   }, [isStaffOrManager]);
 
-  // 2. Fetch Roster Summaries & BPCL AI Reports for active date (isSilent = true updates data smoothly without flashing spinners)
+  // 2. Fetch Roster Summaries, BPCL AI Reports & Past 7 Days Bills for active date
   const loadRosterData = useCallback(async (dateStr: string, isSilent: boolean = false) => {
     if (!isSilent) {
       setIsLoadingRoster(true);
     }
     try {
-      const [summaries, bpclMap] = await Promise.all([
+      const [summaries, bpclMap, past7DaysMap] = await Promise.all([
         fetchAllDayEndReportsForDate(dateStr),
         fetchAllBpclReportsForDate(dateStr),
+        fetchPast7DaysBills(dateStr),
       ]);
       setRosterSummaries(summaries);
       setBpclReportsMap(bpclMap);
+      setPast7DaysBillsMap(past7DaysMap);
       if (selectedBoyRef.current) {
         const norm = selectedBoyRef.current.name.trim().toUpperCase();
         setActiveBpclReport(bpclMap[norm] || null);
@@ -1299,8 +1343,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
     const otherClaimant = crossAgentClaimedMap[consumer.consumer_number.toLowerCase()];
     if (otherClaimant) {
+      const notice = formatDuplicateClaimNotice(otherClaimant);
       toast.error(
-        `🚨 DOUBLE BILL SCAM ALERT! #${consumer.consumer_number} was ALREADY GIVEN BY ${otherClaimant.agentName.toUpperCase()}!`,
+        `🚨 DOUBLE BILL ALERT! #${consumer.consumer_number} was ${notice.shortNotice}!`,
         { duration: 8000, id: 'duplicate-alert' }
       );
     }
@@ -1356,8 +1401,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
       const otherClaimant = crossAgentClaimedMap[match.consumer_number.toLowerCase()] || crossAgentClaimedMap[cleanInput.toLowerCase()];
       if (otherClaimant) {
+        const notice = formatDuplicateClaimNotice(otherClaimant);
         toast.error(
-          `🚨 DOUBLE BILL SCAM ALERT! #${match.consumer_number} was ALREADY GIVEN BY ${otherClaimant.agentName.toUpperCase()}!`,
+          `🚨 DOUBLE BILL ALERT! #${match.consumer_number} was ${notice.shortNotice}!`,
           { duration: 8000, id: 'duplicate-alert' }
         );
       }
@@ -1389,8 +1435,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
     const otherClaimantUnverified = crossAgentClaimedMap[cleanInput.toLowerCase()];
     if (otherClaimantUnverified) {
+      const notice = formatDuplicateClaimNotice(otherClaimantUnverified);
       toast.error(
-        `🚨 DOUBLE BILL SCAM ALERT! #${cleanInput} was ALREADY GIVEN BY ${otherClaimantUnverified.agentName.toUpperCase()}!`,
+        `🚨 DOUBLE BILL ALERT! #${cleanInput} was ${notice.shortNotice}!`,
         { duration: 8000, id: 'duplicate-alert' }
       );
     }
@@ -1497,8 +1544,11 @@ export const StaffDayEndSummary: React.FC = () => {
 
       const duplicatesInBulk = finalResolved.filter((e) => e.duplicate_of_agent);
       if (duplicatesInBulk.length > 0) {
+        const firstDup = duplicatesInBulk[0];
+        const [y, m, d] = (firstDup.duplicate_claimed_date || '').split('-');
+        const dateText = d && m && y ? ` on ${d}-${m}-${y}` : '';
         toast.error(
-          `🚨 SCAM ALERT: ${duplicatesInBulk.length} bill(s) in this bulk list were ALREADY GIVEN by other delivery boys (e.g. #${duplicatesInBulk[0].consumer_number} by ${duplicatesInBulk[0].duplicate_of_agent})!`,
+          `🚨 DOUBLE BILL ALERT: ${duplicatesInBulk.length} bill(s) in this bulk list were ALREADY GIVEN in the last 7 days (e.g. #${firstDup.consumer_number} by ${firstDup.duplicate_of_agent}${dateText})!`,
           { duration: 9000, id: 'bulk-duplicate-scam' }
         );
       }
@@ -2660,15 +2710,15 @@ export const StaffDayEndSummary: React.FC = () => {
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-xs font-black tracking-tight leading-tight uppercase flex items-center gap-1.5">
-                    <span>🚨 {duplicateScamCount} Double Bill Scam{duplicateScamCount > 1 ? 's' : ''} Detected!</span>
+                    <span>🚨 {duplicateScamCount} Double Bill{duplicateScamCount > 1 ? 's' : ''} Detected (Last 7 Days)!</span>
                   </h3>
                   <p className="text-[11px] text-rose-100 font-medium truncate mt-0.5">
-                    {duplicateScamCount === 1 ? 'This bill was' : 'These bills were'} already claimed by another delivery boy today!
+                    {duplicateScamCount === 1 ? 'This bill was' : 'These bills were'} already submitted in the last 7 days!
                   </p>
                 </div>
               </div>
               <span className="text-[10px] font-black uppercase bg-white text-rose-700 px-2.5 py-1 rounded-xl shrink-0 shadow-sm">
-                Scam Alert
+                7-Day Guard
               </span>
             </div>
           )}
@@ -2962,6 +3012,14 @@ export const StaffDayEndSummary: React.FC = () => {
                               {otherClaimant ? (
                                 <span className="inline-flex items-center gap-1 text-[9px] bg-rose-600 text-white font-black px-2 py-0.5 rounded-md shadow-xs animate-pulse">
                                   <ShieldAlert className="w-2.5 h-2.5" /> GIVEN BY {otherClaimant.agentName.toUpperCase()}
+                                  {otherClaimant.date && (
+                                    <span>
+                                      ({(() => {
+                                        const [y, m, d] = otherClaimant.date.split('-');
+                                        return d && m && y ? `${d}-${m}-${y}` : otherClaimant.date;
+                                      })()})
+                                    </span>
+                                  )}
                                 </span>
                               ) : item.found ? (
                                 <span className="inline-flex items-center gap-0.5 text-[9px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-md">
@@ -2985,18 +3043,54 @@ export const StaffDayEndSummary: React.FC = () => {
 
                             {/* Double-Bill Scam Warning Box */}
                             {otherClaimant && (
-                              <div className="mt-2 p-2 rounded-xl bg-rose-100/90 border border-rose-300 text-rose-950 flex items-start gap-2 text-xs">
+                              <div className="mt-2 p-2.5 rounded-xl bg-rose-100/90 border-2 border-rose-300 text-rose-950 flex items-start gap-2 text-xs shadow-xs">
                                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5 animate-bounce" />
-                                <div className="min-w-0">
-                                  <p className="font-black text-rose-700 leading-tight">
-                                    🚨 DOUBLE BILL SCAM DETECTED!
-                                  </p>
-                                  <p className="text-[11px] font-semibold text-rose-900 mt-0.5 leading-snug">
-                                    This cash memo was already submitted by{' '}
-                                    <span className="font-black underline uppercase text-rose-950">
-                                      {otherClaimant.agentName}
-                                    </span>{' '}
-                                    on {otherClaimant.date || reportDate}! Another delivery boy cannot submit the same bill.
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-1 flex-wrap">
+                                    <p className="font-black text-rose-700 leading-tight">
+                                      🚨 DOUBLE BILL ALERT (LAST 7 DAYS)
+                                    </p>
+                                    {otherClaimant.date && (
+                                      <span className="text-[10px] bg-rose-200 text-rose-900 font-mono px-1.5 py-0.5 rounded-md font-black">
+                                        {(() => {
+                                          const [y, m, d] = otherClaimant.date.split('-');
+                                          return d && m && y ? `${d}-${m}-${y}` : otherClaimant.date;
+                                        })()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] font-semibold text-rose-900 mt-1 leading-snug">
+                                    {otherClaimant.agentName.trim().toUpperCase() === selectedBoy?.name.trim().toUpperCase() ? (
+                                      <>
+                                        This bill was already submitted by{' '}
+                                        <span className="font-black underline uppercase text-rose-950">
+                                          {otherClaimant.agentName}
+                                        </span>{' '}
+                                        on{' '}
+                                        <span className="font-black">
+                                          {(() => {
+                                            const [y, m, d] = (otherClaimant.date || reportDate).split('-');
+                                            return d && m && y ? `${d}-${m}-${y}` : (otherClaimant.date || reportDate);
+                                          })()}
+                                        </span>
+                                        ! The same delivery boy cannot submit the same bill twice within 7 days.
+                                      </>
+                                    ) : (
+                                      <>
+                                        This cash memo was already submitted by{' '}
+                                        <span className="font-black underline uppercase text-rose-950">
+                                          {otherClaimant.agentName}
+                                        </span>{' '}
+                                        on{' '}
+                                        <span className="font-black">
+                                          {(() => {
+                                            const [y, m, d] = (otherClaimant.date || reportDate).split('-');
+                                            return d && m && y ? `${d}-${m}-${y}` : (otherClaimant.date || reportDate);
+                                          })()}
+                                        </span>
+                                        ! Another delivery boy cannot submit the same bill.
+                                      </>
+                                    )}
                                   </p>
                                 </div>
                               </div>
