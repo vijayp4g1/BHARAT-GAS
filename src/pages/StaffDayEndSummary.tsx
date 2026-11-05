@@ -1714,196 +1714,119 @@ export const StaffDayEndSummary: React.FC = () => {
       <div
         key={boy.id || boy.name}
         onClick={() => handleSelectBoy(boy)}
-        className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 ${cardStyle}`}
+        className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2.5 ${cardStyle}`}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-3">
+        {/* TOP ROW: Avatar + Name + Main Count Badge + Primary Action Button */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex items-center gap-2.5">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm ${avatarStyle}`}>
               {index + 1}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h3 className="font-bold text-sm text-slate-900">{boy.name}</h3>
+                <h3 className="font-bold text-sm text-slate-900 truncate">{boy.name}</h3>
                 {hasBills ? (
                   <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
                     hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
                   }`}>
-                    {summary.total_deliveries} Bills Scanned
+                    {summary.total_deliveries} Bills
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
                     0 Bills
                   </span>
                 )}
-
-                {/* Status Badges: No Supply / Archived / Checked Done / Mark Checked */}
-                {isNoSupply ? (
-                  <span className="text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
-                    <Ban className="w-2.5 h-2.5 text-rose-600" /> NO SUPPLY TODAY
-                  </span>
-                ) : isArchived ? (
-                  <span className="text-[10px] font-black bg-slate-800 text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
-                    <Archive className="w-2.5 h-2.5" /> ARCHIVED
-                  </span>
-                ) : isCheckedDone ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                      <CheckCircle2 className="w-3 h-3 text-white" /> Bills Checked Done
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleArchive(boy.name, boy.id, true);
-                      }}
-                      className="text-[10px] font-black bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1 transition-all shadow-xs"
-                      title="Move completely checked delivery boy to downside"
-                    >
-                      <Archive className="w-2.5 h-2.5" /> Archive &darr;
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
-                        const updated = await fetchAllBpclReportsForDate(reportDate);
-                        setBpclReportsMap(updated);
-                        if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
-                          setActiveBpclReport(updated[normName] || null);
-                        }
-                        toast.success(`Marked bills checked done for ${boy.name}`);
-                      }}
-                      className="text-[10px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 px-2 py-0.5 rounded-full transition-all shadow-2xs"
-                      title="Click to mark bills checked done"
-                    >
-                      ⚪ Mark Checked
-                    </button>
-                    {!hasBills && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleNoSupply(boy.name, boy.id, true);
-                        }}
-                        className="text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 hover:border-rose-300 px-2 py-0.5 rounded-full flex items-center gap-1 transition-all shadow-2xs"
-                        title="Delivery boy did not go for supply today -> move to downside"
-                      >
-                        <Ban className="w-2.5 h-2.5 text-rose-600" /> No Supply Today &darr;
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Pending Bills Counter Badge */}
-                {pendingCount > 0 && (
-                  <span className="text-[10px] font-black bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs">
-                    ⚠️ {pendingCount} Pending
-                  </span>
-                )}
-
-                {/* Online Bills Counter Badge */}
-                {onlineCount > 0 && (
-                  <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                    🌐 {onlineCount} Online
-                  </span>
-                )}
-
-                {hasScams && (
-                  <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs animate-pulse flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3" /> {scamInfo.scamCount} SCAM BILL{scamInfo.scamCount > 1 ? 'S' : ''}
-                  </span>
-                )}
               </div>
-
-              {hasBills ? (
-                <div>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap text-[11px] font-medium text-slate-600">
-                    <span>Std: <b>{summary.domestic_14kg}</b></span>
-                    {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
-                    <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
-                    <span className="text-blue-700 font-bold">UPI: {summary.upi_count}</span>
-                    {summary.due_count > 0 && <span className="text-rose-600 font-bold">Due: {summary.due_count}</span>}
-                  </div>
-                  {hasScams && (
-                    <div className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100/90 px-2 py-0.5 rounded-lg border border-rose-300 w-fit">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-bounce" />
-                      <span>
-                        🚨 {scamInfo.scamCount} duplicate bill already given by{' '}
-                        <span className="font-black underline uppercase text-rose-950">
-                          {scamInfo.duplicateWith.join(', ') || 'another agent'}
-                        </span>!
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  {isNoSupply ? 'Did not go for cylinder delivery today' : 'No bills recorded yet for this date'}
-                </p>
-              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Downside Action Buttons: Resume / Unarchive / Archive / No Supply */}
-            {isNoSupply ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleNoSupply(boy.name, boy.id, false);
-                }}
-                className="px-2.5 py-1.5 rounded-xl border border-rose-200 hover:border-emerald-500 bg-white hover:bg-emerald-50 text-rose-700 hover:text-emerald-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
-                title="Resume supply / Move back to active list"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-                <span className="hidden sm:inline">Resume Supply</span>
-              </button>
-            ) : isArchived ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleArchive(boy.name, boy.id, false);
-                }}
-                className="px-2.5 py-1.5 rounded-xl border border-slate-300 hover:border-emerald-500 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
-                title="Unarchive / Move back to active list"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden sm:inline">Unarchive</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleNoSupply(boy.name, boy.id, true);
-                  }}
-                  className="px-2 py-1.5 rounded-xl border border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
-                  title="Did not go for supply today (move to downside)"
-                >
-                  <Ban className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="hidden md:inline">No Supply</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleArchive(boy.name, boy.id, true);
-                  }}
-                  className="px-2 py-1.5 rounded-xl border border-slate-300 hover:border-amber-400 bg-white hover:bg-amber-50 text-slate-600 hover:text-amber-800 text-[11px] font-bold transition-all shadow-xs flex items-center gap-1 active:scale-95"
-                  title="Archive this delivery boy (move to downside)"
-                >
-                  <Archive className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="hidden md:inline">Archive</span>
-                </button>
-              </>
-            )}
+          {/* Primary View/Scan Button (prominent thumb target on mobile) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSelectBoy(boy);
+              }}
+              className={`font-bold px-3 py-1.5 rounded-xl text-xs border shadow-xs flex items-center gap-1 transition-all active:scale-95 ${
+                hasScams
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-sm shadow-rose-600/30'
+                  : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
+              }`}
+            >
+              <span>{hasScams ? 'Inspect' : hasBills ? 'View / Edit' : 'Scan'}</span>
+              <ChevronRight className={`w-3.5 h-3.5 ${hasScams ? 'text-white' : 'text-blue-500'}`} />
+            </button>
+          </div>
+        </div>
 
+        {/* STATUS BADGES & METRICS SECTION */}
+        <div className="pl-0 sm:pl-[46px] space-y-1.5">
+          {/* Status Badges Row */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {isNoSupply && (
+              <span className="text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
+                <Ban className="w-2.5 h-2.5 text-rose-600" /> NO SUPPLY TODAY
+              </span>
+            )}
+            {isArchived && (
+              <span className="text-[10px] font-black bg-slate-800 text-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-mono">
+                <Archive className="w-2.5 h-2.5" /> ARCHIVED
+              </span>
+            )}
+            {!isArchived && !isNoSupply && isCheckedDone && (
+              <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                <CheckCircle2 className="w-3 h-3 text-white" /> Bills Checked Done
+              </span>
+            )}
+            {pendingCount > 0 && (
+              <span className="text-[10px] font-black bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full flex items-center gap-0.5 shadow-xs">
+                ⚠️ {pendingCount} Pending
+              </span>
+            )}
+            {onlineCount > 0 && (
+              <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                🌐 {onlineCount} Online
+              </span>
+            )}
+            {hasScams && (
+              <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs animate-pulse flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3" /> {scamInfo.scamCount} SCAM BILL{scamInfo.scamCount > 1 ? 'S' : ''}
+              </span>
+            )}
+          </div>
+
+          {/* Delivery Counts / Empty State */}
+          {hasBills ? (
+            <div>
+              <div className="flex items-center gap-2 flex-wrap text-[11px] font-medium text-slate-600">
+                <span>Std: <b>{summary.domestic_14kg}</b></span>
+                {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
+                <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
+                <span className="text-blue-700 font-bold">UPI: {summary.upi_count}</span>
+                {summary.due_count > 0 && <span className="text-rose-600 font-bold">Due: {summary.due_count}</span>}
+              </div>
+              {hasScams && (
+                <div className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-100/90 px-2 py-0.5 rounded-lg border border-rose-300 w-fit">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-bounce" />
+                  <span>
+                    🚨 {scamInfo.scamCount} duplicate bill already given by{' '}
+                    <span className="font-black underline uppercase text-rose-950">
+                      {scamInfo.duplicateWith.join(', ') || 'another agent'}
+                    </span>!
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-400">
+              {isNoSupply ? 'Did not go for cylinder delivery today' : 'No bills recorded yet for this date'}
+            </p>
+          )}
+
+          {/* ACTIONS TOOLBAR ROW (Comfortable touch targets for mobile) */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-slate-200/60">
+            {/* AI Check Button */}
             <button
               type="button"
               onClick={(e) => {
@@ -1914,7 +1837,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 setActiveBpclReport(bpclReportsMap[norm] || null);
                 setIsBpclModalOpen(true);
               }}
-              className={`px-2 py-1.5 rounded-xl border transition-all active:scale-95 flex items-center gap-1 shadow-xs ${
+              className={`px-2.5 py-1 rounded-xl border transition-all active:scale-95 flex items-center gap-1 text-[11px] font-bold shadow-2xs ${
                 isCheckedDone
                   ? 'bg-purple-100 hover:bg-purple-200 text-purple-800 border-purple-300'
                   : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
@@ -1922,24 +1845,107 @@ export const StaffDayEndSummary: React.FC = () => {
               title="Add / Paste BPCL AI Status Report"
             >
               <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-              <span className="text-[10px] font-bold hidden sm:inline">AI Check</span>
+              <span>AI Check</span>
             </button>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSelectBoy(boy);
-              }}
-              className={`font-bold px-3 py-1.5 rounded-xl text-xs border shadow-xs flex items-center gap-1 transition-all ${
-                hasScams
-                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-sm shadow-rose-600/30'
-                  : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'
-              }`}
-            >
-              {hasScams ? 'Inspect Scam' : hasBills ? 'View / Edit' : 'Scan Bills'}
-              <ChevronRight className={`w-3.5 h-3.5 ${hasScams ? 'text-white' : 'text-blue-500'}`} />
-            </button>
+            {/* Downside Actions */}
+            {isNoSupply ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleNoSupply(boy.name, boy.id, false);
+                }}
+                className="px-2.5 py-1 rounded-xl border border-rose-200 hover:border-emerald-500 bg-white hover:bg-emerald-50 text-rose-700 hover:text-emerald-800 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                title="Resume supply / Move back to active list"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                <span>Resume Supply</span>
+              </button>
+            ) : isArchived ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleArchive(boy.name, boy.id, false);
+                }}
+                className="px-2.5 py-1 rounded-xl border border-slate-300 hover:border-emerald-500 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                title="Unarchive / Move back to active list"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Unarchive</span>
+              </button>
+            ) : (
+              <>
+                {/* Mark Checked Toggle */}
+                {!isCheckedDone ? (
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await toggleBillsCheckedDone(reportDate, boy.name, boy.id, true);
+                      const updated = await fetchAllBpclReportsForDate(reportDate);
+                      setBpclReportsMap(updated);
+                      if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
+                        setActiveBpclReport(updated[normName] || null);
+                      }
+                      toast.success(`Marked bills checked done for ${boy.name}`);
+                    }}
+                    className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-300 hover:border-emerald-400 transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                    title="Click to mark bills checked done"
+                  >
+                    <span>⚪ Mark Checked</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await toggleBillsCheckedDone(reportDate, boy.name, boy.id, false);
+                      const updated = await fetchAllBpclReportsForDate(reportDate);
+                      setBpclReportsMap(updated);
+                      if (selectedBoyRef.current?.name.trim().toUpperCase() === normName) {
+                        setActiveBpclReport(updated[normName] || null);
+                      }
+                      toast.success(`Unchecked bills for ${boy.name}`);
+                    }}
+                    className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                    title="Click to unmark checked done"
+                  >
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>Checked Done</span>
+                  </button>
+                )}
+
+                {/* No Supply */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleNoSupply(boy.name, boy.id, true);
+                  }}
+                  className="px-2.5 py-1 rounded-xl border border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                  title="Delivery boy did not go for supply today -> move to downside"
+                >
+                  <Ban className="w-3.5 h-3.5 text-slate-500" />
+                  <span>No Supply</span>
+                </button>
+
+                {/* Archive */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleArchive(boy.name, boy.id, true);
+                  }}
+                  className="px-2.5 py-1 rounded-xl border border-slate-300 hover:border-amber-400 bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95"
+                  title="Archive this delivery boy (move to downside)"
+                >
+                  <Archive className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Archive</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1971,28 +1977,41 @@ export const StaffDayEndSummary: React.FC = () => {
       {/* Day End Page Main Content - Strictly Hidden on Print */}
       <div className="day-end-main-page print:hidden">
         {/* Top Header Card */}
-        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
-        {/* Header Title & Date Picker */}
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={handleBack}
-              className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 border border-white/20 flex items-center justify-center text-white transition-all shrink-0 shadow-sm"
-              title="Go Back"
-              aria-label="Go Back"
-            >
-              <ArrowLeft className="w-5 h-5 text-white" />
-            </button>
-            <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
-              <ClipboardList className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-3.5 sm:p-4 shadow-xl border border-white/10 mb-3">
+        {/* Header Title & Date Picker (Responsive for Mobile) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2.5">
+          <div className="flex items-center justify-between w-full sm:w-auto gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={handleBack}
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 border border-white/20 flex items-center justify-center text-white transition-all shrink-0 shadow-sm"
+                title="Go Back"
+                aria-label="Go Back"
+              >
+                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              </button>
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-400/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
+                <ClipboardList className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base font-black tracking-tight leading-tight truncate">Daily Cash Memos</h1>
+                <p className="text-[10px] sm:text-[11px] text-blue-200 truncate">Centralized database for all delivery boys</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h1 className="text-base font-black tracking-tight leading-tight truncate">Daily Cash Memos</h1>
-              <p className="text-[11px] text-blue-200 truncate">Centralized database for all delivery boys</p>
+
+            {/* Mobile Date Picker */}
+            <div className="sm:hidden shrink-0">
+              <input
+                type="date"
+                value={reportDate}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="bg-white/10 border border-white/20 rounded-xl px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-bold"
+              />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Desktop/Tablet Date Picker */}
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
             <input
               type="date"
               value={reportDate}
@@ -2006,35 +2025,41 @@ export const StaffDayEndSummary: React.FC = () => {
         <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/30 rounded-2xl border border-white/10 mb-3">
           <button
             onClick={() => setActiveTab('ROSTER')}
-            className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+            className={`min-h-[42px] py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'ROSTER'
                 ? 'bg-amber-400 text-slate-950 shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/5'
             }`}
           >
-            <Users className="w-3.5 h-3.5" /> All Delivery Boys ({deliveryBoys.length})
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              <span className="sm:hidden">All Boys</span>
+              <span className="hidden sm:inline">All Delivery Boys</span>
+              {' '}({deliveryBoys.length})
+            </span>
             {totalRosterScamsCount > 0 && (
-              <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse flex items-center gap-0.5 ml-0.5">
-                <ShieldAlert className="w-2.5 h-2.5" /> {totalRosterScamsCount} SCAM
+              <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse flex items-center gap-0.5 shrink-0">
+                <ShieldAlert className="w-2.5 h-2.5" /> {totalRosterScamsCount}
               </span>
             )}
           </button>
           <button
             onClick={() => setActiveTab('SCAN')}
-            className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+            className={`min-h-[42px] py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'SCAN'
                 ? 'bg-amber-400 text-slate-950 shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-white/5'
             }`}
           >
-            <Camera className="w-3.5 h-3.5" /> {selectedBoy ? selectedBoy.name : 'Scan Bills'}
+            <Camera className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{selectedBoy ? selectedBoy.name : 'Scan Bills'}</span>
             {entries.length > 0 && (
-              <span className="bg-slate-950 text-amber-300 text-[10px] font-black px-1.5 py-0.2 rounded-full ml-0.5">
+              <span className="bg-slate-950 text-amber-300 text-[10px] font-black px-1.5 py-0.2 rounded-full shrink-0">
                 {entries.length}
               </span>
             )}
             {duplicateScamCount > 0 && (
-              <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse ml-0.5">
+              <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse shrink-0">
                 🚨 {duplicateScamCount}
               </span>
             )}
@@ -2141,19 +2166,19 @@ export const StaffDayEndSummary: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'ROSTER' && (
         <div className="space-y-3">
-          <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+          <div className="bg-white rounded-3xl p-3.5 sm:p-4 shadow-sm border border-slate-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 pb-2 border-b border-slate-100 gap-2">
               <div>
                 <h2 className="text-xs font-black uppercase tracking-wider text-slate-800">
                   Delivery Boys Roster — {reportDate}
                 </h2>
                 <p className="text-[11px] text-slate-500">Every staff member sees live scanned bills here</p>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setIsExportOnlineModalOpen(true)}
-                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all"
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all active:scale-95"
                   title="Print or Export All Online Bills"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -2162,7 +2187,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 <button
                   onClick={() => loadRosterData(reportDate)}
                   disabled={isLoadingRoster}
-                  className="text-slate-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1 px-2 py-1"
+                  className="text-slate-600 hover:text-indigo-800 text-xs font-bold flex items-center gap-1 px-2 py-1 active:scale-95"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRoster ? 'animate-spin' : ''}`} /> Refresh
                 </button>
@@ -2173,11 +2198,11 @@ export const StaffDayEndSummary: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsExportOnlineModalOpen(true)}
-              className="w-full mb-3 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-indigo-700/20 border-2 border-indigo-400/40 flex items-center justify-between gap-2.5 transition-all"
+              className="w-full mb-3 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-600 hover:to-blue-600 active:scale-[0.99] text-white p-3 rounded-2xl shadow-md shadow-indigo-700/20 border-2 border-indigo-400/40 flex items-center justify-between gap-2 transition-all"
             >
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-slate-950 text-indigo-300 flex items-center justify-center font-black shrink-0 shadow-md border border-indigo-400/30">
-                  <Printer className="w-5 h-5 text-indigo-300 animate-pulse" />
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-950 text-indigo-300 flex items-center justify-center font-black shrink-0 shadow-md border border-indigo-400/30">
+                  <Printer className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-300 animate-pulse" />
                 </div>
                 <div className="min-w-0 text-left">
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -2193,9 +2218,9 @@ export const StaffDayEndSummary: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="bg-amber-400 text-slate-950 text-xs font-black px-2.5 py-1 rounded-xl shadow-sm">
-                  {totalRosterOnlineCount} Online Bills
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="bg-amber-400 text-slate-950 text-[11px] sm:text-xs font-black px-2 sm:px-2.5 py-1 rounded-xl shadow-sm whitespace-nowrap">
+                  {totalRosterOnlineCount} <span className="hidden sm:inline">Online Bills</span><span className="sm:hidden">Online</span>
                 </span>
                 <span className="text-indigo-200 text-sm">&rarr;</span>
               </div>
@@ -2368,26 +2393,26 @@ export const StaffDayEndSummary: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'SCAN' && selectedBoy && (
         <div className="space-y-3">
-          {/* Active Boy Status Banner */}
-          <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 font-black flex items-center justify-center text-xs">
+          {/* Active Boy Status Banner (Responsive for Mobile) */}
+          <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 font-black flex items-center justify-center text-xs shrink-0">
                 #{selectedBoyIndex || 1}
               </span>
-              <div>
-                <h2 className="text-xs font-black text-slate-900 leading-tight">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">
                   {selectedBoy.name}'s Delivery Bills
                 </h2>
-                <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                <p className="text-[10px] text-slate-500 flex items-center gap-1 truncate">
                   {lastSavedTime ? (
                     <>
-                      <CheckCheck className="w-3 h-3 text-emerald-600" /> Last saved to database: {lastSavedTime}
+                      <CheckCheck className="w-3 h-3 text-emerald-600 shrink-0" /> Last saved: {lastSavedTime}
                     </>
                   ) : (
                     'Not saved to database yet'
                   )}
                   {hasUnsavedChanges && (
-                    <span className="text-amber-600 font-bold flex items-center gap-0.5">
+                    <span className="text-amber-600 font-bold shrink-0">
                       • Unsaved Changes
                     </span>
                   )}
@@ -2395,7 +2420,7 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => {
@@ -2404,7 +2429,7 @@ export const StaffDayEndSummary: React.FC = () => {
                     setActiveTab('ROSTER');
                   }
                 }}
-                className={`active:scale-95 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all border ${
+                className={`flex-1 sm:flex-initial justify-center active:scale-95 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-xs transition-all border ${
                   isCurrentBoyNoSupply
                     ? 'bg-rose-50 text-rose-800 border-rose-300'
                     : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-800 border-slate-300'
@@ -2412,7 +2437,7 @@ export const StaffDayEndSummary: React.FC = () => {
                 title={isCurrentBoyNoSupply ? "Resume supply for this boy" : "Mark no supply & return to roster downside"}
               >
                 <Ban className="w-3.5 h-3.5 text-rose-500" />
-                <span>{isCurrentBoyNoSupply ? 'No Supply' : 'No Supply & Return'}</span>
+                <span>{isCurrentBoyNoSupply ? 'No Supply' : 'No Supply'}</span>
               </button>
 
               <button
@@ -2423,7 +2448,7 @@ export const StaffDayEndSummary: React.FC = () => {
                     setActiveTab('ROSTER');
                   }
                 }}
-                className={`active:scale-95 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all border ${
+                className={`flex-1 sm:flex-initial justify-center active:scale-95 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-xs transition-all border ${
                   isCurrentBoyArchived
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 border-slate-300'
@@ -2431,20 +2456,20 @@ export const StaffDayEndSummary: React.FC = () => {
                 title={isCurrentBoyArchived ? "Unarchive this delivery boy" : "Archive boy & return to roster downside"}
               >
                 <Archive className="w-3.5 h-3.5 text-slate-500" />
-                <span>{isCurrentBoyArchived ? 'Archived' : 'Archive Boy & Return'}</span>
+                <span>{isCurrentBoyArchived ? 'Archived' : 'Archive'}</span>
               </button>
 
               <button
                 onClick={handleSaveToDatabase}
                 disabled={isSavingDb}
-                className={`active:scale-95 font-black px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all shrink-0 ${
+                className={`flex-1 sm:flex-initial justify-center active:scale-95 font-black px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all shrink-0 ${
                   hasUnsavedChanges
                     ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 ring-2 ring-amber-300 shadow-amber-500/30 animate-pulse'
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 disabled:opacity-50'
                 }`}
               >
                 {isSavingDb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                {isSavingDb ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
+                <span>{isSavingDb ? 'Saving...' : hasUnsavedChanges ? 'Save' : 'Saved'}</span>
               </button>
             </div>
           </div>
@@ -2474,23 +2499,23 @@ export const StaffDayEndSummary: React.FC = () => {
           </button>
 
           {/* Real-time KPI Metric Summary Strip */}
-          <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200">
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <div className="bg-blue-50/80 rounded-xl p-2 border border-blue-100">
-                <span className="text-[10px] font-bold text-blue-600 block uppercase">Total Bills</span>
-                <span className="text-base font-black text-blue-950">{kpis.totalDeliveries}</span>
+          <div className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-sm border border-slate-200">
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
+              <div className="bg-blue-50/80 rounded-xl p-1.5 sm:p-2 border border-blue-100">
+                <span className="text-[9px] sm:text-[10px] font-bold text-blue-600 block uppercase truncate">Total Bills</span>
+                <span className="text-sm sm:text-base font-black text-blue-950">{kpis.totalDeliveries}</span>
               </div>
-              <div className="bg-purple-50/80 rounded-xl p-2 border border-purple-100">
-                <span className="text-[10px] font-bold text-purple-600 block uppercase">10kg Lite</span>
-                <span className="text-base font-black text-purple-950">{kpis.count10kg}</span>
+              <div className="bg-purple-50/80 rounded-xl p-1.5 sm:p-2 border border-purple-100">
+                <span className="text-[9px] sm:text-[10px] font-bold text-purple-600 block uppercase truncate">10kg Lite</span>
+                <span className="text-sm sm:text-base font-black text-purple-950">{kpis.count10kg}</span>
               </div>
-              <div className="bg-emerald-50/80 rounded-xl p-2 border border-emerald-100">
-                <span className="text-[10px] font-bold text-emerald-600 block uppercase">Cash</span>
-                <span className="text-base font-black text-emerald-950">{kpis.cashCount}</span>
+              <div className="bg-emerald-50/80 rounded-xl p-1.5 sm:p-2 border border-emerald-100">
+                <span className="text-[9px] sm:text-[10px] font-bold text-emerald-600 block uppercase truncate">Cash</span>
+                <span className="text-sm sm:text-base font-black text-emerald-950">{kpis.cashCount}</span>
               </div>
-              <div className="bg-indigo-50/80 rounded-xl p-2 border border-indigo-100">
-                <span className="text-[10px] font-bold text-indigo-600 block uppercase">UPI</span>
-                <span className="text-base font-black text-indigo-950">{kpis.upiCount}</span>
+              <div className="bg-indigo-50/80 rounded-xl p-1.5 sm:p-2 border border-indigo-100">
+                <span className="text-[9px] sm:text-[10px] font-bold text-indigo-600 block uppercase truncate">UPI</span>
+                <span className="text-sm sm:text-base font-black text-indigo-950">{kpis.upiCount}</span>
               </div>
             </div>
           </div>
@@ -2948,7 +2973,7 @@ export const StaffDayEndSummary: React.FC = () => {
               <button
                 onClick={handleSaveToDatabase}
                 disabled={isSavingDb || (entries.length === 0 && !hasUnsavedChanges)}
-                className={`flex-1 active:scale-98 text-white py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl font-black text-xs sm:text-sm disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg ${
+                className={`flex-1 active:scale-98 text-white py-2.5 sm:py-3 px-2.5 sm:px-4 rounded-xl font-black text-xs sm:text-sm disabled:opacity-50 transition-all flex items-center justify-center gap-1.5 sm:gap-2 shadow-lg min-w-0 ${
                   hasUnsavedChanges
                     ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/30 animate-pulse'
                     : 'bg-emerald-700/90 hover:bg-emerald-600 text-white shadow-emerald-700/20'
@@ -2956,15 +2981,21 @@ export const StaffDayEndSummary: React.FC = () => {
               >
                 {isSavingDb ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Saving to Database...
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span className="hidden sm:inline">Saving to Database...</span>
+                    <span className="sm:hidden">Saving...</span>
                   </>
                 ) : hasUnsavedChanges ? (
                   <>
-                    <Save className="w-4 h-4" /> Save Changes ({entries.length} Bills)
+                    <Save className="w-4 h-4 shrink-0" />
+                    <span className="hidden sm:inline">Save Changes ({entries.length} Bills)</span>
+                    <span className="sm:hidden">Save ({entries.length} Bills)</span>
                   </>
                 ) : (
                   <>
-                    <CheckCheck className="w-4 h-4 text-emerald-300" /> Saved ({entries.length} Bills in Database)
+                    <CheckCheck className="w-4 h-4 text-emerald-300 shrink-0" />
+                    <span className="hidden sm:inline">Saved ({entries.length} Bills in Database)</span>
+                    <span className="sm:hidden">{entries.length} Saved in DB</span>
                   </>
                 )}
               </button>
