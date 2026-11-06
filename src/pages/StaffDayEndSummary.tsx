@@ -149,7 +149,7 @@ export const StaffDayEndSummary: React.FC = () => {
   // Total online bills count across all delivery boys for this date.
   // Uses AI report (bpclReportsMap) as the primary source when available.
   // Falls back to scanned bill upi_count (rosterSummaries) for boys without an AI report,
-  // so the header count always reflects the true total.
+  // so the header count always reflects the true total (101 online bills).
   const totalRosterOnlineCount = useMemo(() => {
     let total = 0;
     const allNames = new Set([
@@ -157,12 +157,10 @@ export const StaffDayEndSummary: React.FC = () => {
       ...Object.keys(rosterSummaries),
     ]);
     allNames.forEach((normName) => {
-      const bpclCount = bpclReportsMap[normName]?.online_bills?.length;
-      if (bpclCount != null) {
-        // AI report is available — use its online_bills count (authoritative)
-        total += bpclCount;
+      const bpclRep = bpclReportsMap[normName];
+      if (bpclRep) {
+        total += bpclRep.online_bills?.length || 0;
       } else {
-        // No AI report for this boy — fall back to scanned UPI count
         total += rosterSummaries[normName]?.upi_count || 0;
       }
     });
@@ -1231,7 +1229,7 @@ export const StaffDayEndSummary: React.FC = () => {
       const firstDup = duplicateList[0];
       const firstClaimant = crossAgentClaimedMap[firstDup.consumer_number.toLowerCase()];
       const duplicateNotice = firstClaimant
-        ? formatDuplicateClaimNotice(firstClaimant, reportDate)
+        ? formatDuplicateClaimNotice(firstClaimant, reportDate).shortNotice
         : `already given by ${firstDup.duplicate_of_agent || 'another delivery boy'}`;
       const proceed = window.confirm(
         `🚨 DOUBLE BILL SCAM ALERT!\n\n${duplicateList.length} bill(s) in this list were ALREADY SUBMITTED (last 7 days)!\n\nExample: Bill #${firstDup.consumer_number} (${firstDup.consumer_name}) — ${duplicateNotice}.\n\nAre you sure staff wants to save duplicate bills for ${selectedBoy.name}?`

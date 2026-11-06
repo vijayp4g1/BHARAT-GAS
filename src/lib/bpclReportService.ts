@@ -53,7 +53,7 @@ export function extractBpclReportFromNotes(notes: string | null | undefined): Bp
     }
     const jsonStr = raw.trim();
     const parsed: BpclReportData = JSON.parse(jsonStr);
-    if (parsed && parsed.raw_text) {
+    if (parsed) {
       parsed.raw_text = sanitizeRawTextWithActiveBills(
         parsed.raw_text,
         parsed.pending_bills,
@@ -184,7 +184,7 @@ export function removeBillFromRawText(
   const billPattern =
     '(?:\\r?\\n)*[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*' +
     escapedNum +
-    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook)|$))';
+    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)|$))';
 
   if (!billType) {
     return rawText
@@ -194,7 +194,7 @@ export function removeBillFromRawText(
   }
 
   // Section-aware removal
-  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)[^\r\n]*)/i;
   const sections = rawText.split(sectionSplitter);
 
   const updatedSections = sections.map((sec) => {
@@ -236,6 +236,29 @@ export function formatBpclBillBlock(bill: BpclBillItem): string {
 }
 
 /**
+ * Builds standard formatted BPCL text from structured pending and online bills.
+ */
+export function buildRawTextFromBills(
+  pendingBills?: BpclBillItem[],
+  onlineBills?: BpclBillItem[]
+): string {
+  const parts: string[] = [];
+  if (pendingBills && pendingBills.length > 0) {
+    parts.push('*BPCL Status Report: Delivery Pending*');
+    pendingBills.forEach((b) => {
+      parts.push(formatBpclBillBlock({ ...b, type: 'PENDING' }));
+    });
+  }
+  if (onlineBills && onlineBills.length > 0) {
+    parts.push('*BPCL Status Report: Online Bills (PayNBook)*');
+    onlineBills.forEach((b) => {
+      parts.push(formatBpclBillBlock({ ...b, type: 'ONLINE' }));
+    });
+  }
+  return parts.join('\n\n').trim();
+}
+
+/**
  * Appends a bill block to the raw BPCL text under the appropriate section.
  */
 export function appendBillToRawText(
@@ -257,13 +280,16 @@ export function appendBillToRawText(
     bill.type === 'PENDING' ? /Delivery Pending/i : /Online Bills|PayNBook|Online Paid/i;
 
   if (targetRegex.test(current)) {
-    const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+    const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)[^\r\n]*)/i;
     const sections = current.split(sectionSplitter);
     let inserted = false;
     const updatedSections = sections.map((sec) => {
       if (inserted) return sec;
+      const firstLine = sec.trim().split(/\r?\n/)[0] || '';
       let secType: 'PENDING' | 'ONLINE' = 'PENDING';
-      if (/Online Bills/i.test(sec) || /PayNBook/i.test(sec) || /Online Paid/i.test(sec)) {
+      if (/Delivery Pending/i.test(firstLine)) {
+        secType = 'PENDING';
+      } else if (/Online Bills|PayNBook|Online Paid/i.test(firstLine)) {
         secType = 'ONLINE';
       }
       if (secType === bill.type) {
@@ -287,14 +313,24 @@ export function appendBillToRawText(
 
 /**
  * Synchronizes rawText with active pending and online bills,
- * purging any deleted/stale bills that might linger in the raw report text.
+ * purging any deleted/stale bills that might linger in the raw report text,
+ * and ensuring newly added/cleared bills are present.
  */
 export function sanitizeRawTextWithActiveBills(
   rawText: string | undefined | null,
   pendingBills?: BpclBillItem[],
   onlineBills?: BpclBillItem[]
 ): string {
-  if (!rawText || !rawText.trim()) return '';
+  const hasPending = Array.isArray(pendingBills) && pendingBills.length > 0;
+  const hasOnline = Array.isArray(onlineBills) && onlineBills.length > 0;
+
+  if (!rawText || !rawText.trim()) {
+    if (hasPending || hasOnline) {
+      return buildRawTextFromBills(pendingBills, onlineBills);
+    }
+    return '';
+  }
+
   if (!pendingBills && !onlineBills) return rawText;
 
   const activePendingSet = new Set(
@@ -307,9 +343,9 @@ export function sanitizeRawTextWithActiveBills(
   const billPattern =
     '(?:\\r?\\n)*[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*' +
     '([0-9a-zA-Z]+)' +
-    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook)|$))';
+    '(?:\\b|\\*)(?:[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number):|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)|$))';
 
-  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report)[^\r\n]*)/i;
+  const sectionSplitter = /(?=(?:^|\r?\n)\s*\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)[^\r\n]*)/i;
   const sections = rawText.split(sectionSplitter);
 
   const cleanedSections = sections.map((sec) => {
@@ -332,10 +368,32 @@ export function sanitizeRawTextWithActiveBills(
     });
   });
 
-  return cleanedSections
+  let result = cleanedSections
     .join('')
     .replace(/(\r?\n){3,}/g, '\n\n')
     .trim();
+
+  // Ensure any active bills that were not in rawText are preserved
+  if (pendingBills) {
+    pendingBills.forEach((bill) => {
+      const cleanNo = bill.consumer_number.trim().toLowerCase();
+      const pattern = new RegExp(`(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*${cleanNo}\\b`, 'i');
+      if (!pattern.test(result)) {
+        result = appendBillToRawText(result, { ...bill, type: 'PENDING' });
+      }
+    });
+  }
+  if (onlineBills) {
+    onlineBills.forEach((bill) => {
+      const cleanNo = bill.consumer_number.trim().toLowerCase();
+      const pattern = new RegExp(`(?:Consumer No|Cons No|Consumer Number):\\*?[\\t ]*${cleanNo}\\b`, 'i');
+      if (!pattern.test(result)) {
+        result = appendBillToRawText(result, { ...bill, type: 'ONLINE' });
+      }
+    });
+  }
+
+  return result.replace(/(\r?\n){3,}/g, '\n\n').trim();
 }
 
 /**
@@ -346,7 +404,7 @@ export function getLocalBpclReport(dateStr: string, agentName: string): BpclRepo
     const raw = localStorage.getItem(getStorageKey(dateStr, agentName));
     if (!raw) return null;
     const data: BpclReportData = JSON.parse(raw);
-    if (data && data.raw_text) {
+    if (data) {
       data.raw_text = sanitizeRawTextWithActiveBills(
         data.raw_text,
         data.pending_bills,

@@ -41,11 +41,10 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   onSaved,
 }) => {
   const [rawText, setRawText] = useState<string>(() => {
-    if (!existingReport?.raw_text) return '';
     return sanitizeRawTextWithActiveBills(
-      existingReport.raw_text,
-      existingReport.pending_bills,
-      existingReport.online_bills
+      existingReport?.raw_text,
+      existingReport?.pending_bills,
+      existingReport?.online_bills
     );
   });
   const [markCheckedDone, setMarkCheckedDone] = useState<boolean>(
@@ -54,17 +53,13 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   useEffect(() => {
-    if (existingReport?.raw_text) {
-      setRawText(
-        sanitizeRawTextWithActiveBills(
-          existingReport.raw_text,
-          existingReport.pending_bills,
-          existingReport.online_bills
-        )
-      );
-    } else {
-      setRawText('');
-    }
+    setRawText(
+      sanitizeRawTextWithActiveBills(
+        existingReport?.raw_text,
+        existingReport?.pending_bills,
+        existingReport?.online_bills
+      )
+    );
   }, [existingReport?.raw_text, existingReport?.pending_bills, existingReport?.online_bills]);
 
   if (!isOpen) return null;
