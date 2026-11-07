@@ -85,6 +85,35 @@ export const SCANNED_BILLS_TAG = '__BGCLS_SCANNED_BILLS__';
 export const BPCL_REPORT_TAG = '__BGCLS_BPCL_REPORT__';
 
 /**
+ * Shared local working-draft key for a (date, delivery boy) pair.
+ * Both the staff screen and the agent screen must use this exact key so a
+ * draft written by one screen can never be read as another day's draft.
+ */
+export const getWorkingDraftKey = (dateStr: string, agentName: string): string => {
+  const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+  return `bgcls_day_end_working_draft_${dateStr}_${norm}`;
+};
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * Calendar date (YYYY-MM-DD) of a timestamp in India Standard Time.
+ * `scanned_at` is stored as UTC, so a bill scanned at 02:00 IST on 07-11 is
+ * 20:30 UTC on 06-11. Comparing the raw UTC date would put it on the wrong day.
+ */
+export function toIstDateString(value?: string | number | Date | null): string {
+  if (value === undefined || value === null || value === '') return '';
+  const ms =
+    value instanceof Date
+      ? value.getTime()
+      : typeof value === 'number'
+        ? value
+        : Date.parse(String(value));
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
  * Safely parse scanned bills JSON from settlement notes.
  * Robust against co-existence with BPCL reports, arbitrary text, and formatting.
  */
@@ -370,6 +399,108 @@ const normalizeBillKey = (consumerNumber?: string): string =>
   String(consumerNumber || '').trim().toUpperCase().replace(/\s+/g, '');
 
 /**
+ * Read the stored scanned bills for one (date, agent) pair, from both the
+ * day-end report and the godown settlement notes. Used to decide whether a
+ * bill scanned on another day is already safely recorded there.
+ */
+async function fetchStoredEntriesForDate(
+  dateStr: string,
+  agentName: string,
+  agentId?: string
+): Promise<DayEndEntry[]> {
+  const entries: DayEndEntry[] = [];
+
+  try {
+    let query = staffDb
+      .from('day_end_reports')
+      .select('entries')
+      .eq('report_date', dateStr);
+    if (agentId) {
+      query = query.or(`agent_id.eq.${agentId},agent_name.ilike.${agentName.trim()}`);
+    } else {
+      query = query.ilike('agent_name', agentName.trim());
+    }
+    const { data, error } = await query.maybeSingle();
+    if (!error && data && Array.isArray(data.entries)) {
+      entries.push(...data.entries);
+    }
+  } catch (_) {}
+
+  try {
+    let query = staffDb
+      .from('staff_cylinder_settlements')
+      .select('notes')
+      .eq('settlement_date', dateStr);
+    if (agentId) {
+      query = query.or(`agent_id.eq.${agentId},agent_name.ilike.${agentName.trim()}`);
+    } else {
+      query = query.ilike('agent_name', agentName.trim());
+    }
+    const { data, error } = await query.maybeSingle();
+    if (!error && data) {
+      entries.push(...extractScannedBillsFromNotes(data.notes));
+    }
+  } catch (_) {}
+
+  return entries;
+}
+
+/**
+ * Cross-date duplicate guard.
+ *
+ * A report for date D must never store a second copy of a bill that is already
+ * recorded on the day it was actually scanned. This is what caused the same 33
+ * bills to appear in both the 06-11 and 07-11 reports for SURENDER J GUTTA.
+ *
+ * Rules:
+ *  - Entries scanned on D (or without a scanned_at timestamp) always belong to
+ *    this report and are kept.
+ *  - Entries scanned on another day are kept ONLY when they are not already
+ *    recorded on that day. This preserves a genuine late-night scan while
+ *    dropping copies created by a date switch.
+ *
+ * The check is exact by consumer number, so it still works when the same bill
+ * was re-scanned and therefore has a different scanned_at value.
+ */
+export async function filterEntriesCrossDateDuplicates(
+  entries: DayEndEntry[],
+  reportDate: string,
+  agentName: string,
+  agentId?: string
+): Promise<DayEndEntry[]> {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+
+  const foreignDates = new Set<string>();
+  for (const entry of entries) {
+    const scanDate = toIstDateString(entry?.scanned_at);
+    if (scanDate && scanDate !== reportDate) foreignDates.add(scanDate);
+  }
+  if (foreignDates.size === 0) return entries;
+
+  const recordedOnOwnDay = new Set<string>();
+  await Promise.all(
+    [...foreignDates].map(async (date) => {
+      const stored = await fetchStoredEntriesForDate(date, agentName, agentId);
+      for (const entry of stored) {
+        const key = normalizeBillKey(entry?.consumer_number);
+        if (key) recordedOnOwnDay.add(key);
+      }
+    })
+  );
+
+  return entries.filter((entry) => {
+    const scanDate = toIstDateString(entry?.scanned_at);
+    // Belongs to this report (or cannot be attributed) -> always keep.
+    if (!scanDate || scanDate === reportDate) return true;
+    const key = normalizeBillKey(entry?.consumer_number);
+    if (!key) return true;
+    // Already recorded on its own day -> this copy is a duplicate.
+    return !recordedOnOwnDay.has(key);
+  });
+}
+
+
+/**
  * Merge two bill lists WITHOUT ever dropping a bill.
  * Incoming entries win on duplicate consumer numbers (so edits to payment mode,
  * empties, etc. persist), while bills that only exist in the database are kept.
@@ -488,9 +619,36 @@ export async function saveDayEndReportToDatabase(payload: {
     ? extractScannedBillsFromNotes(existingSettlement?.notes)
     : [];
 
+  // ---- 1b. Cross-date guard (the permanent double-bill fix) ----
+  // Drop any bill that was scanned on another day and is already recorded on
+  // that day. If the whole payload belongs to another date, refuse the save so
+  // a date switch can never move or duplicate a day's bills.
+  const payloadEntriesForDate = await filterEntriesCrossDateDuplicates(
+    payload.entries,
+    payload.report_date,
+    payload.agent_name,
+    payload.agent_id
+  );
+
+  if (payload.entries.length > 0 && payloadEntriesForDate.length === 0) {
+    return {
+      success: false,
+      error:
+        'These bills were scanned on a different date and are already saved there. ' +
+        'Nothing was changed. Switch to the correct date and try again.',
+    };
+  }
+
+  const existingEntriesForDate = await filterEntriesCrossDateDuplicates(
+    [...existingReportEntries, ...existingSettlementEntries],
+    payload.report_date,
+    payload.agent_name,
+    payload.agent_id
+  );
+
   const finalEntries = mode === 'merge'
-    ? mergeDayEndEntries(mergeDayEndEntries(existingReportEntries, existingSettlementEntries), payload.entries)
-    : payload.entries;
+    ? mergeDayEndEntries(existingEntriesForDate, payloadEntriesForDate)
+    : payloadEntriesForDate;
   const summary = summarizeDayEndEntries(finalEntries);
 
   const recordSummary: DayEndReportSummary = {
@@ -524,9 +682,17 @@ export async function saveDayEndReportToDatabase(payload: {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const current = attempt === 0 ? existingReport : await fetchReportRow();
+      const currentEntriesForDate = current
+        ? await filterEntriesCrossDateDuplicates(
+            Array.isArray(current.entries) ? current.entries : [],
+            payload.report_date,
+            payload.agent_name,
+            payload.agent_id
+          )
+        : [];
       const merged = mode === 'merge'
-        ? (current ? mergeDayEndEntries(Array.isArray(current.entries) ? current.entries : [], payload.entries) : finalEntries)
-        : payload.entries;
+        ? (current ? mergeDayEndEntries(currentEntriesForDate, payloadEntriesForDate) : finalEntries)
+        : payloadEntriesForDate;
       const s = summarizeDayEndEntries(merged);
       const row = {
         report_date: payload.report_date,
@@ -581,10 +747,18 @@ export async function saveDayEndReportToDatabase(payload: {
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         const current = attempt === 0 ? existingSettlement : await fetchSettlementRow();
-        const currentBills = mode === 'merge' ? extractScannedBillsFromNotes(current?.notes) : [];
+        const currentBillsRaw = mode === 'merge' ? extractScannedBillsFromNotes(current?.notes) : [];
+        const currentBills = mode === 'merge'
+          ? await filterEntriesCrossDateDuplicates(
+              currentBillsRaw,
+              payload.report_date,
+              payload.agent_name,
+              payload.agent_id
+            )
+          : [];
         const merged = mode === 'merge'
-          ? (current ? mergeDayEndEntries(currentBills, payload.entries) : finalEntries)
-          : payload.entries;
+          ? (current ? mergeDayEndEntries(currentBills, payloadEntriesForDate) : finalEntries)
+          : payloadEntriesForDate;
         const s = summarizeDayEndEntries(merged);
 
         // Preserve any BPCL Report from existing notes OR local cache so it is NEVER lost!
@@ -674,7 +848,7 @@ export async function saveDayEndReportToDatabase(payload: {
   }
 
   // 5. Update any associated dispatch_items
-  const dispatchItemIds = payload.entries
+  const dispatchItemIds = payloadEntriesForDate
     .map((e) => e.dispatch_item_id)
     .filter((id): id is string => Boolean(id));
 

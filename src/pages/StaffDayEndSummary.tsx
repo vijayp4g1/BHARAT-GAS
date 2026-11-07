@@ -50,6 +50,8 @@ import {
   fetchPast7DaysBills,
   getLocalPast7DaysBills,
   formatDuplicateClaimNotice,
+  getWorkingDraftKey,
+  filterEntriesCrossDateDuplicates,
   type DayEndEntry, 
   type DayEndReportSummary,
   type PastClaimantInfo
@@ -70,11 +72,6 @@ import { ExportOnlineBillsModal } from '../components/ExportOnlineBillsModal';
 import { ExportPendingBillsModal } from '../components/ExportPendingBillsModal';
 
 export type ItemEntry = DayEndEntry;
-
-const getWorkingDraftKey = (dateStr: string, agentName: string): string => {
-  const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
-  return `bgcls_day_end_working_draft_${dateStr}_${norm}`;
-};
 
 export const StaffDayEndSummary: React.FC = () => {
   const navigate = useNavigate();
@@ -688,6 +685,15 @@ export const StaffDayEndSummary: React.FC = () => {
   // Write-Ahead Engine: Immediately writes to local storage (0ms) and auto-saves to database (debounced 800ms)
   const triggerAutoSave = useCallback((updatedEntries: ItemEntry[], boy: DeliveryBoy, dateStr: string) => {
     const normName = boy.name.trim().toUpperCase();
+
+    // Ownership guard: never write a list that was loaded for a different
+    // (date, delivery boy). This is the last line of defence against a date
+    // switch copying one day's bills into the next day's report.
+    const owner = entriesContextRef.current;
+    if (!owner || owner.date !== dateStr || owner.agent !== normName) {
+      return;
+    }
+
     const draftKey = getWorkingDraftKey(dateStr, normName);
 
     // 1. Synchronously persist to localStorage draft immediately (survives app switches)
@@ -706,6 +712,12 @@ export const StaffDayEndSummary: React.FC = () => {
     }
 
     autoSaveTimerRef.current = setTimeout(async () => {
+      // Re-check ownership at fire time: the user may have switched date/boy
+      // while the debounce was pending.
+      const firedOwner = entriesContextRef.current;
+      if (!firedOwner || firedOwner.date !== dateStr || firedOwner.agent !== normName) {
+        return;
+      }
       try {
         await saveDayEndReportToDatabase({
           report_date: dateStr,
@@ -737,7 +749,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
       // 1. Fetch cloud summary first
       const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
-      const cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
+      let cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
 
       // Guard against race conditions when user switches boys/dates quickly
       if (selectedBoyRef.current?.name.trim().toUpperCase() !== normName) {
@@ -767,6 +779,12 @@ export const StaffDayEndSummary: React.FC = () => {
           }
         }
       } catch (_) {}
+
+      // 2b. Never display a bill under the wrong date. Any bill that was
+      // scanned on another day and is already saved on that day is a stale
+      // cross-date copy, so it is removed before it can be re-saved.
+      cloudEntries = await filterEntriesCrossDateDuplicates(cloudEntries, dateStr, boy.name, boy.id);
+      draftEntries = await filterEntriesCrossDateDuplicates(draftEntries, dateStr, boy.name, boy.id);
 
       // A draft only wins if it was written AFTER the cloud row was last updated.
       // This preserves unsaved local work without resurrecting bills that staff deleted.

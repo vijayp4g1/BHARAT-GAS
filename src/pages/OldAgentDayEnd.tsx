@@ -44,6 +44,8 @@ import {
   fetchDayEndReportForAgent, 
   saveDayEndReportToDatabase, 
   dayEndEntrySignature,
+  getWorkingDraftKey,
+  filterEntriesCrossDateDuplicates,
   type DayEndEntry,
   type DayEndReportSummary
 } from '../lib/dayEndService';
@@ -105,11 +107,6 @@ const getDeviceScopedKey = (agentId?: string, dateStr?: string): string => {
   const agent = agentId || localStorage.getItem('bgcls_agent_id') || 'agent_default';
   const date = dateStr || new Date().toISOString().split('T')[0];
   return `bgcls_day_end_entries_${devId}_${agent}_${date}`;
-};
-
-const getWorkingDraftKey = (dateStr: string, agentName: string): string => {
-  const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
-  return `bgcls_day_end_working_draft_${dateStr}_${norm}`;
 };
 
 // Normalize backward compatible entries
@@ -679,7 +676,7 @@ export const OldAgentDayEnd: React.FC = () => {
         const cloudReport = await fetchDayEndReportForAgent(reportDate, agentName, agentId);
         if (!isMounted) return;
 
-        const cloudEntries: ItemEntry[] = (cloudReport && Array.isArray(cloudReport.entries))
+        const cloudEntriesRaw: ItemEntry[] = (cloudReport && Array.isArray(cloudReport.entries))
           ? cloudReport.entries.map((e: any) => ({
               consumer_id: e.consumer_id,
               consumer_number: String(e.consumer_number || ''),
@@ -695,6 +692,22 @@ export const OldAgentDayEnd: React.FC = () => {
               scanned_at: e.scanned_at,
             }))
           : [];
+
+        // Never show or re-save a bill under the wrong date. A bill scanned on
+        // another day and already saved there is a stale cross-date copy.
+        const cloudEntries = await filterEntriesCrossDateDuplicates(
+          cloudEntriesRaw,
+          reportDate,
+          agentName,
+          agentId
+        );
+        draftEntries = await filterEntriesCrossDateDuplicates(
+          draftEntries,
+          reportDate,
+          agentName,
+          agentId
+        );
+        if (!isMounted) return;
 
         // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
         if (cloudEntries.length > 0) {
