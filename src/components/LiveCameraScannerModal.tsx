@@ -485,6 +485,15 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }, 100);
   };
 
+  const handleEditFailedItem = (rawNumber: string) => {
+    editingFailedNumberRef.current = rawNumber;
+    setManualInput(rawNumber);
+    setTimeout(() => {
+      manualInputRef.current?.focus();
+      manualInputRef.current?.select();
+    }, 100);
+  };
+
   const handleRetrySnap = () => {
     setActiveScanFailAlert(null);
     setTimeout(() => {
@@ -1339,6 +1348,26 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                     <div className="min-w-0 flex-1">
                       <span className="font-mono font-bold text-rose-200">#{item.raw_number || '???'}</span>
                       <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
+                      {item.raw_number && (
+                        <div className="flex gap-1.5 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleForceAdd(item.raw_number)}
+                            className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-1 px-2 rounded-lg text-[10px] flex items-center justify-center gap-1 active:scale-95 transition-all"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Force Add</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEditFailedItem(item.raw_number)}
+                            className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-1 px-2 rounded-lg text-[10px] flex items-center justify-center gap-1 active:scale-95 transition-all"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
