@@ -993,7 +993,18 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return;
     }
 
-    const outcome = await processMatchedConsumerNumber(cleanNum);
+    let outcome = await processMatchedConsumerNumber(cleanNum, undefined, { silent: true });
+    if (outcome === 'failed') {
+      if (DISTRIBUTOR_BLACKLIST.has(cleanNum) || cleanNum.length > 12) {
+        toast.error(`Consumer #${cleanNum} cannot be added`);
+        setIsProcessing(false);
+        return;
+      }
+      // Typed number is not in the database: add exactly what was typed.
+      // Never substitute a similar number from the database.
+      handleForceAdd(cleanNum);
+      outcome = 'added';
+    }
     if (outcome !== 'failed') {
       // The bill is now in the list — retire its pending (failed) entry so the
       // Done guard and "Add All" do not add a second, mis-read copy of it.

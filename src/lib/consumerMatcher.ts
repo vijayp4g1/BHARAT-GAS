@@ -320,360 +320,91 @@ export function generateDotMatrix8Variants(num: string): string[] {
 }
 
 /**
- * Intelligent Consumer Matcher with Strict Database Verification:
- * 1. Checks direct Consumer Number in local Dexie database and remote Supabase.
- * 2. If number is found, CROSS-VERIFIES customer name:
- *    - If name matches: 100% verified!
- *    - If name mismatches (e.g. scanned 1677 which is ANNAPURNA, but bill says B LINGAM):
- *      Checks dot-matrix 8/6/0 variants (e.g. 1877) to recover the true customer!
- * 3. If number is not found:
- *    - Checks dot-matrix 8/6/0 variants against the database and matches receipt name.
- * 4. NEVER silently registers or adds unverified consumers to the delivery book without database confirmation.
+ * Consumer lookup by printed consumer number ONLY.
+ *
+ * The consumer number is the single key. The name on a bill (OCR or typed) is
+ * never used to choose, correct, or reject a consumer, and a number that is not
+ * in the database is never swapped for a similar number (8/6/0 variants or a
+ * one-digit neighbour). A number that is not found is returned as found: false
+ * with the exact number that was read or typed, so the operator decides.
  */
 export async function matchConsumerWithDatabase(
   rawNum: string,
-  rawName?: string
+  _rawName?: string
 ): Promise<MatchResult> {
   const digitsOnly = (rawNum || '').replace(/[^0-9]/g, '');
-  const unpadded = digitsOnly.replace(/^0+/, '');
-  const cleanNum = unpadded || digitsOnly;
-  const cleanName = (rawName || '').trim();
+  const cleanNum = digitsOnly.replace(/^0+/, '') || digitsOnly;
 
-  // Helper to query consumer by number (Dexie first, then remote Supabase)
-  async function findByNumber(num: string): Promise<Consumer | null> {
-    if (!num) return null;
-    const rawClean = num.replace(/[^0-9]/g, '');
-    const unpaddedVal = rawClean.replace(/^0+/, '');
-    const numCandidates = Array.from(new Set([rawClean, unpaddedVal].filter(Boolean)));
-
-    // 1. Check local Dexie IndexedDB
-    for (const cNum of numCandidates) {
-      const local = await db.consumers.where('consumer_number').equalsIgnoreCase(cNum).first();
-      if (local) return local;
-    }
-
-    // 2. Check remote Supabase manager_consumer_summary view
-    if (navigator.onLine) {
-      try {
-        const { data } = await supabase
-          .from('manager_consumer_summary')
-          .select('id, consumer_number, consumer_name, address, mobile')
-          .in('consumer_number', numCandidates)
-          .limit(1)
-          .maybeSingle();
-
-        if (data) {
-          const cached: Consumer = {
-            id: data.id,
-            consumer_number: data.consumer_number,
-            consumer_name: data.consumer_name,
-            address: data.address || '',
-            mobile: data.mobile || '',
-            verification_status: 'Verified',
-            created_at: new Date().toISOString(),
-            searchWords: [
-              ...data.consumer_name.toLowerCase().split(/\s+/),
-              data.consumer_number.toLowerCase(),
-            ],
-          };
-          await db.consumers.put(cached).catch(() => {});
-          return cached;
-        }
-      } catch (err) {
-        console.warn('Remote number lookup error:', err);
-      }
-    }
-    return null;
+  if (!cleanNum || DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
+    return {
+      consumer_number: cleanNum || 'UNKNOWN',
+      consumer_name: 'Unverified Consumer',
+      address: 'Not in master database',
+      mobile: '',
+      found: false,
+    };
   }
 
-  // Batch number lookup: one Dexie hit + ONE remote query for all dot-matrix
-  // variants. Previously each variant triggered its own Supabase round-trip,
-  // which made failed scans wait several extra seconds.
-  async function findManyByNumber(nums: string[]): Promise<Map<string, Consumer>> {
-    const map = new Map<string, Consumer>();
-    const candidates = new Set<string>();
-    for (const n of nums) {
-      const raw = (n || '').replace(/[^0-9]/g, '');
-      if (!raw) continue;
-      candidates.add(raw);
-      const unpadded = raw.replace(/^0+/, '');
-      if (unpadded) candidates.add(unpadded);
-    }
-    const list = Array.from(candidates);
-    if (list.length === 0) return map;
-
-    // 1. Local Dexie batch
-    try {
-      const local = await db.consumers.where('consumer_number').anyOfIgnoreCase(list).toArray();
-      for (const c of local) map.set(c.consumer_number.toLowerCase(), c);
-    } catch (_) {}
-
-    // 2. Remote Supabase batch (single request)
-    if (navigator.onLine) {
-      try {
-        const { data } = await supabase
-          .from('manager_consumer_summary')
-          .select('id, consumer_number, consumer_name, address, mobile')
-          .in('consumer_number', list);
-
-        for (const d of data || []) {
-          const cached: Consumer = {
-            id: d.id,
-            consumer_number: d.consumer_number,
-            consumer_name: d.consumer_name,
-            address: d.address || '',
-            mobile: d.mobile || '',
-            verification_status: 'Verified',
-            created_at: new Date().toISOString(),
-            searchWords: [
-              ...d.consumer_name.toLowerCase().split(/\s+/),
-              d.consumer_number.toLowerCase(),
-            ],
-          };
-          map.set(cached.consumer_number.toLowerCase(), cached);
-          await db.consumers.put(cached).catch(() => {});
-        }
-      } catch (err) {
-        console.warn('Remote batch number lookup error:', err);
-      }
-    }
-
-    return map;
-  }
-
-  function pickFromMap(map: Map<string, Consumer>, num: string): Consumer | null {
-    const raw = (num || '').replace(/[^0-9]/g, '');
-    if (!raw) return null;
-    return (
-      map.get(raw.toLowerCase()) ||
-      map.get(raw.replace(/^0+/, '').toLowerCase()) ||
-      null
-    );
-  }
-
-  // Helper to query consumer by name words
-  async function findByName(name: string): Promise<Consumer[]> {
-    if (!name) return [];
-    const words = cleanNameWords(name);
-    if (words.length === 0) return [];
-
-    try {
-      // 1. Search local Dexie
-      const localCandidates = await db.consumers
-        .where('searchWords')
-        .anyOfIgnoreCase(words.map((w) => w.toLowerCase()))
-        .toArray();
-
-      if (localCandidates.length > 0) {
-        return localCandidates;
-      }
-
-      // 2. Search remote Supabase if online
-      if (navigator.onLine) {
-        const targetWord = words.find((w) => w.length >= 3) || words[0];
-        const { data } = await supabase
-          .from('manager_consumer_summary')
-          .select('id, consumer_number, consumer_name, address, mobile')
-          .ilike('consumer_name', `%${targetWord}%`)
-          .limit(20);
-
-        if (data && data.length > 0) {
-          return data.map((d) => ({
-            id: d.id,
-            consumer_number: d.consumer_number,
-            consumer_name: d.consumer_name,
-            address: d.address || '',
-            mobile: d.mobile || '',
-            verification_status: 'Verified',
-            created_at: new Date().toISOString(),
-            searchWords: [
-              ...d.consumer_name.toLowerCase().split(/\s+/),
-              d.consumer_number.toLowerCase(),
-            ],
-          }));
-        }
-      }
-    } catch (_) {}
-    return [];
-  }
-
-  // 1. Direct number check
-  if (cleanNum && !DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
-    const directConsumer = await findByNumber(cleanNum);
-
-    if (directConsumer) {
-      // Check if scanned name matches database record
-      const isNameVerified = cleanName ? areNamesSimilar(cleanName, directConsumer.consumer_name) : true;
-
-      if (isNameVerified) {
-        // High confidence: BOTH number and name verify against database!
-        return {
-          consumer_id: directConsumer.id,
-          consumer_number: directConsumer.consumer_number,
-          consumer_name: directConsumer.consumer_name,
-          address: directConsumer.address || '',
-          mobile: directConsumer.mobile || '',
-          found: true,
-          name_verified: true,
-        };
-      } else {
-        // NAME MISMATCH DETECTED!
-        // E.g. OCR read 1677 (which is ANNAPURNA in DB), but receipt says "B LINGAM"!
-        // Check dot-matrix 8/6/0 variants (e.g. 1877)!
-        console.warn(`[OCR Cross-Check] Name mismatch on #${cleanNum}: Receipt says "${cleanName}", but DB #${cleanNum} is "${directConsumer.consumer_name}". Checking 8/6/0 variants...`);
-        
-        const variants = generateDotMatrix8Variants(cleanNum);
-        const [variantMap, nameMatches] = await Promise.all([
-          findManyByNumber(variants),
-          cleanName ? findByName(cleanName) : Promise.resolve([] as Consumer[]),
-        ]);
-        for (const variant of variants) {
-          const varConsumer = pickFromMap(variantMap, variant);
-          if (varConsumer && areNamesSimilar(cleanName, varConsumer.consumer_name)) {
-            console.log(`[OCR Auto-Recovery] Corrected #${cleanNum} -> #${varConsumer.consumer_number} (${varConsumer.consumer_name}) matching receipt name!`);
-            return {
-              consumer_id: varConsumer.id,
-              consumer_number: varConsumer.consumer_number,
-              consumer_name: varConsumer.consumer_name,
-              address: varConsumer.address || '',
-              mobile: varConsumer.mobile || '',
-              found: true,
-              corrected: true,
-              original_number: cleanNum,
-              name_verified: true,
-            };
-          }
-        }
-
-        // Also search by name directly in database
-        if (cleanName) {
-          const closeCandidate = nameMatches.find((cand) => {
-            if (!cand.consumer_number || cand.consumer_number.length !== cleanNum.length) return false;
-            let diff = 0;
-            for (let i = 0; i < cleanNum.length; i++) {
-              if (cleanNum[i] !== cand.consumer_number[i]) diff++;
-            }
-            return diff === 1;
-          });
-
-          if (closeCandidate) {
-            console.log(`[OCR Auto-Recovery] Recovered #${closeCandidate.consumer_number} (${closeCandidate.consumer_name}) from name match!`);
-            return {
-              consumer_id: closeCandidate.id,
-              consumer_number: closeCandidate.consumer_number,
-              consumer_name: closeCandidate.consumer_name,
-              address: closeCandidate.address || '',
-              mobile: closeCandidate.mobile || '',
-              found: true,
-              corrected: true,
-              original_number: cleanNum,
-              name_verified: true,
-            };
-          }
-        }
-
-        // Consumer number was directly found in agency database!
-        // Accept the consumer with found: true so valid bills are not blocked by OCR noise on names.
-        return {
-          consumer_id: directConsumer.id,
-          consumer_number: directConsumer.consumer_number,
-          consumer_name: directConsumer.consumer_name,
-          address: directConsumer.address || '',
-          mobile: directConsumer.mobile || '',
-          found: true,
-          name_verified: false,
-        };
-      }
-    } else {
-      // Direct number was NOT found in database!
-      // Check dot-matrix 8/6/0 variants (batched: one Dexie hit + one remote query)
-      const variants = generateDotMatrix8Variants(cleanNum);
-      const [variantMap, nameMatches] = await Promise.all([
-        findManyByNumber(variants),
-        cleanName ? findByName(cleanName) : Promise.resolve([] as Consumer[]),
-      ]);
-      for (const variant of variants) {
-        const varConsumer = pickFromMap(variantMap, variant);
-        if (varConsumer) {
-          const nameOkay = cleanName ? areNamesSimilar(cleanName, varConsumer.consumer_name) : true;
-          if (nameOkay) {
-            console.log(`[OCR Auto-Recovery] Unmatched #${cleanNum} recovered to #${varConsumer.consumer_number} (${varConsumer.consumer_name})!`);
-            return {
-              consumer_id: varConsumer.id,
-              consumer_number: varConsumer.consumer_number,
-              consumer_name: varConsumer.consumer_name,
-              address: varConsumer.address || '',
-              mobile: varConsumer.mobile || '',
-              found: true,
-              corrected: true,
-              original_number: cleanNum,
-              name_verified: true,
-            };
-          }
-        }
-      }
-
-      // Check name in database to recover 1-digit dot-matrix errors
-      if (cleanName) {
-        const closeCandidate = nameMatches.find((cand) => {
-          if (!cand.consumer_number || cand.consumer_number.length !== cleanNum.length) return false;
-          let diff = 0;
-          for (let i = 0; i < cleanNum.length; i++) {
-            if (cleanNum[i] !== cand.consumer_number[i]) diff++;
-          }
-          return diff === 1;
-        });
-
-        if (closeCandidate) {
-          return {
-            consumer_id: closeCandidate.id,
-            consumer_number: closeCandidate.consumer_number,
-            consumer_name: closeCandidate.consumer_name,
-            address: closeCandidate.address || '',
-            mobile: closeCandidate.mobile || '',
-            found: true,
-            corrected: true,
-            original_number: cleanNum,
-            name_verified: true,
-          };
-        }
-      }
-
-      // TRULY NOT IN DATABASE:
-      // Return found: false - DO NOT auto-register or add blindly!
-      return {
-        consumer_number: cleanNum,
-        consumer_name: cleanName || 'Customer Not Found in Database',
-        address: 'Not in master database',
-        mobile: '',
-        found: false,
-      };
-    }
-  }
-
-  // Fallback for pure name manual search
-  if (!cleanNum && cleanName) {
-    const nameMatches = await findByName(cleanName);
-    const words = cleanNameWords(cleanName);
-    const { best, isConfident } = disambiguateCandidates(nameMatches, '', words);
-    if (best && isConfident) {
-      return {
-        consumer_id: best.id,
-        consumer_number: best.consumer_number,
-        consumer_name: best.consumer_name,
-        address: best.address || '',
-        mobile: best.mobile || '',
-        found: true,
-        name_verified: true,
-      };
-    }
+  const consumer = await findConsumerByExactNumber(digitsOnly, cleanNum);
+  if (!consumer) {
+    return {
+      consumer_number: cleanNum,
+      consumer_name: 'Customer Not Found in Database',
+      address: 'Not in master database',
+      mobile: '',
+      found: false,
+    };
   }
 
   return {
-    consumer_number: cleanNum || 'UNKNOWN',
-    consumer_name: cleanName || 'Unverified Consumer',
-    address: 'Not in master database',
-    mobile: '',
-    found: false,
+    consumer_id: consumer.id,
+    consumer_number: consumer.consumer_number,
+    consumer_name: consumer.consumer_name,
+    address: consumer.address || '',
+    mobile: consumer.mobile || '',
+    found: true,
   };
+}
+
+async function findConsumerByExactNumber(rawDigits: string, cleanNum: string): Promise<Consumer | null> {
+  const candidates = Array.from(new Set([rawDigits, cleanNum].filter(Boolean)));
+
+  try {
+    for (const num of candidates) {
+      const local = await db.consumers.where('consumer_number').equalsIgnoreCase(num).first();
+      if (local) return local;
+    }
+  } catch (_) {}
+
+  if (!navigator.onLine) return null;
+
+  try {
+    const { data } = await supabase
+      .from('manager_consumer_summary')
+      .select('id, consumer_number, consumer_name, address, mobile')
+      .in('consumer_number', candidates)
+      .limit(1)
+      .maybeSingle();
+
+    if (!data) return null;
+
+    const cached: Consumer = {
+      id: data.id,
+      consumer_number: data.consumer_number,
+      consumer_name: data.consumer_name,
+      address: data.address || '',
+      mobile: data.mobile || '',
+      verification_status: 'Verified',
+      created_at: new Date().toISOString(),
+      searchWords: [
+        ...data.consumer_name.toLowerCase().split(/\s+/),
+        data.consumer_number.toLowerCase(),
+      ],
+    };
+    await db.consumers.put(cached).catch(() => {});
+    return cached;
+  } catch (err) {
+    console.warn('Remote consumer number lookup error:', err);
+    return null;
+  }
 }
