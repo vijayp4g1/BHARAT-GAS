@@ -538,17 +538,35 @@ export const StaffCylinderSettlement: React.FC = () => {
     }
 
     // Preserve internal tags (__BGCLS_SCANNED_BILLS__ & __BGCLS_BPCL_REPORT__)
+    // Re-read the freshest notes from the database immediately before writing.
+    // Without this, a settlement page left open for hours overwrites bills that
+    // the day-end scanner saved in the meantime.
+    let freshNotes = existing?.notes || '';
+    if (navigator.onLine) {
+      try {
+        const { data: freshRow } = await supabase
+          .from('staff_cylinder_settlements')
+          .select('notes')
+          .eq('settlement_date', selectedDate)
+          .eq('agent_id', selectedAgentId)
+          .maybeSingle();
+        if (freshRow?.notes) {
+          freshNotes = freshRow.notes;
+        }
+      } catch (_) {}
+    }
+
     let internalTags = '';
-    if (existing?.notes) {
-      if (existing.notes.includes('__BGCLS_SCANNED_BILLS__')) {
-        let scPart = existing.notes.split('__BGCLS_SCANNED_BILLS__')[1];
+    if (freshNotes) {
+      if (freshNotes.includes('__BGCLS_SCANNED_BILLS__')) {
+        let scPart = freshNotes.split('__BGCLS_SCANNED_BILLS__')[1];
         if (scPart.includes('__BGCLS_BPCL_REPORT__')) {
           scPart = scPart.split('__BGCLS_BPCL_REPORT__')[0];
         }
         internalTags += `\n__BGCLS_SCANNED_BILLS__${scPart.trim()}`;
       }
-      if (existing.notes.includes('__BGCLS_BPCL_REPORT__')) {
-        let bpclPart = existing.notes.split('__BGCLS_BPCL_REPORT__')[1];
+      if (freshNotes.includes('__BGCLS_BPCL_REPORT__')) {
+        let bpclPart = freshNotes.split('__BGCLS_BPCL_REPORT__')[1];
         if (bpclPart.includes('__BGCLS_SCANNED_BILLS__')) {
           bpclPart = bpclPart.split('__BGCLS_SCANNED_BILLS__')[0];
         }

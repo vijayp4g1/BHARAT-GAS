@@ -87,8 +87,99 @@ export function mergeBpclIntoNotes(currentNotes: string | null | undefined, bpcl
   return result.trim();
 }
 
+type BpclSection = 'PENDING' | 'ONLINE';
+
+const stripBpclMarkup = (value: string): string => value.replace(/[*_`]/g, '').trim();
+
+// Field labels can legitimately contain words like "Pending" or "PayNBook" in their
+// values (e.g. "Status: Online Paid - Pending", "Refill Type: PayNBook Apps").
+// Never treat those lines as section headers.
+const BPCL_FIELD_LINE_RE =
+  /^(?:consumer|cons|customer|name|order|book(?:ing)?|cash|memo|invoice|refill|type|status(?!\s+report\b)|date|address|mobile|phone|amount|delivery\s*boy)\b/i;
+
+const BPCL_BILL_START_RE =
+  /^\s*\*{0,2}\s*(?:Consumer\s*(?:No\.?|Number|#)|Cons\s*(?:No\.?|Number|#))\s*\*{0,2}\s*[:.-]?/i;
+
 /**
- * Robust parser for BPCL Status Report text from WhatsApp / AI agents
+ * Classifies a header line. Only the header line itself may change the section,
+ * so a bill's Status/Refill Type values can never flip the section mid-report.
+ */
+function classifyBpclSectionLine(line: string): BpclSection | null {
+  const clean = stripBpclMarkup(line).replace(/\s+/g, ' ').trim();
+  if (!clean || BPCL_FIELD_LINE_RE.test(clean)) return null;
+
+  if (/\bdelivery\s+pending\b/i.test(clean)) {
+    return 'PENDING';
+  }
+  if (/\bonline\s+(?:bills?|paid|pending)\b|\bpay\s*n?\s*book\b|^online\b/i.test(clean)) {
+    return 'ONLINE';
+  }
+  if (/\bpending\s+(?:bills?|deliver(?:y|ies))\b|^pending\b/i.test(clean)) {
+    return 'PENDING';
+  }
+  return null;
+}
+
+function parseBpclBillChunk(chunk: string, section: BpclSection): BpclBillItem | null {
+  const consMatch = chunk.match(
+    /^\s*\*{0,2}\s*(?:Consumer\s*(?:No\.?|Number|#)|Cons\s*(?:No\.?|Number|#))\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([0-9a-zA-Z]+)/im
+  );
+  if (!consMatch) return null;
+
+  const pick = (re: RegExp): string => {
+    const match = chunk.match(re);
+    return match ? stripBpclMarkup(match[1]) : '';
+  };
+
+  const nameMatch = pick(
+    /^\s*\*{0,2}\s*(?:Customer\s*Name|Consumer\s*Name|Cons\s*Name|Name)\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([^\n\r]+)/im
+  );
+  const orderMatch = pick(
+    /^\s*\*{0,2}\s*(?:Order\s*(?:No\.?|Number|#)?)\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([0-9a-zA-Z]+)/im
+  );
+  const bookDateMatch = pick(
+    /^\s*\*{0,2}\s*(?:Book(?:ing)?\s*Date|Date)\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([0-9][0-9/.-]*)/im
+  );
+  const cashMemoMatch = pick(
+    /^\s*\*{0,2}\s*(?:Cash\s*Memo|Memo(?:\s*(?:No\.?|Number|#))?|Invoice(?:\s*(?:No\.?|Number|#))?)\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([0-9a-zA-Z]+)/im
+  );
+  const refillTypeMatch = pick(
+    /^\s*\*{0,2}\s*(?:Refill\s*Type|Type)\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([^\n\r]+)/im
+  );
+  const statusMatch = pick(
+    /^\s*\*{0,2}\s*Status\s*\*{0,2}\s*[:.-]?\s*\*{0,2}\s*([^\n\r]+)/im
+  );
+
+  return {
+    consumer_number: consMatch[1].trim(),
+    consumer_name: nameMatch,
+    order_no: orderMatch,
+    book_date: bookDateMatch,
+    cash_memo: cashMemoMatch,
+    refill_type: refillTypeMatch,
+    status: statusMatch || (section === 'PENDING' ? 'Delivery Pending' : 'Online Bill (Delivery Done)'),
+    type: section,
+  };
+}
+
+const isOnlinePaidBpclBill = (bill: BpclBillItem): boolean =>
+  /online|pay\s*n?\s*book/i.test(`${bill.status || ''} ${bill.refill_type || ''}`);
+
+const isPendingDeliveryBpclBill = (bill: BpclBillItem): boolean =>
+  /\bpending\b/i.test(bill.status || '');
+
+const hasConsumerNumber = (list: BpclBillItem[], consumerNumber: string): boolean =>
+  list.some((b) => b.consumer_number.trim().toLowerCase() === consumerNumber.trim().toLowerCase());
+
+/**
+ * Robust parser for BPCL Status Report text from WhatsApp / AI agents.
+ *
+ * Sections are detected from header lines only, so words inside bill fields
+ * (e.g. "PayNBook Apps", "Online Paid - Pending", "Delivery Pending") can never
+ * move a bill into the wrong list.
+ *
+ * A bill that is paid online but still awaiting delivery ("Online Paid - Pending")
+ * is counted in BOTH the pending list and the online list.
  */
 export function parseBpclReportText(rawText: string): {
   pendingBills: BpclBillItem[];
@@ -101,66 +192,62 @@ export function parseBpclReportText(rawText: string): {
     return { pendingBills, onlineBills };
   }
 
-  let currentSection: 'PENDING' | 'ONLINE' = 'PENDING';
-  // Split on section headers
-  const blocks = rawText.split(/(?=\*?BPCL Status Report:|\*?Status Report:|\*?Delivery Pending\*?|\*?Online Bills\*?|\*?PayNBook\*?|\*?Online Paid\*?)/i);
+  let currentSection: BpclSection = 'PENDING';
+  const chunks: Array<{ text: string; section: BpclSection }> = [];
+  let currentLines: string[] = [];
+  let currentChunkSection: BpclSection = 'PENDING';
 
-  for (const block of blocks) {
-    const trimmed = block.trim();
-    if (!trimmed) continue;
+  const flushChunk = () => {
+    if (currentLines.length > 0) {
+      chunks.push({ text: currentLines.join('\n'), section: currentChunkSection });
+      currentLines = [];
+    }
+  };
 
-    if (/Delivery Pending/i.test(trimmed)) {
-      currentSection = 'PENDING';
-    } else if (/Online Bills/i.test(trimmed) || /PayNBook/i.test(trimmed) || /Online Paid/i.test(trimmed)) {
-      currentSection = 'ONLINE';
+  const lines = rawText.replace(/\r\n?/g, '\n').split('\n');
+  for (const line of lines) {
+    const section = classifyBpclSectionLine(line);
+    if (section) {
+      flushChunk();
+      currentSection = section;
+      continue;
     }
 
-    // Split block into individual consumer bills
-    const billChunks = trimmed.split(/(?=\*?Consumer No:\*?|\*?Cons No:\*?|\*?Consumer Number:\*?)/i);
-    for (const chunk of billChunks) {
-      if (!/Consumer No|Cons No|Consumer Number/i.test(chunk)) continue;
+    if (BPCL_BILL_START_RE.test(line)) {
+      flushChunk();
+      currentChunkSection = currentSection;
+      currentLines = [line];
+    } else if (currentLines.length > 0) {
+      currentLines.push(line);
+    }
+  }
+  flushChunk();
 
-      const consMatch = chunk.match(/\*?(?:Consumer No|Cons No|Consumer Number):\*?\s*([0-9a-zA-Z]+)/i);
-      const nameMatch = chunk.match(/\*?(?:Customer Name|Name|Cons Name):\*?\s*([^\n\r]+)/i);
-      const orderMatch = chunk.match(/\*?(?:Order No|Order Number):\*?\s*([0-9a-zA-Z]+)/i);
-      const bookDateMatch = chunk.match(/\*?(?:Book Date|Booking Date|Date):\*?\s*([0-9\/\-]+)/i);
-      const cashMemoMatch = chunk.match(/\*?(?:Cash Memo|Memo No|Memo Number|Invoice):\*?\s*([0-9a-zA-Z]+)/i);
-      const refillTypeMatch = chunk.match(/\*?(?:Refill Type|Type):\*?\s*([^\n\r]+)/i);
-      const statusMatch = chunk.match(/\*?(?:Status):\*?\s*([^\n\r]+)/i);
+  for (const chunk of chunks) {
+    const item = parseBpclBillChunk(chunk.text, chunk.section);
+    if (!item) continue;
 
-      if (consMatch) {
-        const item: BpclBillItem = {
-          consumer_number: consMatch[1].trim(),
-          consumer_name: nameMatch ? nameMatch[1].replace(/\*/g, '').trim() : '',
-          order_no: orderMatch ? orderMatch[1].trim() : '',
-          book_date: bookDateMatch ? bookDateMatch[1].trim() : '',
-          cash_memo: cashMemoMatch ? cashMemoMatch[1].trim() : '',
-          refill_type: refillTypeMatch ? refillTypeMatch[1].replace(/\*/g, '').trim() : '',
-          status: statusMatch 
-            ? statusMatch[1].replace(/\*/g, '').trim() 
-            : (currentSection === 'PENDING' ? 'Delivery Pending' : 'Online Bill (Delivery Done)'),
-          type: currentSection,
-        };
-
-        const isOnlinePaidStatus = /Online Paid|PayNBook/i.test(item.status || '') || /PayNBook|Online/i.test(item.refill_type || '');
-
-        // Prevent duplicates in same list
-        if (currentSection === 'PENDING') {
-          if (!pendingBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
-            pendingBills.push(item);
-          }
-          // If the pending bill is already paid online (PayNBook), it belongs in onlineBills as well!
-          if (isOnlinePaidStatus && !onlineBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
-            onlineBills.push({
-              ...item,
-              type: 'ONLINE',
-            });
-          }
-        } else {
-          if (!onlineBills.some((b) => b.consumer_number.toLowerCase() === item.consumer_number.toLowerCase())) {
-            onlineBills.push(item);
-          }
-        }
+    if (item.type === 'PENDING') {
+      if (!hasConsumerNumber(pendingBills, item.consumer_number)) {
+        pendingBills.push(item);
+      }
+      // A pending bill already paid online (PayNBook) also belongs to the online list.
+      if (
+        isOnlinePaidBpclBill(item) &&
+        !hasConsumerNumber(onlineBills, item.consumer_number)
+      ) {
+        onlineBills.push({ ...item, type: 'ONLINE' });
+      }
+    } else {
+      if (!hasConsumerNumber(onlineBills, item.consumer_number)) {
+        onlineBills.push(item);
+      }
+      // Online-paid but not yet delivered still needs a delivery boy: count it as pending too.
+      if (
+        isPendingDeliveryBpclBill(item) &&
+        !hasConsumerNumber(pendingBills, item.consumer_number)
+      ) {
+        pendingBills.push({ ...item, type: 'PENDING' });
       }
     }
   }
@@ -217,6 +304,44 @@ export function removeBillFromRawText(
     .join('')
     .replace(/(\r?\n){3,}/g, '\n\n')
     .trim();
+}
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Updates the Status line of every bill block that belongs to the given consumer.
+ * Used when a bill is delivered/removed from the pending list but still exists in
+ * the online section, so it is not re-added to pending by the parser.
+ */
+export function markBillStatusInRawText(
+  rawText: string | undefined | null,
+  consumerNumber: string,
+  newStatus: string
+): string {
+  if (!rawText || !rawText.trim()) return rawText || '';
+
+  const escapedNum = escapeRegExp(consumerNumber.trim());
+  const blockPattern = new RegExp(
+    '(\\*?(?:Consumer No|Cons No|Consumer Number)\\s*:?\\s*\\*?\\s*' +
+      escapedNum +
+      '\\b[\\s\\S]*?)(?=(?:\\r?\\n+[\\t ]*\\*?(?:Consumer No|Cons No|Consumer Number)\\s*:|\\r?\\n+[\\t ]*\\*?(?:BPCL Status Report|Status Report|Delivery Pending|Online Bills|PayNBook|Online Paid)[^\\r\\n]*)|$)',
+    'gi'
+  );
+
+  return rawText.replace(blockPattern, (block) => {
+    if (/^\s*\*?Status\s*:?/im.test(block)) {
+      return block.replace(/^(\s*\*?Status\s*:?\s*\*?\s*).*$/im, `$1${newStatus}`);
+    }
+    return `${block.replace(/\s+$/, '')}\nStatus: ${newStatus}`;
+  });
+}
+
+function rawTextContainsConsumer(rawText: string, consumerNumber: string): boolean {
+  const escapedNum = escapeRegExp(consumerNumber.trim());
+  return new RegExp(
+    '(?:Consumer No|Cons No|Consumer Number)\\s*:?\\s*\\*?\\s*' + escapedNum + '\\b',
+    'i'
+  ).test(rawText);
 }
 
 /**
@@ -766,6 +891,16 @@ export async function updateBpclBill(
     originalConsumerNumber,
     originalType
   );
+  // Converting a pending bill to online: drop the old online block as well so the
+  // edited bill's new status is the single source of truth (prevents it from being
+  // re-added to pending on the next parse).
+  if (originalType === 'PENDING' && updatedBill.type === 'ONLINE') {
+    updatedRawText = removeBillFromRawText(
+      updatedRawText,
+      originalConsumerNumber,
+      'ONLINE'
+    );
+  }
   updatedRawText = appendBillToRawText(updatedRawText, updatedBill);
 
   const updatedReport: BpclReportData = {
@@ -819,7 +954,20 @@ export async function deleteBpclBill(
     ? current.online_bills.filter((b) => b.consumer_number.trim().toLowerCase() !== cleanNum)
     : current.online_bills;
 
-  const updatedRawText = removeBillFromRawText(current.raw_text, consumerNumber, billType);
+  let updatedRawText = removeBillFromRawText(current.raw_text, consumerNumber, billType);
+
+  // An online-paid bill is shown in both lists. When its pending entry is deleted,
+  // mark the online entry as delivered so the parser does not re-create it as pending.
+  if (
+    billType === 'PENDING' &&
+    updatedOnline.some((b) => b.consumer_number.trim().toLowerCase() === cleanNum)
+  ) {
+    updatedRawText = markBillStatusInRawText(
+      updatedRawText,
+      consumerNumber,
+      'Online Bill (Delivery Done)'
+    );
+  }
 
   const updatedReport: BpclReportData = {
     ...current,
@@ -899,11 +1047,24 @@ export async function clearPendingBillAndMarkDelivered(
 
   let updatedRawText = removeBillFromRawText(current.raw_text, consumerNumber, 'PENDING');
   if (isOnlinePaid && pendingBill) {
-    updatedRawText = appendBillToRawText(updatedRawText, {
-      ...pendingBill,
-      status: 'Online Bill (Delivery Done)',
-      type: 'ONLINE',
-    });
+    const onlineCopyExists = updatedOnline.some(
+      (b) => b.consumer_number.trim().toLowerCase() === cleanNum
+    );
+    if (onlineCopyExists) {
+      // Update the existing online block instead of appending a duplicate.
+      updatedRawText = markBillStatusInRawText(
+        updatedRawText,
+        consumerNumber,
+        'Online Bill (Delivery Done)'
+      );
+    }
+    if (!rawTextContainsConsumer(updatedRawText, consumerNumber)) {
+      updatedRawText = appendBillToRawText(updatedRawText, {
+        ...pendingBill,
+        status: 'Online Bill (Delivery Done)',
+        type: 'ONLINE',
+      });
+    }
   }
 
   const updatedReport: BpclReportData = {

@@ -43,6 +43,7 @@ import {
   fetchAllDayEndReportsForDate,
   fetchDayEndReportForAgent, 
   saveDayEndReportToDatabase, 
+  dayEndEntrySignature,
   type DayEndEntry,
   type DayEndReportSummary
 } from '../lib/dayEndService';
@@ -226,7 +227,10 @@ export const OldAgentDayEnd: React.FC = () => {
   agentIdRef.current = agentId;
   const reportDateRef = useRef<string>(reportDate);
   reportDateRef.current = reportDate;
+  const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionClientIdRef = useRef<string>(Math.random().toString(36).substring(2) + Date.now().toString(36));
 
   // Anti-fraud cross-agent claimed map for detecting duplicate bills
   const crossAgentClaimedMap = useMemo(() => {
@@ -582,6 +586,7 @@ export const OldAgentDayEnd: React.FC = () => {
           agent_name: agentName,
           entries: entries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
       } catch (e) {
         console.warn('Auto-save before switch notice:', e);
@@ -637,12 +642,14 @@ export const OldAgentDayEnd: React.FC = () => {
 
         // 1. Check local working draft first
         let draftEntries: ItemEntry[] = [];
+        let draftTimestamp = 0;
         try {
           const rawDraft = localStorage.getItem(draftKey);
           if (rawDraft) {
             const parsed = JSON.parse(rawDraft);
             if (Array.isArray(parsed.entries)) {
               draftEntries = parsed.entries;
+              draftTimestamp = Number(parsed.timestamp) || 0;
             }
           }
         } catch (_) {}
@@ -670,31 +677,59 @@ export const OldAgentDayEnd: React.FC = () => {
 
         // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
         if (cloudEntries.length > 0) {
-          const mergedMap = new Map<string, ItemEntry>();
-          cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
-          draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+          const cloudUpdatedMs = cloudReport?.updated_at ? new Date(cloudReport.updated_at).getTime() : 0;
+          const cloudKeys = new Set(cloudEntries.map((e) => e.consumer_number.trim().toLowerCase()));
+          const draftHasNewBills = draftEntries.some(
+            (e) => !cloudKeys.has(e.consumer_number.trim().toLowerCase())
+          );
+          const draftIsNewer = draftEntries.length > 0 && draftTimestamp > cloudUpdatedMs;
+          const draftChanged = dayEndEntrySignature(draftEntries) !== dayEndEntrySignature(cloudEntries);
+          const draftWins = draftHasNewBills || (draftIsNewer && draftChanged);
 
-          const finalEntries = Array.from(mergedMap.values());
-          setEntries(finalEntries);
+          if (draftWins) {
+            const mergedMap = new Map<string, ItemEntry>();
+            cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+            draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+            setEntries(Array.from(mergedMap.values()));
+            setHasUnsavedChanges(true);
+          } else {
+            setEntries(cloudEntries);
+            setHasUnsavedChanges(false);
+            try {
+              localStorage.setItem(draftKey, JSON.stringify({
+                entries: cloudEntries,
+                timestamp: cloudUpdatedMs || Date.now(),
+              }));
+            } catch (_) {}
+          }
+
           if (cloudReport?.updated_at) {
             setLastSavedTime(
               new Date(cloudReport.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             );
           }
-          setHasUnsavedChanges(draftEntries.length > cloudEntries.length);
           setIsLoaded(true);
           return;
         }
 
         if (cloudReport && cloudReport.total_deliveries === 0) {
           // Cloud confirmed 0 bills for this delivery boy
-          setEntries([]);
-          setLastSavedTime(null);
-          setHasUnsavedChanges(false);
+          const cloudUpdatedMs = cloudReport.updated_at ? new Date(cloudReport.updated_at).getTime() : 0;
+          const draftIsNewer = draftEntries.length > 0 && draftTimestamp > cloudUpdatedMs;
+
+          if (draftIsNewer) {
+            // Genuinely unsaved local scans: never throw them away
+            setEntries(draftEntries);
+            setHasUnsavedChanges(true);
+          } else {
+            setEntries([]);
+            setLastSavedTime(null);
+            setHasUnsavedChanges(false);
+            try {
+              localStorage.removeItem(draftKey);
+            } catch (_) {}
+          }
           setIsLoaded(true);
-          try {
-            localStorage.removeItem(draftKey);
-          } catch (_) {}
           return;
         }
 
@@ -727,15 +762,28 @@ export const OldAgentDayEnd: React.FC = () => {
   // 3. Synchronous write-ahead to localStorage on ANY change to entries
   useEffect(() => {
     if (!agentName) return;
+    // Do not persist transient state while the cloud/draft is still loading
+    if (!isLoaded) return;
     const normName = agentName.trim().toUpperCase();
     const draftKey = getWorkingDraftKey(reportDate, normName);
     try {
+      // Safety: never overwrite a real draft with a transient empty list
+      // (e.g. while the page is still loading or mid delivery-boy switch).
+      if (entries.length === 0) {
+        const existingRaw = localStorage.getItem(draftKey);
+        if (existingRaw) {
+          const parsedExisting = JSON.parse(existingRaw);
+          if (Array.isArray(parsedExisting.entries) && parsedExisting.entries.length > 0) {
+            return;
+          }
+        }
+      }
       localStorage.setItem(draftKey, JSON.stringify({
         entries,
         timestamp: Date.now(),
       }));
     } catch (_) {}
-  }, [entries, agentName, reportDate]);
+  }, [entries, agentName, reportDate, isLoaded]);
 
   // 4. Debounced background auto-save to cloud database whenever entries change with unsaved edits
   useEffect(() => {
@@ -753,6 +801,7 @@ export const OldAgentDayEnd: React.FC = () => {
           agent_name: agentName,
           entries: entries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
@@ -769,44 +818,124 @@ export const OldAgentDayEnd: React.FC = () => {
   }, [entries, hasUnsavedChanges, agentName, agentId, reportDate, supervisorPhone]);
 
   // 5. App Switch / Background / Pagehide Emergency Flush:
-  // Ensures bills are immediately persisted when the user switches to WhatsApp or another app!
+  // Persists ONLY genuinely unsaved work. This prevents a stale tab from silently
+  // overwriting newer bills added by another device when the app is brought back.
   useEffect(() => {
-    const handleAppSwitchOrUnload = () => {
+    const flushUnsavedWork = () => {
       const currentName = agentNameRef.current;
       const currentId = agentIdRef.current;
       const currentEntries = entriesRef.current;
       const currentDate = reportDateRef.current;
 
-      if (currentName && currentEntries.length > 0) {
-        const normName = currentName.trim().toUpperCase();
-        const draftKey = getWorkingDraftKey(currentDate, normName);
-        try {
-          localStorage.setItem(draftKey, JSON.stringify({
-            entries: currentEntries,
-            timestamp: Date.now(),
-          }));
-        } catch (_) {}
+      // Only flush when there is actually unsaved work to protect
+      if (!hasUnsavedChangesRef.current) return;
+      if (!currentName || currentEntries.length === 0) return;
 
-        saveDayEndReportToDatabase({
-          report_date: currentDate,
-          agent_id: currentId !== 'agent_default' ? currentId : undefined,
-          agent_name: currentName,
-          entries: currentEntries as any,
-          supervisor_phone: supervisorPhone,
-        }).catch(() => {});
-      }
+      const normName = currentName.trim().toUpperCase();
+      const draftKey = getWorkingDraftKey(currentDate, normName);
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          entries: currentEntries,
+          timestamp: Date.now(),
+        }));
+      } catch (_) {}
+
+      saveDayEndReportToDatabase({
+        report_date: currentDate,
+        agent_id: currentId !== 'agent_default' ? currentId : undefined,
+        agent_name: currentName,
+        entries: currentEntries as any,
+        supervisor_phone: supervisorPhone,
+        sender_session_id: sessionClientIdRef.current,
+      }).catch(() => {});
     };
 
-    document.addEventListener('visibilitychange', handleAppSwitchOrUnload);
-    window.addEventListener('pagehide', handleAppSwitchOrUnload);
-    window.addEventListener('beforeunload', handleAppSwitchOrUnload);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushUnsavedWork();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', flushUnsavedWork);
+    window.addEventListener('beforeunload', flushUnsavedWork);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleAppSwitchOrUnload);
-      window.removeEventListener('pagehide', handleAppSwitchOrUnload);
-      window.removeEventListener('beforeunload', handleAppSwitchOrUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', flushUnsavedWork);
+      window.removeEventListener('beforeunload', flushUnsavedWork);
     };
   }, [supervisorPhone]);
+
+  // 5b. Realtime listener: pull bills saved by another staff device immediately.
+  // Merge-only, so a remote update can never remove bills from this screen.
+  useEffect(() => {
+    const mySessionId = sessionClientIdRef.current;
+    let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const channel = supabase.channel('bgcls_cash_memo_live_sync');
+    channel.on('broadcast', { event: 'cash_memos_updated' }, (payload) => {
+      const data = payload?.payload;
+      if (!data || data.report_date !== reportDateRef.current) return;
+      if (data.sender_session_id && data.sender_session_id === mySessionId) return;
+
+      const currentName = (agentNameRef.current || '').trim().toUpperCase();
+      if (data.agent_name && String(data.agent_name).trim().toUpperCase() !== currentName) return;
+
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      syncDebounceTimer = setTimeout(async () => {
+        try {
+          const currentId = agentIdRef.current !== 'agent_default' ? agentIdRef.current : undefined;
+          const cloudReport = await fetchDayEndReportForAgent(
+            reportDateRef.current,
+            agentNameRef.current,
+            currentId
+          );
+          if (!cloudReport || !Array.isArray(cloudReport.entries) || cloudReport.entries.length === 0) return;
+
+          const cloudEntries: ItemEntry[] = cloudReport.entries.map((e: any) => ({
+            consumer_id: e.consumer_id,
+            consumer_number: String(e.consumer_number || ''),
+            consumer_name: String(e.consumer_name || 'Consumer Record'),
+            address: e.address,
+            mobile: e.mobile,
+            found: e.found !== undefined ? Boolean(e.found) : true,
+            source: e.source || 'remote',
+            cylinder_type: e.cylinder_type || '14.2KG_STD',
+            payment_mode: e.payment_mode || 'CASH',
+            empty_collected: e.empty_collected !== undefined ? Boolean(e.empty_collected) : true,
+            dispatch_item_id: e.dispatch_item_id,
+            scanned_at: e.scanned_at,
+          }));
+
+          setEntries((prev) => {
+            const localKeys = new Set(prev.map((e) => e.consumer_number.trim().toLowerCase()));
+            const hasNewBills = cloudEntries.some((e) => !localKeys.has(e.consumer_number.trim().toLowerCase()));
+
+            // Don't disturb in-progress edits unless the cloud actually has new bills
+            if (!hasNewBills && hasUnsavedChangesRef.current) return prev;
+
+            const mergedMap = new Map<string, ItemEntry>();
+            cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+            prev.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+            return Array.from(mergedMap.values());
+          });
+
+          if (cloudReport.updated_at) {
+            setLastSavedTime(
+              new Date(cloudReport.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            );
+          }
+        } catch (err) {
+          console.warn('Realtime bill sync notice:', err);
+        }
+      }, 800);
+    });
+    channel.subscribe();
+
+    return () => {
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // 4. Save Bills to Database
   const handleSaveToDatabase = async () => {
@@ -837,6 +966,7 @@ export const OldAgentDayEnd: React.FC = () => {
         agent_name: agentName,
         entries: dayEndEntries,
         supervisor_phone: supervisorPhone,
+        sender_session_id: sessionClientIdRef.current,
       });
 
       if (res.success) {
@@ -867,6 +997,7 @@ export const OldAgentDayEnd: React.FC = () => {
           agent_name: agentName,
           entries: entries as any,
           supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
         });
       } catch (_) {}
     }
@@ -1177,7 +1308,13 @@ export const OldAgentDayEnd: React.FC = () => {
         agent_name: agentName,
         entries: updated as any,
         supervisor_phone: supervisorPhone,
+        mode: 'replace',
       });
+      if (updated.length === 0) {
+        try {
+          localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
+        } catch (_) {}
+      }
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       toast.success('Bill deleted & database updated');
     } catch (_) {}
@@ -1198,7 +1335,11 @@ export const OldAgentDayEnd: React.FC = () => {
         agent_name: agentName,
         entries: [],
         supervisor_phone: supervisorPhone,
+        mode: 'replace',
       });
+      try {
+        localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
+      } catch (_) {}
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       toast.success('All bills cleared and database updated');
     } catch (_) {}

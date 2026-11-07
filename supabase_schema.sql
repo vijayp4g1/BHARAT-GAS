@@ -265,7 +265,7 @@ CREATE POLICY "Allow authenticated read/write on daily_dispatch" ON daily_dispat
 CREATE POLICY "Allow authenticated read/write on dispatch_items" ON dispatch_items FOR ALL USING (auth.role() = 'authenticated');
 
 -- 8. Day End Delivery Reports
-CREATE TABLE day_end_reports (
+CREATE TABLE IF NOT EXISTS day_end_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id UUID REFERENCES agents(id),
     agent_name TEXT NOT NULL,
@@ -281,10 +281,14 @@ CREATE TABLE day_end_reports (
     entries JSONB NOT NULL DEFAULT '[]'::jsonb,
     raw_csv TEXT,
     supervisor_phone TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    scanned_by_staff TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(report_date, agent_name)
 );
 
 ALTER TABLE day_end_reports ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow authenticated read/write on day_end_reports" ON day_end_reports;
 CREATE POLICY "Allow authenticated read/write on day_end_reports" ON day_end_reports FOR ALL USING (auth.role() = 'authenticated');
 
 -- 9. Staff Cylinder Settlements (Digital Book for Daily Delivery Boy Cash & Cylinder Settlement)
@@ -320,4 +324,129 @@ ALTER TABLE staff_cylinder_settlements ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow authenticated read/write on staff_cylinder_settlements" 
 ON staff_cylinder_settlements FOR ALL USING (auth.role() = 'authenticated');
 
+-- 10. Settlement shrink audit (permanent history whenever scanned bills are removed)
+CREATE OR REPLACE FUNCTION bgcls_scanned_bill_count(notes TEXT)
+RETURNS INTEGER
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  raw TEXT;
+  parsed JSONB;
+BEGIN
+  IF notes IS NULL OR position('__BGCLS_SCANNED_BILLS__' IN notes) = 0 THEN
+    RETURN 0;
+  END IF;
+  raw := split_part(notes, '__BGCLS_SCANNED_BILLS__', 2);
+  raw := split_part(raw, '__BGCLS_BPCL_REPORT__', 1);
+  IF btrim(raw) = '' THEN
+    RETURN 0;
+  END IF;
+  parsed := btrim(raw)::jsonb;
+  IF jsonb_typeof(parsed) = 'array' THEN
+    RETURN jsonb_array_length(parsed);
+  END IF;
+  RETURN 0;
+EXCEPTION WHEN OTHERS THEN
+  RETURN 0;
+END;
+$$;
 
+CREATE OR REPLACE FUNCTION bgcls_scanned_bill_numbers(notes TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  raw TEXT;
+  parsed JSONB;
+BEGIN
+  IF notes IS NULL OR position('__BGCLS_SCANNED_BILLS__' IN notes) = 0 THEN
+    RETURN '[]'::jsonb;
+  END IF;
+  raw := split_part(notes, '__BGCLS_SCANNED_BILLS__', 2);
+  raw := split_part(raw, '__BGCLS_BPCL_REPORT__', 1);
+  IF btrim(raw) = '' THEN
+    RETURN '[]'::jsonb;
+  END IF;
+  parsed := btrim(raw)::jsonb;
+  IF jsonb_typeof(parsed) <> 'array' THEN
+    RETURN '[]'::jsonb;
+  END IF;
+  RETURN coalesce(
+    (
+      SELECT jsonb_agg(coalesce(e ->> 'consumer_number', ''))
+      FROM jsonb_array_elements(parsed) e
+      WHERE coalesce(e ->> 'consumer_number', '') <> ''
+    ),
+    '[]'::jsonb
+  );
+EXCEPTION WHEN OTHERS THEN
+  RETURN '[]'::jsonb;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS settlement_shrink_history (
+    id BIGSERIAL PRIMARY KEY,
+    settlement_id UUID,
+    settlement_date DATE,
+    agent_id UUID,
+    agent_name TEXT,
+    old_bill_count INTEGER NOT NULL DEFAULT 0,
+    new_bill_count INTEGER NOT NULL DEFAULT 0,
+    removed_numbers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    old_updated_at TIMESTAMP WITH TIME ZONE,
+    new_updated_at TIMESTAMP WITH TIME ZONE,
+    detected_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS settlement_shrink_history_date_idx
+  ON settlement_shrink_history (settlement_date, agent_name);
+
+ALTER TABLE settlement_shrink_history ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow authenticated read on settlement_shrink_history" ON settlement_shrink_history;
+CREATE POLICY "Allow authenticated read on settlement_shrink_history"
+  ON settlement_shrink_history FOR SELECT USING (auth.role() = 'authenticated');
+
+CREATE OR REPLACE FUNCTION log_settlement_shrink()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  old_count INTEGER;
+  new_count INTEGER;
+  old_numbers JSONB;
+  new_numbers JSONB;
+  removed JSONB;
+BEGIN
+  old_count := bgcls_scanned_bill_count(old.notes);
+  new_count := bgcls_scanned_bill_count(new.notes);
+
+  IF new_count < old_count THEN
+    old_numbers := bgcls_scanned_bill_numbers(old.notes);
+    new_numbers := bgcls_scanned_bill_numbers(new.notes);
+    SELECT coalesce(jsonb_agg(value), '[]'::jsonb)
+      INTO removed
+      FROM jsonb_array_elements_text(old_numbers) value
+      WHERE NOT (new_numbers ? value);
+
+    INSERT INTO settlement_shrink_history (
+      settlement_id, settlement_date, agent_id, agent_name,
+      old_bill_count, new_bill_count, removed_numbers, old_updated_at, new_updated_at
+    ) VALUES (
+      old.id, old.settlement_date, old.agent_id, old.agent_name,
+      old_count, new_count, removed, old.updated_at, new.updated_at
+    );
+  END IF;
+
+  RETURN new;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_log_settlement_shrink ON staff_cylinder_settlements;
+CREATE TRIGGER trg_log_settlement_shrink
+  AFTER UPDATE OF notes ON staff_cylinder_settlements
+  FOR EACH ROW
+  EXECUTE FUNCTION log_settlement_shrink();

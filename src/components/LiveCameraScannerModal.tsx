@@ -1,23 +1,19 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { 
-  X, 
-  Flashlight, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sparkles, 
-  Loader2, 
-  Search, 
-  Plus, 
-  Check, 
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  X,
+  Flashlight,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  Loader2,
+  Search,
+  Plus,
+  Check,
   Camera,
-  Image as ImageIcon,
-  Upload,
   WifiOff
 } from 'lucide-react';
-import db, { type Consumer } from '../lib/db';
-import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { scanBillWithGemini } from '../lib/gemini';
+import { scanBillWithGemini, enhanceImageForOcr } from '../lib/gemini';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 
 interface LiveCameraScannerModalProps {
@@ -178,6 +174,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [isSuccessFlash, setIsSuccessFlash] = useState<boolean>(false);
   const [isShutterFlash, setIsShutterFlash] = useState<boolean>(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [snapAttempts, setSnapAttempts] = useState<number>(0);
+  const [showDoneWarning, setShowDoneWarning] = useState<boolean>(false);
+
+  // Hard guard against double-taps / overlapping async scans (prevents duplicate
+  // API calls, wrong counts and single-bill double reads).
+  const isProcessingRef = useRef<boolean>(false);
+  const prevOpenRef = useRef<boolean>(false);
 
   // Monitor network online/offline state
   useEffect(() => {
@@ -203,10 +206,44 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // Cooldown map to avoid spamming the same bill
   const recentSeenCooldownRef = useRef<Map<string, number>>(new Map());
 
-  // Sync existing numbers
+  // Pending failed bill the operator is currently correcting via Edit Number.
+  const editingFailedNumberRef = useRef<string | null>(null);
+
+  // Keep the "already added" set in sync with the delivery list.
+  // Rebuilding (instead of only adding) means a bill deleted from the list can
+  // be scanned again, and switching delivery boy/day never blocks fresh bills.
+  const existingNumbersKey = existingNumbers.join('|');
   useEffect(() => {
-    existingNumbers.forEach((num) => scannedSetRef.current.add(num.toLowerCase()));
-  }, [existingNumbers]);
+    const nums = existingNumbersKey ? existingNumbersKey.split('|') : [];
+    scannedSetRef.current = new Set(nums.map((num) => num.toLowerCase()));
+  }, [existingNumbersKey, agentId, agentName]);
+
+  // Reset per-session counters + cooldowns every time the scanner is opened.
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      setScannedSessionList([]);
+      setFailedScanList([]);
+      setLastScanned(null);
+      setAlreadyAddedNotice(null);
+      setDuplicateScamNotice(null);
+      setActiveScanFailAlert(null);
+      setSnapAttempts(0);
+      setShowDoneWarning(false);
+      recentSeenCooldownRef.current.clear();
+      editingFailedNumberRef.current = null;
+    }
+    if (!isOpen) {
+      setShowDoneWarning(false);
+      isProcessingRef.current = false;
+    }
+    prevOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  // Switching delivery boy must never carry the previous boy's cooldowns.
+  useEffect(() => {
+    if (!isOpen) return;
+    recentSeenCooldownRef.current.clear();
+  }, [agentId, agentName, isOpen]);
 
   // Start video stream when modal opens
   useEffect(() => {
@@ -389,8 +426,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     toast.success(`✨ Added #${cleanNum} (${finalName})!`, { id: 'scan-snap' });
     setStatusText(`Added #${cleanNum}! Ready for next bill`);
 
-    // Remove from failedScanList if present
-    setFailedScanList((prev) => prev.filter((item) => item.raw_number !== cleanNum));
+    // Remove from failedScanList if present (compare normalized digits)
+    setFailedScanList((prev) =>
+      prev.filter((item) => cleanAndNormalizeDigits(item.raw_number) !== cleanNum)
+    );
 
     // Clear alert
     setActiveScanFailAlert(null);
@@ -398,6 +437,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   const handleEditNumber = () => {
     if (activeScanFailAlert?.consumer_number) {
+      // Remember which pending (failed) bill the operator is correcting, so a
+      // successful manual add can retire the stale pending entry instead of
+      // letting "Add All" add the mis-read number as an extra bill.
+      editingFailedNumberRef.current = activeScanFailAlert.consumer_number;
       setManualInput(activeScanFailAlert.consumer_number);
     }
     setActiveScanFailAlert(null);
@@ -414,44 +457,66 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }, 150);
   };
 
-  // Process a candidate consumer number match
+  // Records a bill that could not be auto-added so it is never silently lost.
+  // The operator gets a final "N bills not added" guard when closing the scanner.
+  const recordFailedScan = (rawNumber: string, reason: string) => {
+    setFailedScanList((prev) => {
+      if (prev.some((item) => item.raw_number === rawNumber && item.reason === reason)) {
+        return prev;
+      }
+      return [{ raw_number: rawNumber, reason, timestamp: Date.now() }, ...prev];
+    });
+  };
+
+  // Process a candidate consumer number match.
+  // Returns:
+  //   'added'     → the bill was newly added to the delivery list
+  //   'duplicate' → this exact consumer is already in the list (safe re-scan)
+  //   'failed'    → could not verify / add (alert + failed-list recorded)
   const processMatchedConsumerNumber = async (
     rawNum: string,
-    extractedName?: string
-  ): Promise<boolean> => {
+    extractedName?: string,
+    options: { silent?: boolean } = {}
+  ): Promise<'added' | 'duplicate' | 'failed'> => {
+    const silent = options.silent === true;
     const cleanNum = cleanAndNormalizeDigits(rawNum);
 
     if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 12) {
-      playWarningAlarm();
-      if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
-      const reason = cleanNum && cleanNum.length > 12
-        ? `Too many digits (${cleanNum.length}). Bharatgas numbers are 1-10 digits.`
-        : 'Could not extract valid digits.';
-      setActiveScanFailAlert({
-        type: 'TOO_LONG',
-        consumer_number: cleanNum,
-        consumer_name: extractedName,
-        reason,
-      });
-      if (cleanNum) {
-        setFailedScanList((prev) => [
-          { raw_number: cleanNum, reason: `Too long (${cleanNum.length} digits)`, timestamp: Date.now() },
-          ...prev,
-        ]);
+      const reason =
+        cleanNum && cleanNum.length > 12
+          ? `Too many digits (${cleanNum.length}). Bharatgas numbers are 1-10 digits.`
+          : 'Could not extract valid digits.';
+      if (!silent) {
+        playWarningAlarm();
+        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+        setActiveScanFailAlert({
+          type: 'TOO_LONG',
+          consumer_number: cleanNum,
+          consumer_name: extractedName,
+          reason,
+        });
+        if (cleanNum) {
+          recordFailedScan(
+            cleanNum,
+            cleanNum.length > 12 ? `Too long (${cleanNum.length} digits)` : 'Invalid digits'
+          );
+        }
       }
-      return false;
+      return 'failed';
     }
 
     if (DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
-      playWarningAlarm();
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      setActiveScanFailAlert({
-        type: 'BLACKLISTED',
-        consumer_number: cleanNum,
-        consumer_name: extractedName,
-        reason: `Ignored distributor / telephone code #${cleanNum}. Aim camera at "Details of Receiver:".`,
-      });
-      return false;
+      if (!silent) {
+        playWarningAlarm();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        setActiveScanFailAlert({
+          type: 'BLACKLISTED',
+          consumer_number: cleanNum,
+          consumer_name: extractedName,
+          reason: `Ignored distributor / telephone code #${cleanNum}. Aim camera at "Details of Receiver:".`,
+        });
+      }
+      return 'failed';
     }
 
     // Match with local Dexie or remote Supabase, checking number, name, and 8/6/0 variants!
@@ -460,28 +525,28 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // STRICT DATABASE VERIFICATION GUARD:
     // If consumer is not verified in the database, show prominent alert directly on screen!
     if (!match.found) {
-      playWarningAlarm();
-      if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
       const isMismatch = match.name_verified === false && Boolean(match.consumer_name);
       const failReason = isMismatch
         ? `Receipt has "${extractedName || 'Unknown'}", but Agency Database has "${match.consumer_name}".`
         : `Consumer #${cleanNum} is NOT found in agency database.`;
 
-      // Trigger direct on-screen popup alert immediately
-      setActiveScanFailAlert({
-        type: isMismatch ? 'NAME_MISMATCH' : 'NOT_FOUND',
-        consumer_number: cleanNum,
-        consumer_name: extractedName || '',
-        db_consumer_name: isMismatch ? match.consumer_name : undefined,
-        reason: failReason,
-      });
+      if (!silent) {
+        playWarningAlarm();
+        if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
 
-      setStatusText(`Bill #${cleanNum} not verified. Action required above.`);
-      setFailedScanList((prev) => [
-        { raw_number: cleanNum, reason: isMismatch ? 'Name mismatch' : 'Not found in database', timestamp: Date.now() },
-        ...prev,
-      ]);
-      return false;
+        // Trigger direct on-screen popup alert immediately
+        setActiveScanFailAlert({
+          type: isMismatch ? 'NAME_MISMATCH' : 'NOT_FOUND',
+          consumer_number: cleanNum,
+          consumer_name: extractedName || '',
+          db_consumer_name: isMismatch ? match.consumer_name : undefined,
+          reason: failReason,
+        });
+
+        setStatusText(`Bill #${cleanNum} not verified. Action required above.`);
+        recordFailedScan(cleanNum, isMismatch ? 'Name mismatch' : 'Not found in database');
+      }
+      return 'failed';
     }
 
     const resolvedNum = match.consumer_number;
@@ -489,24 +554,48 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const finalAddress = match.address || 'Verified in Agency Database';
     const finalMobile = match.mobile || '';
 
-    // Anti-spam cooldown (5 seconds for the same number)
-    const now = Date.now();
-    const lastSeen =
-      recentSeenCooldownRef.current.get(resolvedNum.toLowerCase()) ||
-      recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
-    if (lastSeen && now - lastSeen < 5000) {
-      return false;
+    // Anti-spam cooldown (5 seconds for the same number). Skipped for internal
+    // silent passes so they never suppress the final user-facing error.
+    if (!silent) {
+      const now = Date.now();
+      const lastSeen =
+        recentSeenCooldownRef.current.get(resolvedNum.toLowerCase()) ||
+        recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
+      if (lastSeen && now - lastSeen < 5000) {
+        return 'failed';
+      }
+      recentSeenCooldownRef.current.set(resolvedNum.toLowerCase(), now);
+      recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
     }
-    recentSeenCooldownRef.current.set(resolvedNum.toLowerCase(), now);
-    recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
 
-    const isAlreadyAdded =
-      scannedSetRef.current.has(resolvedNum.toLowerCase()) ||
-      scannedSetRef.current.has(cleanNum.toLowerCase());
-    if (isAlreadyAdded) {
-      setAlreadyAddedNotice(`Consumer #${resolvedNum} is already in delivery list!`);
-      setTimeout(() => setAlreadyAddedNotice(null), 2500);
-      return true;
+    const resolvedAlready = scannedSetRef.current.has(resolvedNum.toLowerCase());
+    const rawAlready = scannedSetRef.current.has(cleanNum.toLowerCase());
+    const wasAutoCorrected = cleanNum.toLowerCase() !== resolvedNum.toLowerCase();
+
+    if (resolvedAlready || rawAlready) {
+      if (wasAutoCorrected && resolvedAlready) {
+        // A NEW physical bill was auto-corrected onto a number that is already
+        // in the list. That usually means an OCR digit error collided with a
+        // different bill — flag it instead of silently dropping it.
+        if (!silent) {
+          playWarningAlarm();
+          setActiveScanFailAlert({
+            type: 'NOT_FOUND',
+            consumer_number: cleanNum,
+            consumer_name: extractedName,
+            reason: `OCR auto-corrected this receipt to #${resolvedNum}, which is already in the list. The printed number may be #${cleanNum}. Verify the bill and Force Add if it is different.`,
+          });
+          recordFailedScan(cleanNum, `Auto-corrected onto already added #${resolvedNum}`);
+          setStatusText(`Possible missed bill #${cleanNum}. Verify above.`);
+        }
+        return 'failed';
+      }
+
+      if (!silent) {
+        setAlreadyAddedNotice(`Consumer #${resolvedNum} is already in delivery list!`);
+        setTimeout(() => setAlreadyAddedNotice(null), 2500);
+      }
+      return 'duplicate';
     }
 
     // INSTANT ADDITION TO UI FOR VERIFIED CONSUMER
@@ -600,7 +689,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       toast.success(`✨ Added #${resolvedNum} (${finalName})!`, { id: 'scan-snap' });
     }
 
-    return true;
+    return 'added';
   };
 
   /**
@@ -634,9 +723,155 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     return canvas.toDataURL('image/jpeg', 0.88);
   };
 
+  /**
+   * Runs one complete OCR → database-verification cycle for an image.
+   *
+   * Accuracy/cost strategy:
+   *   1. Cheapest Flash-Lite model reads the bill.
+   *   2. If the number is valid but cannot be verified, ONE high-contrast
+   *      grayscale re-read is attempted (faint dot-matrix digits recover here).
+   *   3. If it still fails, the actionable popup is shown and the bill is
+   *      recorded so it cannot be silently lost when the scanner is closed.
+   */
+  const runScanPipeline = async (imageInput: File | Blob | string, label: string) => {
+    if (isProcessingRef.current) return;
+
+    if (!navigator.onLine) {
+      toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
+      return;
+    }
+
+    isProcessingRef.current = true;
+    setActiveScanFailAlert(null);
+    setIsProcessing(true);
+    setIsShutterFlash(true);
+    setSnapAttempts((n) => n + 1);
+    setTimeout(() => setIsShutterFlash(false), 200);
+    toast.loading(`Gemini AI reading ${label}...`, { id: 'scan-snap' });
+
+    try {
+      setStatusText('Gemini AI reading Cons No & Name...');
+      const first = await scanBillWithGemini(imageInput);
+
+      if (first.error) {
+        playWarningAlarm();
+        setActiveScanFailAlert({
+          type: 'NOT_DETECTED',
+          reason: `AI Notice: ${first.error}`,
+        });
+        toast.error(`AI Notice: ${first.error}`, { id: 'scan-snap' });
+        setStatusText('Hold bill steady and tap Snap...');
+        return;
+      }
+
+      if (first.found && first.consumerNumber) {
+        // Silent pass: don't show the failure popup until the enhanced re-read
+        // has also had a chance to recover the number.
+        const firstOutcome = await processMatchedConsumerNumber(
+          first.consumerNumber,
+          first.consumerName,
+          { silent: true }
+        );
+        if (firstOutcome === 'added') {
+          toast.success('Matched successfully!', { id: 'scan-snap' });
+          setStatusText(`Matched #${first.consumerNumber}! Ready for next bill`);
+          return;
+        }
+        if (firstOutcome === 'duplicate') {
+          toast(`#${first.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
+          setStatusText(`#${first.consumerNumber} already added — ready for next bill`);
+          return;
+        }
+
+        // Not verified — try ONE high-contrast re-read of the same frame.
+        let reportNumber = first.consumerNumber;
+        let reportName = first.consumerName;
+        setStatusText('Re-reading faint print (enhanced)...');
+        toast.loading('Re-reading faint print...', { id: 'scan-snap' });
+        const enhanced = await enhanceImageForOcr(imageInput);
+        if (enhanced) {
+          const retry = await scanBillWithGemini(enhanced);
+          if (retry.found && retry.consumerNumber) {
+            const retryOutcome = await processMatchedConsumerNumber(
+              retry.consumerNumber,
+              retry.consumerName,
+              { silent: true }
+            );
+            if (retryOutcome === 'added') {
+              toast.success(
+                `✨ Recovered: #${retry.consumerNumber} (${retry.consumerName})`,
+                { id: 'scan-snap' }
+              );
+              setStatusText(`Recovered #${retry.consumerNumber}! Ready for next bill`);
+              return;
+            }
+            if (retryOutcome === 'duplicate') {
+              toast(`#${retry.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
+              setStatusText(`#${retry.consumerNumber} already added — ready for next bill`);
+              return;
+            }
+            // Surface the enhanced reading (usually the more reliable one).
+            reportNumber = retry.consumerNumber;
+            reportName = retry.consumerName;
+          }
+        }
+
+        // Still unverified → now show the actionable popup / record the bill.
+        await processMatchedConsumerNumber(reportNumber, reportName);
+        return;
+      }
+
+      // No number detected on the first pass — try one enhanced re-read before
+      // asking the operator to retry.
+      setStatusText('Re-reading faint print (enhanced)...');
+      toast.loading('Re-reading faint print...', { id: 'scan-snap' });
+      const enhanced = await enhanceImageForOcr(imageInput);
+      if (enhanced) {
+        const retry = await scanBillWithGemini(enhanced);
+        if (retry.found && retry.consumerNumber) {
+          const recovered = await processMatchedConsumerNumber(
+            retry.consumerNumber,
+            retry.consumerName
+          );
+          if (recovered === 'added') {
+            toast.success(
+              `✨ Recovered: #${retry.consumerNumber} (${retry.consumerName})`,
+              { id: 'scan-snap' }
+            );
+            setStatusText(`Recovered #${retry.consumerNumber}! Ready for next bill`);
+          } else if (recovered === 'duplicate') {
+            toast(`#${retry.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
+            setStatusText(`#${retry.consumerNumber} already added — ready for next bill`);
+          }
+          // 'added'/'duplicate' are resolved; 'failed' already showed its popup.
+          return;
+        }
+      }
+
+      playWarningAlarm();
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      setActiveScanFailAlert({
+        type: 'NOT_DETECTED',
+        reason: 'Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.',
+      });
+      recordFailedScan('', 'Cons No not detected');
+      setStatusText('Cons No not detected. Tap Retry or type number.');
+      toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
+        id: 'scan-snap',
+        duration: 3500,
+      });
+    } catch (err: any) {
+      console.warn('Scan cycle error:', err);
+      toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
+    } finally {
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+    }
+  };
+
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
-  const performScan = useCallback(async () => {
-    if (isProcessing || !videoRef.current) return;
+  const performScan = async () => {
+    if (isProcessingRef.current || !videoRef.current) return;
 
     if (!navigator.onLine) {
       toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
@@ -646,111 +881,17 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const imgDataUrl = captureCameraFrame();
     if (!imgDataUrl) return;
 
-    setActiveScanFailAlert(null);
-    setIsProcessing(true);
-    setIsShutterFlash(true);
-    setTimeout(() => setIsShutterFlash(false), 200);
-    toast.loading('Gemini AI reading cash memo...', { id: 'scan-snap' });
-
-    try {
-      setStatusText('Gemini AI reading Cons No & Name...');
-      const result = await scanBillWithGemini(imgDataUrl);
-
-      if (result.error) {
-        playWarningAlarm();
-        setActiveScanFailAlert({
-          type: 'NOT_DETECTED',
-          reason: `AI Notice: ${result.error}`,
-        });
-        toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
-        setStatusText('Hold bill steady and tap Snap...');
-        return;
-      }
-
-      if (result.found && result.consumerNumber) {
-        const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
-        if (matched) {
-          toast.success('Matched successfully!', { id: 'scan-snap' });
-          setStatusText(`Matched #${result.consumerNumber}! Ready for next bill`);
-          return;
-        }
-      } else {
-        playWarningAlarm();
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        setActiveScanFailAlert({
-          type: 'NOT_DETECTED',
-          reason: 'Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.',
-        });
-        setStatusText('Cons No not detected. Tap Retry or type number.');
-        toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
-          id: 'scan-snap',
-          duration: 3500,
-        });
-      }
-    } catch (err: any) {
-      console.warn('Scan cycle error:', err);
-      toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [isProcessing]);
+    await runScanPipeline(imgDataUrl, 'cash memo');
+  };
 
   // Direct Photo Capture / Gallery Upload Handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!navigator.onLine) {
-      toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
-      return;
-    }
-
-    setActiveScanFailAlert(null);
-    setIsProcessing(true);
-    setIsShutterFlash(true);
-    setTimeout(() => setIsShutterFlash(false), 200);
-    toast.loading('Gemini AI reading photo...', { id: 'scan-snap' });
-
     try {
-      setStatusText('Gemini AI reading photo...');
-      const result = await scanBillWithGemini(file);
-
-      if (result.error) {
-        playWarningAlarm();
-        setActiveScanFailAlert({
-          type: 'NOT_DETECTED',
-          reason: `AI Notice: ${result.error}`,
-        });
-        toast.error(`AI Notice: ${result.error}`, { id: 'scan-snap' });
-        setStatusText('Hold bill steady and tap Snap...');
-        return;
-      }
-
-      if (result.found && result.consumerNumber) {
-        const matched = await processMatchedConsumerNumber(result.consumerNumber, result.consumerName);
-        if (matched) {
-          toast.success('Matched successfully!', { id: 'scan-snap' });
-          setStatusText(`Matched #${result.consumerNumber}! Ready for next bill`);
-          return;
-        }
-      } else {
-        playWarningAlarm();
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        setActiveScanFailAlert({
-          type: 'NOT_DETECTED',
-          reason: 'Cons No: not detected in photo. Make sure "Details of Receiver:" is clearly visible.',
-        });
-        setStatusText('Cons No: not detected in photo...');
-        toast.error('Cons No: not detected. Make sure "Details of Receiver:" is clearly visible.', {
-          id: 'scan-snap',
-          duration: 3500,
-        });
-      }
-    } catch (err: any) {
-      console.warn('File upload scan error:', err);
-      toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
+      await runScanPipeline(file, 'photo');
     } finally {
-      setIsProcessing(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -771,13 +912,105 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return;
     }
 
-    const ok = await processMatchedConsumerNumber(cleanNum);
-    if (ok) {
+    const outcome = await processMatchedConsumerNumber(cleanNum);
+    if (outcome !== 'failed') {
+      // The bill is now in the list — retire its pending (failed) entry so the
+      // Done guard and "Add All" do not add a second, mis-read copy of it.
+      const editedNumber = editingFailedNumberRef.current;
+      const editedDigits = editedNumber ? cleanAndNormalizeDigits(editedNumber) : '';
+      setFailedScanList((prev) =>
+        prev.filter((item) => {
+          const digits = cleanAndNormalizeDigits(item.raw_number);
+          return digits !== cleanNum && digits !== editedDigits;
+        })
+      );
+      editingFailedNumberRef.current = null;
       setManualInput('');
+      if (outcome === 'duplicate') {
+        toast(`#${cleanNum} is already in the list`, { icon: '⚠️' });
+      }
     } else {
       toast.error(`Could not add Consumer #${cleanNum}`);
     }
     setIsProcessing(false);
+  };
+
+  /**
+   * Failed scans that still carry a usable number. These are bills the operator
+   * physically scanned but which could not be matched to the agency database.
+   * They must be explicitly resolved before the scanner closes — otherwise the
+   * "50 scanned but only 45 added" data loss happens.
+   */
+  // Deduplicate by normalized digits: the same physical bill can fail more than
+  // once with different reasons, and "Add All" must never add it twice.
+  const pendingBills = (() => {
+    const seen = new Set<string>();
+    return failedScanList.filter((item) => {
+      const digits = cleanAndNormalizeDigits(item.raw_number);
+      if (
+        digits.length < 1 ||
+        digits.length > 12 ||
+        DISTRIBUTOR_BLACKLIST.has(digits) ||
+        seen.has(digits)
+      ) {
+        return false;
+      }
+      seen.add(digits);
+      return true;
+    });
+  })();
+
+  const handleForceAddAllPending = () => {
+    const items = [...pendingBills];
+    if (items.length === 0) {
+      setShowDoneWarning(false);
+      onClose();
+      return;
+    }
+
+    const batch = items
+      .map((item) => {
+        const cleanNum = cleanAndNormalizeDigits(item.raw_number);
+        return { item, cleanNum };
+      })
+      .filter(
+        ({ cleanNum }) =>
+          Boolean(cleanNum) && !scannedSetRef.current.has(cleanNum.toLowerCase())
+      );
+
+    batch.forEach(({ cleanNum }) => {
+      const otherClaimant = claimedByOtherAgents[cleanNum.toLowerCase()];
+      const finalName = `Customer #${cleanNum}`;
+
+      scannedSetRef.current.add(cleanNum.toLowerCase());
+      setScannedSessionList((prev) => [
+        { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
+        ...prev,
+      ]);
+      onConsumerScanned({
+        consumer_number: cleanNum,
+        consumer_name: finalName,
+        address: 'Directly Verified / Physical Bill',
+        mobile: '',
+        found: true,
+        duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+        duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
+      });
+    });
+
+    setFailedScanList([]);
+    setShowDoneWarning(false);
+    toast.success(`Added ${batch.length} pending bill(s) ✓`, { id: 'scan-snap' });
+    setStatusText(`Added ${batch.length} pending bill(s). Done!`);
+    onClose();
+  };
+
+  const handleDone = () => {
+    if (pendingBills.length > 0) {
+      setShowDoneWarning(true);
+      return;
+    }
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -873,7 +1106,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleDone}
               className="p-2 sm:p-2.5 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white border border-white/15 transition-all"
               title="Close Scanner"
             >
@@ -1104,9 +1337,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
 
           {/* Quick Expandable Session Status Bar */}
-          {(scannedSessionList.length > 0 || failedScanList.length > 0) && (
+          {(scannedSessionList.length > 0 || failedScanList.length > 0 || snapAttempts > 0) && (
             <div className="flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
               <div className="flex items-center gap-2">
+                <span className="text-slate-400 font-semibold" title="Bills captured this session">
+                  {snapAttempts} scanned
+                </span>
                 {scannedSessionList.length > 0 && (
                   <button
                     type="button"
@@ -1200,14 +1436,92 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
             <button
               type="button"
-              onClick={onClose}
-              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all shrink-0 whitespace-nowrap"
+              onClick={handleDone}
+              className={`font-bold px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all shrink-0 whitespace-nowrap ${
+                pendingBills.length > 0
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 animate-pulse'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+              }`}
             >
               Done ({scannedSessionList.length})
+              {pendingBills.length > 0 ? ` · ${pendingBills.length} pending` : ''}
             </button>
           </div>
         </div>
       </div>
+
+      {/* 5. "BILLS NOT ADDED" GUARD — prevents silent data loss */}
+      {showDoneWarning && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-gradient-to-b from-slate-900 via-amber-950/40 to-slate-900 border-2 border-amber-500 rounded-3xl p-4 w-full max-w-sm text-white shadow-[0_0_60px_rgba(245,158,11,0.35)] flex flex-col gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-amber-300">⚠️ Bills Not Added Yet</h3>
+                <p className="text-[11px] text-slate-300">
+                  You scanned {snapAttempts} bill{snapAttempts === 1 ? '' : 's'}, added {scannedSessionList.length}.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 rounded-2xl p-3 border border-amber-500/30 text-xs text-amber-100 leading-relaxed">
+              <b>{pendingBills.length}</b> scanned bill{pendingBills.length === 1 ? '' : 's'} could not be
+              auto-verified in the agency database. Add them now so no cash memo is missed.
+              {pendingBills.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {pendingBills.slice(0, 12).map((item, idx) => (
+                    <span
+                      key={`${item.raw_number}-${idx}`}
+                      className="font-mono text-[11px] bg-amber-500/15 border border-amber-400/30 text-amber-200 px-1.5 py-0.5 rounded-md"
+                    >
+                      #{item.raw_number || '???'}
+                    </span>
+                  ))}
+                  {pendingBills.length > 12 && (
+                    <span className="text-[11px] text-amber-300">+{pendingBills.length - 12} more</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleForceAddAllPending}
+              className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
+            >
+              <Check className="w-4 h-4" />
+              Add All {pendingBills.length} Bill{pendingBills.length === 1 ? '' : 's'}
+            </button>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDoneWarning(false);
+                  setShowFailedList(true);
+                  setShowSessionList(false);
+                }}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
+              >
+                <Search className="w-3.5 h-3.5" />
+                Review
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDoneWarning(false);
+                  onClose();
+                }}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-slate-300 font-semibold py-2.5 px-2 rounded-xl text-xs active:scale-95 transition-all"
+              >
+                Close Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

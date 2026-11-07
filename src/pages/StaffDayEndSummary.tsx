@@ -46,6 +46,7 @@ import {
   fetchAllDayEndReportsForDate, 
   fetchDayEndReportForAgent, 
   saveDayEndReportToDatabase, 
+  dayEndEntrySignature,
   fetchPast7DaysBills,
   getLocalPast7DaysBills,
   formatDuplicateClaimNotice,
@@ -732,35 +733,62 @@ export const StaffDayEndSummary: React.FC = () => {
       // 2. Check local working draft
       const draftKey = getWorkingDraftKey(dateStr, normName);
       let draftEntries: ItemEntry[] = [];
+      let draftTimestamp = 0;
       try {
         const rawDraft = localStorage.getItem(draftKey);
         if (rawDraft) {
           const parsed = JSON.parse(rawDraft);
           if (Array.isArray(parsed.entries)) {
             draftEntries = parsed.entries;
+            draftTimestamp = Number(parsed.timestamp) || 0;
           }
         }
       } catch (_) {}
 
+      // A draft only wins if it was written AFTER the cloud row was last updated.
+      // This preserves unsaved local work without resurrecting bills that staff deleted.
+      const cloudUpdatedMs = summary?.updated_at ? new Date(summary.updated_at).getTime() : 0;
+      const draftIsNewer = draftEntries.length > 0 && draftTimestamp > cloudUpdatedMs &&
+        dayEndEntrySignature(draftEntries) !== dayEndEntrySignature(cloudEntries);
+
       // 3. Resolution:
       if (cloudEntries.length > 0) {
-        setEntries(cloudEntries);
+        if (draftIsNewer) {
+          // Never drop unsaved local bills: union cloud + draft, draft wins on conflicts
+          const mergedMap = new Map<string, ItemEntry>();
+          cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+          draftEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+          const mergedEntries = Array.from(mergedMap.values());
+          setEntries(mergedEntries);
+          setHasUnsavedChanges(true);
+          try {
+            localStorage.setItem(draftKey, JSON.stringify({ entries: mergedEntries, timestamp: draftTimestamp }));
+          } catch (_) {}
+        } else {
+          setEntries(cloudEntries);
+          setHasUnsavedChanges(false);
+          try {
+            localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: cloudUpdatedMs || Date.now() }));
+          } catch (_) {}
+        }
         if (summary?.updated_at) {
           setLastSavedTime(new Date(summary.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         }
-        setHasUnsavedChanges(false);
-        try {
-          localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: Date.now() }));
-        } catch (_) {}
       } else if (summary && summary.total_deliveries === 0) {
-        // Cloud officially confirms 0 deliveries for this boy:
-        // Never load stale/leaked drafts for boys with 0 bills!
-        setEntries([]);
-        setLastSavedTime(null);
-        setHasUnsavedChanges(false);
-        try {
-          localStorage.removeItem(draftKey);
-        } catch (_) {}
+        // Cloud officially confirms 0 deliveries for this boy.
+        // Never wipe a NEWER local draft (unsaved scanned bills) just because the
+        // cloud row is empty or stale.
+        if (draftIsNewer) {
+          setEntries(draftEntries);
+          setHasUnsavedChanges(true);
+        } else {
+          setEntries([]);
+          setLastSavedTime(null);
+          setHasUnsavedChanges(false);
+          try {
+            localStorage.removeItem(draftKey);
+          } catch (_) {}
+        }
       } else if (draftEntries.length > 0) {
         // Cross-contamination safeguard: if every entry in draft belongs to another delivery boy, purge it!
         const allClaimedByOther = draftEntries.every(
@@ -995,13 +1023,15 @@ export const StaffDayEndSummary: React.FC = () => {
   }, [activeBpclReport, entries, selectedBoy, reportDate, triggerAutoSave, autoConvertOnlineBills]);
 
   // App Switch / Background / Pagehide Emergency Flush:
-  // Ensures bills are immediately persisted when the user switches to WhatsApp or another app!
+  // Persists ONLY genuinely unsaved work. A stale tab must never overwrite newer
+  // bills that were added by another staff device.
   useEffect(() => {
-    const handleAppSwitchOrUnload = () => {
+    const flushUnsavedWork = () => {
       const boy = selectedBoyRef.current;
       const currentEntries = entriesRef.current;
       const currentDate = reportDateRef.current;
 
+      if (!hasUnsavedChangesRef.current) return;
       if (boy && currentEntries.length > 0) {
         const normName = boy.name.trim().toUpperCase();
         if (activeBoyIdentityRef.current !== normName) return;
@@ -1025,14 +1055,18 @@ export const StaffDayEndSummary: React.FC = () => {
       }
     };
 
-    document.addEventListener('visibilitychange', handleAppSwitchOrUnload);
-    window.addEventListener('pagehide', handleAppSwitchOrUnload);
-    window.addEventListener('beforeunload', handleAppSwitchOrUnload);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushUnsavedWork();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', flushUnsavedWork);
+    window.addEventListener('beforeunload', flushUnsavedWork);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleAppSwitchOrUnload);
-      window.removeEventListener('pagehide', handleAppSwitchOrUnload);
-      window.removeEventListener('beforeunload', handleAppSwitchOrUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', flushUnsavedWork);
+      window.removeEventListener('beforeunload', flushUnsavedWork);
     };
   }, [supervisorPhone]);
 
@@ -1045,6 +1079,16 @@ export const StaffDayEndSummary: React.FC = () => {
 
     const draftKey = getWorkingDraftKey(reportDate, normName);
     try {
+      // Safety: never overwrite a real draft with a transient empty list
+      if (entries.length === 0) {
+        const existingRaw = localStorage.getItem(draftKey);
+        if (existingRaw) {
+          const parsedExisting = JSON.parse(existingRaw);
+          if (Array.isArray(parsedExisting.entries) && parsedExisting.entries.length > 0) {
+            return;
+          }
+        }
+      }
       localStorage.setItem(draftKey, JSON.stringify({
         entries,
         timestamp: Date.now(),
@@ -1701,7 +1745,14 @@ export const StaffDayEndSummary: React.FC = () => {
           scanned_by_staff: staffName,
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
+          mode: 'replace',
         });
+        // Last bill removed: drop the local draft so it cannot resurrect
+        if (updated.length === 0) {
+          try {
+            localStorage.removeItem(getWorkingDraftKey(reportDate, selectedBoy.name.trim().toUpperCase()));
+          } catch (_) {}
+        }
         const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSavedTime(nowFormatted);
         setHasUnsavedChanges(false);
@@ -2932,7 +2983,12 @@ export const StaffDayEndSummary: React.FC = () => {
                               scanned_by_staff: staffName,
                               supervisor_phone: supervisorPhone,
                               sender_session_id: sessionClientIdRef.current,
+                              mode: 'replace',
                             });
+                            // Explicit clear: remove the local draft so it cannot resurrect bills
+                            try {
+                              localStorage.removeItem(getWorkingDraftKey(reportDate, selectedBoy.name.trim().toUpperCase()));
+                            } catch (_) {}
                             const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                             setLastSavedTime(nowFormatted);
                             setHasUnsavedChanges(false);

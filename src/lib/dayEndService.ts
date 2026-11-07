@@ -331,10 +331,67 @@ export async function fetchDayEndReportForAgent(
   return null;
 }
 
+const normalizeBillKey = (consumerNumber?: string): string =>
+  String(consumerNumber || '').trim().toUpperCase().replace(/\s+/g, '');
+
+/**
+ * Merge two bill lists WITHOUT ever dropping a bill.
+ * Incoming entries win on duplicate consumer numbers (so edits to payment mode,
+ * empties, etc. persist), while bills that only exist in the database are kept.
+ * This is the core protection against a stale device overwriting newer bills.
+ */
+export function mergeDayEndEntries(existing: DayEndEntry[], incoming: DayEndEntry[]): DayEndEntry[] {
+  const merged = new Map<string, DayEndEntry>();
+  for (const entry of existing) {
+    const key = normalizeBillKey(entry?.consumer_number);
+    if (key) merged.set(key, entry);
+  }
+  for (const entry of incoming) {
+    const key = normalizeBillKey(entry?.consumer_number);
+    if (key) merged.set(key, entry);
+  }
+  return [...merged.values()];
+}
+
+/**
+ * Stable signature of a bill list (order-independent) used to detect whether
+ * a local draft actually contains edits that the cloud copy does not have.
+ */
+export function dayEndEntrySignature(entries: DayEndEntry[]): string {
+  return entries
+    .map((e) =>
+      [
+        normalizeBillKey(e?.consumer_number),
+        e?.consumer_name || '',
+        e?.cylinder_type || '',
+        e?.payment_mode || '',
+        e?.empty_collected ? '1' : '0',
+      ].join('|')
+    )
+    .sort()
+    .join(';');
+}
+
+const summarizeDayEndEntries = (entries: DayEndEntry[]) => ({
+  total: entries.length,
+  domestic14kg: entries.filter((e) => e.cylinder_type === '14.2KG_STD').length,
+  composite10kg: entries.filter((e) => e.cylinder_type === '10KG_LITE').length,
+  commercial19kg: entries.filter((e) => e.cylinder_type === '19KG_COMM').length,
+  emptiesCollected: entries.filter((e) => e.empty_collected).length,
+  cashCount: entries.filter((e) => e.payment_mode === 'CASH').length,
+  upiCount: entries.filter((e) => e.payment_mode === 'UPI').length,
+  dueCount: entries.filter((e) => e.payment_mode === 'DUE').length,
+  rawCsv: entries.map((e) => e.consumer_number).join(','),
+});
+
 /**
  * Save day-end scanned bills for a delivery boy directly into the Supabase database.
  * Dual-persists into day_end_reports AND staff_cylinder_settlements so the godown ledger
  * and bill scanner are always in complete sync across all staff devices.
+ *
+ * mode = 'merge' (default): union with whatever is already in the database. A device
+ *   holding a stale list can never delete bills added by another device.
+ * mode = 'replace': intentionally overwrite (only used for explicit delete / clear).
  */
 export async function saveDayEndReportToDatabase(payload: {
   report_date: string;
@@ -344,166 +401,244 @@ export async function saveDayEndReportToDatabase(payload: {
   scanned_by_staff?: string;
   supervisor_phone?: string;
   sender_session_id?: string;
+  mode?: 'merge' | 'replace';
 }): Promise<{ success: boolean; error?: string }> {
+  const mode: 'merge' | 'replace' = payload.mode === 'replace' ? 'replace' : 'merge';
   const normName = payload.agent_name.trim().toUpperCase();
-  const rawCsv = payload.entries.map((e) => e.consumer_number).join(',');
-  const count14kg = payload.entries.filter((e) => e.cylinder_type === '14.2KG_STD').length;
-  const count10kg = payload.entries.filter((e) => e.cylinder_type === '10KG_LITE').length;
-  const count19kg = payload.entries.filter((e) => e.cylinder_type === '19KG_COMM').length;
-  const emptiesCollected = payload.entries.filter((e) => e.empty_collected).length;
-  const cashCount = payload.entries.filter((e) => e.payment_mode === 'CASH').length;
-  const upiCount = payload.entries.filter((e) => e.payment_mode === 'UPI').length;
-  const dueCount = payload.entries.filter((e) => e.payment_mode === 'DUE').length;
   const nowIso = new Date().toISOString();
+  let lastError: string | undefined;
 
-  const recordSummary: DayEndReportSummary = {
-    report_date: payload.report_date,
-    agent_id: payload.agent_id,
-    agent_name: payload.agent_name,
-    total_deliveries: payload.entries.length,
-    domestic_14kg: count14kg,
-    composite_10kg: count10kg,
-    commercial_19kg: count19kg,
-    empties_collected: emptiesCollected,
-    cash_count: cashCount,
-    upi_count: upiCount,
-    due_count: dueCount,
-    entries: payload.entries,
-    raw_csv: rawCsv,
-    supervisor_phone: payload.supervisor_phone,
-    scanned_by_staff: payload.scanned_by_staff,
-    updated_at: nowIso,
-  };
-
-  // 1. Immediately cache locally
-  try {
-    localStorage.setItem(getDayEndStorageKey(payload.report_date, normName), JSON.stringify(recordSummary));
-  } catch (_) {}
-
-  let savedCloud = false;
-
-  // 2. Try upserting to day_end_reports
-  try {
-    const { error: upsertErr } = await supabase.from('day_end_reports').upsert(
-      {
-        report_date: payload.report_date,
-        agent_id: payload.agent_id || null,
-        agent_name: payload.agent_name,
-        total_deliveries: payload.entries.length,
-        domestic_14kg: count14kg,
-        composite_10kg: count10kg,
-        commercial_19kg: count19kg,
-        empties_collected: emptiesCollected,
-        cash_count: cashCount,
-        upi_count: upiCount,
-        due_count: dueCount,
-        entries: payload.entries,
-        raw_csv: rawCsv,
-        supervisor_phone: payload.supervisor_phone || null,
-        scanned_by_staff: payload.scanned_by_staff || null,
-        updated_at: nowIso,
-      },
-      { onConflict: 'report_date, agent_name' }
-    );
-
-    if (!upsertErr) {
-      savedCloud = true;
-    } else {
-      console.warn('Upsert to day_end_reports encountered notice, falling back:', upsertErr.message);
-    }
-  } catch (err) {
-    console.warn('day_end_reports write error:', err);
-  }
-
-  // 3. Dual-persist to staff_cylinder_settlements notes & counters
-  if (payload.agent_id || payload.agent_name) {
+  // ---- 1. Read the freshest server-side state BEFORE writing anything ----
+  const fetchReportRow = async () => {
     try {
-      const serialJson = `__BGCLS_SCANNED_BILLS__${JSON.stringify(payload.entries)}`;
-      
-      let query = adminClient
-        .from('staff_cylinder_settlements')
-        .select('id, notes, supplied_cylinders, empty_cylinders')
-        .eq('settlement_date', payload.report_date);
-
+      let query = supabase
+        .from('day_end_reports')
+        .select('id, entries, updated_at')
+        .eq('report_date', payload.report_date);
       if (payload.agent_id) {
         query = query.or(`agent_id.eq.${payload.agent_id},agent_name.ilike.${payload.agent_name.trim()}`);
       } else {
         query = query.ilike('agent_name', payload.agent_name.trim());
       }
+      const { data, error } = await query.maybeSingle();
+      if (error) return null;
+      return data;
+    } catch (_) {
+      return null;
+    }
+  };
 
-      const { data: existingSet } = await query.maybeSingle();
+  const fetchSettlementRow = async () => {
+    let query = adminClient
+      .from('staff_cylinder_settlements')
+      .select('id, notes, supplied_cylinders, empty_cylinders, updated_at')
+      .eq('settlement_date', payload.report_date);
+    if (payload.agent_id) {
+      query = query.or(`agent_id.eq.${payload.agent_id},agent_name.ilike.${payload.agent_name.trim()}`);
+    } else {
+      query = query.ilike('agent_name', payload.agent_name.trim());
+    }
+    const { data, error } = await query.maybeSingle();
+    if (error) return null;
+    return data;
+  };
 
-      // Retrieve any BPCL Report from existing notes OR local cache so it is NEVER lost!
-      let bpclPart = '';
-      if (existingSet && (existingSet.notes || '').includes('__BGCLS_BPCL_REPORT__')) {
-        let afterBpcl = (existingSet.notes || '').split('__BGCLS_BPCL_REPORT__')[1];
-        if (afterBpcl.includes('__BGCLS_SCANNED_BILLS__')) {
-          afterBpcl = afterBpcl.split('__BGCLS_SCANNED_BILLS__')[0];
+  let existingReport: any = null;
+  let existingSettlement: any = null;
+  try { existingReport = await fetchReportRow(); } catch (_) {}
+  try { existingSettlement = await fetchSettlementRow(); } catch (_) {}
+
+  const existingReportEntries: DayEndEntry[] = Array.isArray(existingReport?.entries) ? existingReport.entries : [];
+  const existingSettlementEntries: DayEndEntry[] = mode === 'merge'
+    ? extractScannedBillsFromNotes(existingSettlement?.notes)
+    : [];
+
+  const finalEntries = mode === 'merge'
+    ? mergeDayEndEntries(mergeDayEndEntries(existingReportEntries, existingSettlementEntries), payload.entries)
+    : payload.entries;
+  const summary = summarizeDayEndEntries(finalEntries);
+
+  const recordSummary: DayEndReportSummary = {
+    report_date: payload.report_date,
+    agent_id: payload.agent_id,
+    agent_name: payload.agent_name,
+    total_deliveries: summary.total,
+    domestic_14kg: summary.domestic14kg,
+    composite_10kg: summary.composite10kg,
+    commercial_19kg: summary.commercial19kg,
+    empties_collected: summary.emptiesCollected,
+    cash_count: summary.cashCount,
+    upi_count: summary.upiCount,
+    due_count: summary.dueCount,
+    entries: finalEntries,
+    raw_csv: summary.rawCsv,
+    supervisor_phone: payload.supervisor_phone,
+    scanned_by_staff: payload.scanned_by_staff,
+    updated_at: nowIso,
+  };
+
+  // 2. Immediately cache locally (merged snapshot, never a shrinking one)
+  try {
+    localStorage.setItem(getDayEndStorageKey(payload.report_date, normName), JSON.stringify(recordSummary));
+  } catch (_) {}
+
+  let savedReport = false;
+  let savedSettlement = false;
+
+  // ---- 3. day_end_reports: CAS-retry so concurrent staff devices never lose bills ----
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const current = attempt === 0 ? existingReport : await fetchReportRow();
+      const merged = mode === 'merge'
+        ? (current ? mergeDayEndEntries(Array.isArray(current.entries) ? current.entries : [], payload.entries) : finalEntries)
+        : payload.entries;
+      const s = summarizeDayEndEntries(merged);
+      const row = {
+        report_date: payload.report_date,
+        agent_id: payload.agent_id || null,
+        agent_name: payload.agent_name,
+        total_deliveries: s.total,
+        domestic_14kg: s.domestic14kg,
+        composite_10kg: s.composite10kg,
+        commercial_19kg: s.commercial19kg,
+        empties_collected: s.emptiesCollected,
+        cash_count: s.cashCount,
+        upi_count: s.upiCount,
+        due_count: s.dueCount,
+        entries: merged,
+        raw_csv: s.rawCsv,
+        supervisor_phone: payload.supervisor_phone || null,
+        scanned_by_staff: payload.scanned_by_staff || null,
+        updated_at: nowIso,
+      };
+
+      if (current?.id) {
+        let updateQuery = supabase.from('day_end_reports').update(row).eq('id', current.id);
+        if (mode === 'merge' && current.updated_at) {
+          updateQuery = updateQuery.eq('updated_at', current.updated_at);
         }
-        bpclPart = '\n__BGCLS_BPCL_REPORT__' + afterBpcl.trim();
+        const { data: updatedRows, error } = await updateQuery.select('id');
+        if (!error && updatedRows && updatedRows.length > 0) {
+          savedReport = true;
+          break;
+        }
+        if (error) {
+          lastError = error.message;
+          break;
+        }
+        // 0 rows updated => another device wrote in between. Re-read and retry.
       } else {
-        // Fallback: check local storage cache for this agent and date
-        try {
-          const norm = payload.agent_name.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
-          const rawLocal = localStorage.getItem(`bgcls_bpcl_report_${payload.report_date}_${norm}`);
-          if (rawLocal) {
-            bpclPart = '\n__BGCLS_BPCL_REPORT__' + rawLocal.trim();
-          }
-        } catch (_) {}
+        const { error } = await supabase.from('day_end_reports').insert(row);
+        if (!error) {
+          savedReport = true;
+          break;
+        }
+        lastError = error.message;
+        // Unique violation => row created concurrently. Retry as an update.
       }
-
-      let baseNote = (existingSet?.notes || '')
-        .split('__BGCLS_SCANNED_BILLS__')[0]
-        .split('__BGCLS_BPCL_REPORT__')[0]
-        .trim();
-      const combinedNote = `${baseNote ? baseNote + '\n' : ''}${serialJson}${bpclPart}`;
-
-      if (existingSet) {
-        await adminClient
-          .from('staff_cylinder_settlements')
-          .update({
-            notes: combinedNote,
-            supplied_cylinders: payload.entries.length,
-            empty_cylinders: emptiesCollected,
-            cash_cylinders: cashCount,
-            upi_cylinders: upiCount,
-            due_cylinders: dueCount,
-            updated_at: nowIso,
-          })
-          .eq('id', existingSet.id);
-        savedCloud = true;
-      } else {
-        // Create settlement row if not existing yet
-        await adminClient
-          .from('staff_cylinder_settlements')
-          .insert({
-            settlement_date: payload.report_date,
-            agent_id: payload.agent_id || null,
-            agent_name: payload.agent_name,
-            cylinder_price: 994,
-            supplied_cylinders: payload.entries.length,
-            cash_cylinders: cashCount,
-            upi_cylinders: upiCount,
-            due_cylinders: dueCount,
-            empty_cylinders: emptiesCollected,
-            expected_cash: cashCount * 994,
-            actual_cash: cashCount * 994,
-            cash_difference: 0,
-            online_amount: 0,
-            upi_amount: upiCount * 994,
-            total_amount: (cashCount + upiCount) * 994,
-            status: 'BALANCED',
-            notes: combinedNote,
-            updated_at: nowIso,
-          });
-        savedCloud = true;
-      }
-    } catch (settleErr) {
-      console.warn('Secondary settlement sync notice:', settleErr);
+    } catch (err: any) {
+      lastError = err?.message;
     }
   }
 
-  // 4. Update any associated dispatch_items
+  // ---- 4. Dual-persist to staff_cylinder_settlements notes & counters ----
+  if (payload.agent_id || payload.agent_name) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const current = attempt === 0 ? existingSettlement : await fetchSettlementRow();
+        const currentBills = mode === 'merge' ? extractScannedBillsFromNotes(current?.notes) : [];
+        const merged = mode === 'merge'
+          ? (current ? mergeDayEndEntries(currentBills, payload.entries) : finalEntries)
+          : payload.entries;
+        const s = summarizeDayEndEntries(merged);
+
+        // Preserve any BPCL Report from existing notes OR local cache so it is NEVER lost!
+        let bpclPart = '';
+        if (current && (current.notes || '').includes(BPCL_REPORT_TAG)) {
+          let afterBpcl = (current.notes || '').split(BPCL_REPORT_TAG)[1];
+          if (afterBpcl.includes(SCANNED_BILLS_TAG)) {
+            afterBpcl = afterBpcl.split(SCANNED_BILLS_TAG)[0];
+          }
+          bpclPart = `\n${BPCL_REPORT_TAG}` + afterBpcl.trim();
+        } else {
+          try {
+            const norm = payload.agent_name.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+            const rawLocal = localStorage.getItem(`bgcls_bpcl_report_${payload.report_date}_${norm}`);
+            if (rawLocal) {
+              bpclPart = `\n${BPCL_REPORT_TAG}` + rawLocal.trim();
+            }
+          } catch (_) {}
+        }
+
+        const baseNote = (current?.notes || '')
+          .split(SCANNED_BILLS_TAG)[0]
+          .split(BPCL_REPORT_TAG)[0]
+          .trim();
+        const combinedNote = `${baseNote ? baseNote + '\n' : ''}${SCANNED_BILLS_TAG}${JSON.stringify(merged)}${bpclPart}`;
+
+        if (current?.id) {
+          let updateQuery = adminClient
+            .from('staff_cylinder_settlements')
+            .update({
+              notes: combinedNote,
+              supplied_cylinders: s.total,
+              empty_cylinders: s.emptiesCollected,
+              cash_cylinders: s.cashCount,
+              upi_cylinders: s.upiCount,
+              due_cylinders: s.dueCount,
+              updated_at: nowIso,
+            })
+            .eq('id', current.id);
+          if (mode === 'merge' && current.updated_at) {
+            updateQuery = updateQuery.eq('updated_at', current.updated_at);
+          }
+          const { data: updatedRows, error } = await updateQuery.select('id');
+          if (!error && updatedRows && updatedRows.length > 0) {
+            savedSettlement = true;
+            break;
+          }
+          if (error) {
+            lastError = error.message;
+            break;
+          }
+          // 0 rows updated => concurrent write. Re-read and retry.
+        } else {
+          const { error } = await adminClient
+            .from('staff_cylinder_settlements')
+            .insert({
+              settlement_date: payload.report_date,
+              agent_id: payload.agent_id || null,
+              agent_name: payload.agent_name,
+              cylinder_price: 994,
+              supplied_cylinders: s.total,
+              cash_cylinders: s.cashCount,
+              upi_cylinders: s.upiCount,
+              due_cylinders: s.dueCount,
+              empty_cylinders: s.emptiesCollected,
+              expected_cash: s.cashCount * 994,
+              actual_cash: s.cashCount * 994,
+              cash_difference: 0,
+              online_amount: 0,
+              upi_amount: s.upiCount * 994,
+              total_amount: (s.cashCount + s.upiCount) * 994,
+              status: 'BALANCED',
+              notes: combinedNote,
+              updated_at: nowIso,
+            });
+          if (!error) {
+            savedSettlement = true;
+            break;
+          }
+          lastError = error.message;
+          // Unique violation => settlement created concurrently. Retry as an update.
+        }
+      } catch (settleErr: any) {
+        lastError = settleErr?.message;
+      }
+    }
+  }
+
+  // 5. Update any associated dispatch_items
   const dispatchItemIds = payload.entries
     .map((e) => e.dispatch_item_id)
     .filter((id): id is string => Boolean(id));
@@ -517,7 +652,7 @@ export async function saveDayEndReportToDatabase(payload: {
     } catch (_) {}
   }
 
-  // 5. Broadcast live WebSocket event to all other open staff screens
+  // 6. Broadcast live WebSocket event to all other open staff screens
   try {
     const channel = supabase.channel('bgcls_cash_memo_live_sync');
     channel.send({
@@ -527,7 +662,7 @@ export async function saveDayEndReportToDatabase(payload: {
         report_date: payload.report_date,
         agent_name: payload.agent_name,
         agent_id: payload.agent_id,
-        total_deliveries: payload.entries.length,
+        total_deliveries: summary.total,
         sender_session_id: payload.sender_session_id,
         updated_at: nowIso,
       },
@@ -541,7 +676,10 @@ export async function saveDayEndReportToDatabase(payload: {
     })
   );
 
-  return { success: true };
+  return {
+    success: savedReport || savedSettlement,
+    error: savedReport || savedSettlement ? undefined : lastError,
+  };
 }
 
 export interface PastClaimantInfo {
