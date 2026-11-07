@@ -1005,20 +1005,19 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       handleForceAdd(cleanNum);
     }
     // The bill is now in the list — retire its pending (failed) entry so the
-      // Done guard and "Add All" do not add a second, mis-read copy of it.
-      const editedNumber = editingFailedNumberRef.current;
-      const editedDigits = editedNumber ? cleanAndNormalizeDigits(editedNumber) : '';
-      setFailedScanList((prev) =>
-        prev.filter((item) => {
-          const digits = cleanAndNormalizeDigits(item.raw_number);
-          return digits !== cleanNum && digits !== editedDigits;
-        })
-      );
-      editingFailedNumberRef.current = null;
-      setManualInput('');
-      if (outcome === 'duplicate') {
-        toast(`#${cleanNum} is already in the list`, { icon: '⚠️' });
-      }
+    // Done guard and "Add All" do not add a second, mis-read copy of it.
+    const editedNumber = editingFailedNumberRef.current;
+    const editedDigits = editedNumber ? cleanAndNormalizeDigits(editedNumber) : '';
+    setFailedScanList((prev) =>
+      prev.filter((item) => {
+        const digits = cleanAndNormalizeDigits(item.raw_number);
+        return digits !== cleanNum && digits !== editedDigits;
+      })
+    );
+    editingFailedNumberRef.current = null;
+    setManualInput('');
+    if (outcome === 'duplicate') {
+      toast(`#${cleanNum} is already in the list`, { icon: '⚠️' });
     }
     setIsProcessing(false);
   };
