@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { staffAction, staffDb } from '../lib/staffDb';
 import { 
   ArrowLeft, 
   Loader2, 
@@ -54,7 +54,7 @@ export const ManagerAgents = () => {
     setIsLoading(true);
     try {
       const [{ data, error }, cloudAssignments, boys] = await Promise.all([
-        supabase
+        staffDb
           .from('agents')
           .select('*')
           .neq('status', 'DELETED')
@@ -128,19 +128,20 @@ export const ManagerAgents = () => {
     try {
       const safeUsername = username.toLowerCase().trim();
 
-      // Call the edge function securely
-      const { data, error } = await supabase.functions.invoke('create-agent', {
-        body: {
-          name,
-          username: safeUsername,
-          password,
-          phone,
-          role
-        }
+      // Create the account through the authenticated admin-api function.
+      const { data, error } = await staffAction<DeliveryBoy>('create_agent', {
+        name,
+        username: safeUsername,
+        password,
+        phone,
+        role,
       });
 
       if (error) {
         throw new Error(error.message || 'Failed to create agent');
+      }
+      if (!data) {
+        throw new Error('Failed to create agent');
       }
 
       // If delivery boy route was selected for this agent, persist it
@@ -183,12 +184,12 @@ export const ManagerAgents = () => {
 
     setIsSubmitting(true);
     try {
-      const { error } = await supabase
+      const { error } = await staffDb
         .from('agents')
         .update({ name, phone, role })
         .eq('id', editingAgent.id);
 
-      if (error) throw error;
+      if (error) throw new Error(error.message);
 
       // Update delivery boy route if changed
       if (role === 'AGENT') {
@@ -266,8 +267,8 @@ export const ManagerAgents = () => {
 
   const executeDelete = async (id: string) => {
     try {
-      const { error: dbError } = await supabase.from('agents').update({ status: 'DELETED' }).eq('id', id);
-      if (dbError) throw dbError;
+      const { error: dbError } = await staffDb.from('agents').update({ status: 'DELETED' }).eq('id', id);
+      if (dbError) throw new Error(dbError.message);
       
       toast.success('Agent deleted');
       setAgents(agents.filter(a => a.id !== id));

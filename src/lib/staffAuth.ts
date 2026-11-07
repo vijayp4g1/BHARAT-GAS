@@ -1,14 +1,19 @@
-import { createClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { staffAction, staffDb } from './staffDb';
 
 const STAFF_PERMISSIONS_STORAGE_KEY = 'bgcls_staff_permissions_list';
 const DEFAULT_STAFF = ['john', 'ganesh'];
 
-// Create an administrative privileged client for staff permission management
-// This bypasses RLS so Manager can grant/revoke staff permissions reliably in Postgres!
-const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
-const adminClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : supabase;
+type StaffIdentity = {
+  userId: string;
+  email: string | null;
+  username: string;
+  name: string | null;
+  role: string;
+  is_staff: boolean;
+  isManager: boolean;
+  isStaff: boolean;
+};
 
 /**
  * Retrieve the list of agents (IDs and usernames) who have been granted Staff Dashboard permission
@@ -109,75 +114,32 @@ export function isCurrentStaffOrManager(): boolean {
 export async function refreshCurrentStaffPermission(): Promise<boolean> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session || !session.user) {
-      const currentUsername = (
-        localStorage.getItem('bgcls_logged_username') ||
-        localStorage.getItem('bgcls_remember_username') ||
-        ''
-      ).toLowerCase().trim();
-
-      if (currentUsername === 'john' || currentUsername === 'ganesh') {
-        localStorage.setItem('bgcls_is_staff', 'true');
-        return true;
-      }
-      return false;
-    }
-
-    const email = (session.user.email || '').toLowerCase().trim();
-    const userId = session.user.id;
-
-    // Manager / Owner account (custom domain / external email like vijay.p4g1@gmail.com)
-    if (!email.includes('@bgcls.local')) {
-      const { data: agent } = await adminClient
-        .from('agents')
-        .select('id, name, username, is_staff, role')
-        .eq('id', userId)
-        .maybeSingle();
-
-      const isMgr = agent?.role === 'MANAGER' || !agent;
-      if (isMgr) {
-        localStorage.setItem('bgcls_user_role', 'MANAGER');
-        localStorage.setItem('bgcls_is_staff', 'true');
-        return true;
-      }
-    }
-
-    // Agent account (@bgcls.local)
-    const { data: agent } = await adminClient
-      .from('agents')
-      .select('id, name, username, is_staff, role')
-      .eq('id', userId)
-      .maybeSingle();
-
-    const username = (agent?.username || email.split('@')[0] || '').toLowerCase().trim();
-    const isStaff = Boolean(
-      agent?.is_staff === true ||
-      agent?.role === 'MANAGER' ||
-      username === 'john' ||
-      username === 'ganesh'
-    );
-
-    if (agent?.role) {
-      localStorage.setItem('bgcls_user_role', agent.role);
-    } else {
-      localStorage.setItem('bgcls_user_role', 'AGENT');
-    }
-
-    if (username) {
-      localStorage.setItem('bgcls_logged_username', username);
-    }
-    if (agent?.name) {
-      localStorage.setItem('bgcls_agent_name', agent.name);
-    }
-
-    if (isStaff) {
-      localStorage.setItem('bgcls_is_staff', 'true');
-      return true;
-    } else {
-      localStorage.removeItem('bgcls_is_staff');
+    if (!session?.user) {
       localStorage.setItem('bgcls_is_staff', 'false');
       return false;
     }
+
+    // The Edge Function decides staff/manager using fresh server-side data.
+    // Never infer manager access from an external email in the browser.
+    const { data: identity, error } = await staffAction<StaffIdentity>('me');
+    if (error || !identity) {
+      throw new Error(error?.message || 'Could not verify staff permission');
+    }
+
+    localStorage.setItem(
+      'bgcls_user_role',
+      identity.isManager ? 'MANAGER' : (identity.role || 'AGENT')
+    );
+
+    const username = (identity.username || (identity.email || '').split('@')[0] || '')
+      .toLowerCase()
+      .trim();
+    if (username) localStorage.setItem('bgcls_logged_username', username);
+    if (identity.name) localStorage.setItem('bgcls_agent_name', identity.name);
+    if (identity.userId) localStorage.setItem('bgcls_agent_id', identity.userId);
+
+    localStorage.setItem('bgcls_is_staff', identity.isStaff ? 'true' : 'false');
+    return identity.isStaff;
   } catch (err) {
     console.warn('Failed to refresh staff permission from cloud:', err);
     return localStorage.getItem('bgcls_is_staff') === 'true';
@@ -193,16 +155,18 @@ export async function grantStaffPermission(agentId: string, username: string): P
   const updated = Array.from(new Set([...current, agentId.toLowerCase(), cleanUsername]));
   localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
 
-  // Directly update Supabase Postgres agents table (using admin client to bypass RLS)
+  // Server-side update: only a manager may change is_staff.
   try {
     if (agentId) {
-      await adminClient.from('agents').update({ is_staff: true } as any).eq('id', agentId);
+      const { error } = await staffDb.from('agents').update({ is_staff: true }).eq('id', agentId);
+      if (error) throw error;
     }
     if (cleanUsername) {
-      await adminClient.from('agents').update({ is_staff: true } as any).ilike('username', cleanUsername);
+      const { error } = await staffDb.from('agents').update({ is_staff: true }).ilike('username', cleanUsername);
+      if (error) throw error;
     }
   } catch (err) {
-    console.warn('Direct agents table update notice:', err);
+    console.warn('Staff permission update notice:', err);
   }
 
   // Broadcast realtime notification across devices
@@ -229,13 +193,15 @@ export async function revokeStaffPermission(agentId: string, username: string): 
 
   try {
     if (agentId) {
-      await adminClient.from('agents').update({ is_staff: false } as any).eq('id', agentId);
+      const { error } = await staffDb.from('agents').update({ is_staff: false }).eq('id', agentId);
+      if (error) throw error;
     }
     if (cleanUsername) {
-      await adminClient.from('agents').update({ is_staff: false } as any).ilike('username', cleanUsername);
+      const { error } = await staffDb.from('agents').update({ is_staff: false }).ilike('username', cleanUsername);
+      if (error) throw error;
     }
   } catch (err) {
-    console.warn('Direct agents table update notice:', err);
+    console.warn('Staff permission update notice:', err);
   }
 
   // Broadcast realtime notification across devices

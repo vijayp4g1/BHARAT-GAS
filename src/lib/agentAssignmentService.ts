@@ -1,15 +1,44 @@
 import { supabase } from './supabase';
-import { createClient } from '@supabase/supabase-js';
+import { staffAction, staffDb } from './staffDb';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from './staffAuth';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const ASSIGNMENTS_STORAGE_KEY = 'bgcls_agent_delivery_boy_assignments';
-const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
-const adminClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : supabase;
 
 export interface AgentAssignmentMap {
   [agentIdOrUsername: string]: string; // maps agent ID or username -> delivery boy name (e.g. 'NAGARAJU')
+}
+
+interface AssignmentAuditRow {
+  entity_id: string | null;
+  action_type: string | null;
+  timestamp: string | null;
+}
+
+/**
+ * Read the full assignment history in pages. PostgREST caps a single response
+ * at the project's max_rows, so a one-shot select would silently drop the
+ * newest assignments once the audit trail grows past that cap.
+ */
+async function fetchAllAssignmentAuditRows(): Promise<AssignmentAuditRow[]> {
+  const pageSize = 1000;
+  const rows: AssignmentAuditRow[] = [];
+
+  for (let from = 0; from < 50000; from += pageSize) {
+    const { data, error } = await staffDb
+      .from('audit_logs')
+      .select('entity_id, action_type, timestamp')
+      .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
+      .order('timestamp', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error || !Array.isArray(data)) break;
+    rows.push(...(data as AssignmentAuditRow[]));
+    if (data.length < pageSize) break;
+  }
+
+  return rows;
 }
 
 /**
@@ -42,13 +71,9 @@ export async function fetchAgentDeliveryBoyAssignments(): Promise<AgentAssignmen
   const map: AgentAssignmentMap = { ...getLocalAssignments() };
 
   try {
-    const [{ data: auditData }, { data: agentsData }] = await Promise.all([
-      adminClient
-        .from('audit_logs')
-        .select('entity_id, action_type, timestamp')
-        .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
-        .order('timestamp', { ascending: true }),
-      adminClient
+    const [auditData, { data: agentsData }] = await Promise.all([
+      fetchAllAssignmentAuditRows(),
+      staffDb
         .from('agents')
         .select('id, username')
     ]);
@@ -107,26 +132,17 @@ export async function assignDeliveryBoyToAgent(
   }
   setLocalAssignments(local);
 
-  // 2. Persist to Supabase Auth User Metadata (Permanent)
-  try {
-    if (adminClient && agentId) {
-      await adminClient.auth.admin.updateUserById(agentId, {
-        user_metadata: { assigned_delivery_boy: normBoy },
-      });
-    }
-  } catch (err) {
-    console.warn('Failed to update auth metadata for agent assignment:', err);
-  }
-
-  // 3. Persist to Postgres audit_logs table (Accessible by all clients)
-  try {
-    await adminClient.from('audit_logs').insert({
-      action_type: `ASSIGN_DELIVERY_BOY:${normBoy || 'UNASSIGNED'}`,
-      entity_id: agentId,
-      performed_by: agentId,
+  // 2 + 3. Persist auth metadata and the audit trail through the server,
+  // which checks that the caller is staff before writing.
+  if (agentId) {
+    const { error } = await staffAction('assign_delivery_boy', {
+      agentId,
+      deliveryBoyName: normBoy,
+      username: cleanUsername,
     });
-  } catch (err) {
-    console.warn('Failed to log assignment to audit_logs:', err);
+    if (error) {
+      console.warn('Failed to persist delivery boy assignment:', error.message);
+    }
   }
 
   // 4. Broadcast realtime notification to active devices

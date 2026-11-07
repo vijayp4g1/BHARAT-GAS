@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { staffDb } from '../lib/staffDb';
 import db from '../lib/db';
 import { Loader2, User, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -92,14 +93,14 @@ export const Login = () => {
       let isStaffMember = false;
 
       if (data?.user?.id) {
-        let { data: agentData } = await supabase
+        let { data: agentData } = await staffDb
           .from('agents')
           .select('role, name, is_staff, username')
           .eq('id', data.user.id)
           .maybeSingle();
 
         if (!agentData && username) {
-          const { data: byUser } = await supabase
+          const { data: byUser } = await staffDb
             .from('agents')
             .select('role, name, is_staff, username')
             .ilike('username', username.trim())
@@ -135,7 +136,7 @@ export const Login = () => {
 
         let assignedBoy = data.user?.user_metadata?.assigned_delivery_boy;
         if (!assignedBoy && data.user.id) {
-          const { data: auditLog } = await supabase
+          const { data: auditLog } = await staffDb
             .from('audit_logs')
             .select('action_type')
             .like('action_type', 'ASSIGN_DELIVERY_BOY:%')
@@ -155,6 +156,13 @@ export const Login = () => {
           localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy.trim().toUpperCase());
         } else {
           localStorage.removeItem('bgcls_assigned_delivery_boy');
+        }
+
+        // The server is authoritative for role and staff access. Reconcile
+        // whatever the fast local guess above produced with admin-api.
+        isStaffMember = await refreshCurrentStaffPermission();
+        if (localStorage.getItem('bgcls_user_role') === 'MANAGER') {
+          actualRole = 'MANAGER';
         }
       }
 

@@ -1,9 +1,5 @@
 import { supabase } from './supabase';
-import { createClient } from '@supabase/supabase-js';
-
-const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
-const adminClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : supabase;
+import { staffDb } from './staffDb';
 
 export interface BpclBillItem {
   consumer_number: string;
@@ -565,7 +561,7 @@ export async function fetchBpclReport(
 
   // 1. Try cloud from staff_cylinder_settlements
   try {
-    let query = adminClient
+    let query = staffDb
       .from('staff_cylinder_settlements')
       .select('notes, updated_at')
       .eq('settlement_date', dateStr);
@@ -602,7 +598,7 @@ export async function fetchAllBpclReportsForDate(
 
   // 1. Fetch from cloud
   try {
-    const { data, error } = await adminClient
+    const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
       .select('agent_name, agent_id, notes, updated_at')
       .eq('settlement_date', dateStr);
@@ -696,7 +692,7 @@ export async function saveBpclReportToCloud(payload: {
 
   // 2. Persist to Supabase staff_cylinder_settlements
   try {
-    let query = adminClient
+    let query = staffDb
       .from('staff_cylinder_settlements')
       .select('id, notes, supplied_cylinders, empty_cylinders')
       .eq('settlement_date', payload.dateStr);
@@ -711,7 +707,7 @@ export async function saveBpclReportToCloud(payload: {
 
     if (existing) {
       const updatedNotes = mergeBpclIntoNotes(existing.notes, reportData);
-      await adminClient
+      await staffDb
         .from('staff_cylinder_settlements')
         .update({
           notes: updatedNotes,
@@ -721,7 +717,7 @@ export async function saveBpclReportToCloud(payload: {
     } else {
       // Create new settlement record with this BPCL report
       const newNotes = mergeBpclIntoNotes('', reportData);
-      await adminClient.from('staff_cylinder_settlements').insert({
+      await staffDb.from('staff_cylinder_settlements').insert({
         settlement_date: payload.dateStr,
         agent_id: payload.agentId || null,
         agent_name: normName,

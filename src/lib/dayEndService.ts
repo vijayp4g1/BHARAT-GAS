@@ -1,11 +1,7 @@
 import { supabase } from './supabase';
-import { createClient } from '@supabase/supabase-js';
+import { staffDb } from './staffDb';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
-
-const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
-const adminClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : supabase;
 
 export interface DayEndEntry {
   consumer_id?: string;
@@ -98,7 +94,7 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
 
   // 1. Try querying day_end_reports from Supabase
   try {
-    const { data, error } = await supabase
+    const { data, error } = await staffDb
       .from('day_end_reports')
       .select('*')
       .eq('report_date', dateStr);
@@ -134,13 +130,13 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
 
   // 2. Fallback: Check staff_cylinder_settlements for this date
   try {
-    const { data: settlements, error: setErr } = await adminClient
+    const { data: settlements, error: setErr } = await staffDb
       .from('staff_cylinder_settlements')
       .select('agent_name, agent_id, cash_cylinders, upi_cylinders, due_cylinders, notes, updated_at')
       .eq('settlement_date', dateStr);
 
     if (!setErr && settlements && settlements.length > 0) {
-      settlements.forEach((s) => {
+      settlements.forEach((s: any) => {
         const normName = (s.agent_name || '').trim().toUpperCase();
         const parsed = extractScannedBillsFromNotes(s.notes);
         if (parsed.length > 0) {
@@ -216,7 +212,7 @@ export async function fetchDayEndReportForAgent(
 
   // 1. Try Supabase day_end_reports
   try {
-    let query = supabase.from('day_end_reports').select('*').eq('report_date', dateStr);
+    let query = staffDb.from('day_end_reports').select('*').eq('report_date', dateStr);
     if (agentId) {
       query = query.or(`agent_id.eq.${agentId},agent_name.ilike.${agentName}`);
     } else {
@@ -258,7 +254,7 @@ export async function fetchDayEndReportForAgent(
 
   // 2. Check staff_cylinder_settlements notes fallback
   try {
-    let sQuery = adminClient.from('staff_cylinder_settlements').select('*').eq('settlement_date', dateStr);
+    let sQuery = staffDb.from('staff_cylinder_settlements').select('*').eq('settlement_date', dateStr);
     if (agentId) {
       sQuery = sQuery.eq('agent_id', agentId);
     } else {
@@ -411,7 +407,7 @@ export async function saveDayEndReportToDatabase(payload: {
   // ---- 1. Read the freshest server-side state BEFORE writing anything ----
   const fetchReportRow = async () => {
     try {
-      let query = supabase
+      let query = staffDb
         .from('day_end_reports')
         .select('id, entries, updated_at')
         .eq('report_date', payload.report_date);
@@ -429,7 +425,7 @@ export async function saveDayEndReportToDatabase(payload: {
   };
 
   const fetchSettlementRow = async () => {
-    let query = adminClient
+    let query = staffDb
       .from('staff_cylinder_settlements')
       .select('id, notes, supplied_cylinders, empty_cylinders, updated_at')
       .eq('settlement_date', payload.report_date);
@@ -513,7 +509,7 @@ export async function saveDayEndReportToDatabase(payload: {
       };
 
       if (current?.id) {
-        let updateQuery = supabase.from('day_end_reports').update(row).eq('id', current.id);
+        let updateQuery = staffDb.from('day_end_reports').update(row).eq('id', current.id);
         if (mode === 'merge' && current.updated_at) {
           updateQuery = updateQuery.eq('updated_at', current.updated_at);
         }
@@ -528,7 +524,7 @@ export async function saveDayEndReportToDatabase(payload: {
         }
         // 0 rows updated => another device wrote in between. Re-read and retry.
       } else {
-        const { error } = await supabase.from('day_end_reports').insert(row);
+        const { error } = await staffDb.from('day_end_reports').insert(row);
         if (!error) {
           savedReport = true;
           break;
@@ -577,7 +573,7 @@ export async function saveDayEndReportToDatabase(payload: {
         const combinedNote = `${baseNote ? baseNote + '\n' : ''}${SCANNED_BILLS_TAG}${JSON.stringify(merged)}${bpclPart}`;
 
         if (current?.id) {
-          let updateQuery = adminClient
+          let updateQuery = staffDb
             .from('staff_cylinder_settlements')
             .update({
               notes: combinedNote,
@@ -603,7 +599,7 @@ export async function saveDayEndReportToDatabase(payload: {
           }
           // 0 rows updated => concurrent write. Re-read and retry.
         } else {
-          const { error } = await adminClient
+          const { error } = await staffDb
             .from('staff_cylinder_settlements')
             .insert({
               settlement_date: payload.report_date,
@@ -645,7 +641,7 @@ export async function saveDayEndReportToDatabase(payload: {
 
   if (dispatchItemIds.length > 0) {
     try {
-      await supabase
+      await staffDb
         .from('dispatch_items')
         .update({ status: 'COMPLETED', completed_at: nowIso })
         .in('id', dispatchItemIds);
@@ -734,7 +730,7 @@ export async function fetchPast7DaysBills(
     const prevDateStr = `${yP}-${mP}-${dP}`;
 
     // Query settlements in the 7-day range preceding reportDate
-    const { data, error } = await adminClient
+    const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
       .select('agent_name, agent_id, settlement_date, notes')
       .gte('settlement_date', startDateStr)
