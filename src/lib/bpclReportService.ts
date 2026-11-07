@@ -1086,6 +1086,95 @@ export async function clearPendingBillAndMarkDelivered(
 }
 
 /**
+ * Bulk clear pending bills.
+ *
+ * Removes the given consumer numbers from pending_bills ONLY. online_bills is
+ * passed through untouched, so online-paid bills keep exactly the entries and
+ * statuses they already had. Completed deliveries / day-end counts are not
+ * affected either. One read + one cloud write for the whole batch.
+ */
+export async function clearPendingBillsBulk(params: {
+  dateStr: string;
+  agentName: string;
+  agentId?: string;
+  consumerNumbers: string[];
+}): Promise<{ report: BpclReportData; cleared: BpclBillItem[] }> {
+  const normName = params.agentName.trim().toUpperCase();
+  const targets = new Set(
+    params.consumerNumbers
+      .map((n) => String(n || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const current = (await fetchBpclReport(params.dateStr, normName, params.agentId)) || {
+    agent_name: normName,
+    agent_id: params.agentId,
+    report_date: params.dateStr,
+    checked_done: true,
+    pending_bills: [],
+    online_bills: [],
+  };
+
+  if (targets.size === 0 || current.pending_bills.length === 0) {
+    return { report: current, cleared: [] };
+  }
+
+  const cleared = current.pending_bills.filter((b) =>
+    targets.has(b.consumer_number.trim().toLowerCase())
+  );
+
+  if (cleared.length === 0) {
+    return { report: current, cleared: [] };
+  }
+
+  const updatedPending = current.pending_bills.filter(
+    (b) => !targets.has(b.consumer_number.trim().toLowerCase())
+  );
+
+  // Intentionally NOT modified: online bills stay exactly as they are.
+  const updatedOnline = current.online_bills;
+
+  // Remove each cleared bill from the pending section of the stored report text,
+  // then run the consistency guard so a later paste/update cannot resurrect them.
+  let updatedRawText = current.raw_text;
+  for (const bill of cleared) {
+    updatedRawText = removeBillFromRawText(updatedRawText, bill.consumer_number, 'PENDING');
+  }
+  updatedRawText = sanitizeRawTextWithActiveBills(
+    updatedRawText,
+    updatedPending,
+    updatedOnline
+  );
+
+  const updatedReport: BpclReportData = {
+    ...current,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: updatedRawText,
+    updated_at: new Date().toISOString(),
+  };
+
+  const saved = await saveBpclReportToCloud({
+    dateStr: params.dateStr,
+    agentName: normName,
+    agentId: params.agentId,
+    checked_done: current.checked_done,
+    archived: current.archived,
+    no_supply: current.no_supply,
+    pending_bills: updatedPending,
+    online_bills: updatedOnline,
+    raw_text: updatedRawText,
+    checked_by: localStorage.getItem('bgcls_agent_name') || 'Staff',
+  });
+
+  if (!saved) {
+    throw new Error('Could not save cleared bills to the database. Nothing was removed.');
+  }
+
+  return { report: updatedReport, cleared };
+}
+
+/**
  * Fast 1-click toggle for "Bills Checked Done"
  */
 export async function toggleBillsCheckedDone(
