@@ -60,11 +60,17 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
       const sampleRow = rawData[0];
       const keys = Object.keys(sampleRow);
       
-      const consumerNumKey = keys.find(k => k.toLowerCase() === 'consumernumber' || k.toLowerCase().includes('number') || k.toLowerCase().includes('no')) || '';
-      const consumerNameKey = keys.find(k => k.toLowerCase() === 'consumername' || k.toLowerCase().includes('name')) || '';
-      const mobileKey = keys.find(k => k.toLowerCase() === 'mobilenumber' || k.toLowerCase().includes('mobile') || k.toLowerCase().includes('phone')) || '';
-      const addressKey = keys.find(k => k.toLowerCase() === 'address' || k.toLowerCase().includes('address')) || '';
-      const areaKey = keys.find(k => k.toLowerCase() === 'areacodedesc' || k.toLowerCase().includes('area')) || '';
+      // Exact header names win over loose matches. Otherwise "PhoneNumber" beats
+      // "MobileNumber" and "AreaLandMark" beats "AreaCodeDesc" in Bharat Gas exports.
+      const pickKey = (exact: string[], loose: (k: string) => boolean): string => {
+        const lower = (k: string) => k.toLowerCase().replace(/[\s_]/g, '');
+        return keys.find(k => exact.includes(lower(k))) || keys.find(loose) || '';
+      };
+      const consumerNumKey = pickKey(['consumernumber', 'number', 'consumerno'], k => k.toLowerCase().includes('number') || k.toLowerCase().includes('no'));
+      const consumerNameKey = pickKey(['consumername', 'name'], k => k.toLowerCase().includes('name'));
+      const mobileKey = pickKey(['mobilenumber', 'mobile'], k => k.toLowerCase().includes('mobile') || k.toLowerCase().includes('phone'));
+      const addressKey = pickKey(['address'], k => k.toLowerCase().includes('address'));
+      const areaKey = pickKey(['areacodedesc', 'areacode'], k => k.toLowerCase().includes('area') && !k.toLowerCase().includes('landmark'));
 
       if (!consumerNumKey || !consumerNameKey) {
         toast.error('Could not find required columns (Consumer Number, Name) in the file.');
