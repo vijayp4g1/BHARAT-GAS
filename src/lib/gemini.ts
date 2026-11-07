@@ -247,6 +247,7 @@ function writeCachedScan(key: string, result: GeminiOcrResult) {
 /* -------------------------------------------------------------------------- */
 
 const SCAN_PROMPT = `You are a high-accuracy OCR assistant for Indian Bharatgas (BPCL) LPG delivery receipts and cash memos.
+The picture is a tight crop of the receiver line and may contain only the "Cons No" / "Name" fields.
 Carefully examine the receipt image:
 1. "consumerNumber": The consumer number printed next to or under "Cons No:", "Consumer No:", or "Cons. No."
    CRITICAL DOT-MATRIX PRINT INSTRUCTIONS:

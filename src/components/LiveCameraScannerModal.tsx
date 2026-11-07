@@ -152,6 +152,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Small viewfinder rectangle + the dashed guide inside it. Only the guide
+  // area is cropped and sent to Gemini, which keeps image tokens (cost) low.
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const guideBoxRef = useRef<HTMLDivElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
@@ -166,8 +170,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
   const [failedScanList, setFailedScanList] = useState<FailedScanItem[]>([]);
-  const [showFailedList, setShowFailedList] = useState<boolean>(false);
-  const [showSessionList, setShowSessionList] = useState<boolean>(false);
   const [activeScanFailAlert, setActiveScanFailAlert] = useState<ActiveScanFailAlert | null>(null);
   const manualInputRef = useRef<HTMLInputElement | null>(null);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
@@ -725,9 +727,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   };
 
   /**
-   * Capture the full camera frame at receipt-readable clarity.
-   * 1280 px longest edge @ 0.82 JPEG keeps dot-matrix digits readable while
-   * cutting upload payload to ~40–70 KB for fast Gemini inference on mobile data.
+   * Capture ONLY the small guide rectangle (Cons No + Name line), not the full
+   * camera frame.
+   *
+   * Why: Gemini charges image tokens by pixel area, and a full-page photo also
+   * gives the model dates, amounts and telephone numbers to get confused by.
+   * A tight crop of the receiver line is both far cheaper and more accurate.
+   *
+   * The mapping mirrors CSS `object-cover`: the video is scaled to cover the
+   * preview box, so the visible guide rectangle maps back to a source-pixel
+   * crop inside the camera frame.
    */
   const captureCameraFrame = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
@@ -736,11 +745,48 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 1280;
-    let targetW = video.videoWidth;
-    let targetH = video.videoHeight;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // Fallback = centre strip of the frame if the guide box can't be measured.
+    let sx = 0;
+    let sy = vh * 0.35;
+    let sw = vw;
+    let sh = vh * 0.3;
+
+    const frame = previewFrameRef.current;
+    const guide = guideBoxRef.current;
+    if (frame && guide) {
+      const f = frame.getBoundingClientRect();
+      const g = guide.getBoundingClientRect();
+      if (f.width > 0 && f.height > 0 && g.width > 0 && g.height > 0) {
+        const scale = Math.max(f.width / vw, f.height / vh);
+        const offX = (vw * scale - f.width) / 2;
+        const offY = (vh * scale - f.height) / 2;
+
+        // Small margin so ascenders/descenders of the dot-matrix line aren't clipped.
+        const padX = g.width * 0.03;
+        const padY = g.height * 0.18;
+
+        sx = (g.left - f.left + offX - padX) / scale;
+        sy = (g.top - f.top + offY - padY) / scale;
+        sw = (g.width + padX * 2) / scale;
+        sh = (g.height + padY * 2) / scale;
+
+        sx = Math.max(0, Math.min(sx, vw - 1));
+        sy = Math.max(0, Math.min(sy, vh - 1));
+        sw = Math.max(32, Math.min(sw, vw - sx));
+        sh = Math.max(24, Math.min(sh, vh - sy));
+      }
+    }
+
+    // Keep enough pixels for faint dot-matrix print, but cap the crop so one
+    // scan stays a small image (low token cost) even on a 4K camera sensor.
+    const maxDim = 960;
+    let targetW = sw;
+    let targetH = sh;
     if (targetW > maxDim || targetH > maxDim) {
-      if (targetW > targetH) {
+      if (targetW / maxDim > targetH / maxDim) {
         targetH = Math.round((targetH * maxDim) / targetW);
         targetW = maxDim;
       } else {
@@ -749,11 +795,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       }
     }
 
-    canvas.width = targetW;
-    canvas.height = targetH;
-    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
+    canvas.width = Math.max(32, Math.round(targetW));
+    canvas.height = Math.max(24, Math.round(targetH));
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-    return canvas.toDataURL('image/jpeg', 0.82);
+    return canvas.toDataURL('image/jpeg', 0.88);
   };
 
   /**
@@ -1150,11 +1198,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       </div>
 
       {/* 0. COMPACT CAMERA VIEWFINDER + QUICK ACTIONS (scrollable body) */}
-      <main className="relative z-20 flex flex-1 min-h-0 flex-col overflow-y-auto px-3 pb-2">
-        <div className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-2">
+      <main className="relative z-20 flex flex-1 min-h-0 flex-col overflow-y-auto px-3 py-2">
+        <div className="mx-auto flex w-full max-w-lg flex-1 min-h-0 flex-col gap-2">
           <div
+            ref={previewFrameRef}
             onClick={triggerFocus}
-            className="relative w-full flex-1 min-h-[190px] overflow-hidden rounded-3xl border border-white/15 bg-black shadow-2xl cursor-pointer"
+            className="relative w-full h-[136px] sm:h-[160px] overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl cursor-pointer"
             title="Tap to focus"
           >
             <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
@@ -1165,45 +1214,42 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150" />
             )}
 
-            {/* Target Box Guides: Formatted for Bharatgas Cash Memos */}
+            {/* Crop guide: ONLY this rectangle is sent to Gemini. */}
             <div
-              className={`absolute inset-x-4 top-3 bottom-3 border-2 rounded-2xl pointer-events-none flex flex-col justify-between p-2.5 transition-all duration-300 z-10 ${
+              ref={guideBoxRef}
+              className={`absolute inset-x-3 top-2.5 bottom-2.5 border-2 rounded-xl pointer-events-none flex flex-col justify-center transition-all duration-300 z-10 ${
                 isSuccessFlash
-                  ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_60px_rgba(16,185,129,0.45)]'
-                  : 'border-dashed border-amber-400/80 shadow-[0_0_40px_rgba(245,158,11,0.2)]'
+                  ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_40px_rgba(16,185,129,0.45)]'
+                  : 'border-dashed border-amber-400/80 shadow-[0_0_24px_rgba(245,158,11,0.2)]'
               }`}
             >
-              <div className="flex justify-between">
-                <div className="w-5 h-5 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
-                <div className="w-5 h-5 border-t-4 border-r-4 border-amber-400 rounded-tr-lg" />
-              </div>
-
               {/* Sweeping Laser Animation Line */}
-              <div className="relative w-full h-1 overflow-visible">
+              <div className="relative w-full h-0.5 overflow-visible">
                 <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_14px_#fbbf24] animate-pulse" />
               </div>
 
-              {/* Central Instruction Badge */}
-              <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-[10px] py-1 px-2.5 rounded-full mx-auto border border-amber-400/40 shadow-lg flex items-center gap-1.5 pointer-events-none">
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                    <span>Reading Cons No & Name...</span>
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-3 h-3 text-amber-400" />
-                    <span>Align receipt & tap Snap</span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex justify-between">
-                <div className="w-5 h-5 border-b-4 border-l-4 border-amber-400 rounded-bl-lg" />
-                <div className="w-5 h-5 border-b-4 border-r-4 border-amber-400 rounded-br-lg" />
+              {/* Compact instruction / progress chip */}
+              <div className="absolute inset-x-0 top-1.5 flex justify-center">
+                <div className="bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-[9px] py-0.5 px-2 rounded-full border border-amber-400/40 shadow-lg flex items-center gap-1 pointer-events-none">
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                      <span>Reading Cons No & Name...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-3 h-3 text-amber-400" />
+                      <span>Cons No + Name inside box</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
+
+          <p className="text-center text-[10px] text-slate-400 -mt-1">
+            Only the boxed line is scanned — keep the receipt line inside it.
+          </p>
 
           {/* Compact quick actions — sits directly under the camera preview */}
           <div className="flex items-center gap-2">
@@ -1258,79 +1304,72 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             </button>
           </div>
 
-          {/* Quick Expandable Session Status Bar */}
-          {(scannedSessionList.length > 0 || failedScanList.length > 0 || snapAttempts > 0) && (
-            <div className="flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400 font-semibold" title="Bills captured this session">
-                  {snapAttempts} scanned
-                </span>
-                {scannedSessionList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSessionList((v) => !v);
-                      setShowFailedList(false);
-                    }}
-                    className="text-emerald-400 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>{scannedSessionList.length} Added</span>
-                  </button>
-                )}
-                {failedScanList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFailedList((v) => !v);
-                      setShowSessionList(false);
-                    }}
-                    className="text-rose-400 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>{failedScanList.length} Failed</span>
-                  </button>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
-                {statusText}
+          {/* Quick Session Status Bar */}
+          <div className="shrink-0 flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 font-semibold" title="Bills captured this session">
+                {snapAttempts} scanned
               </span>
+              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" />
+                <span>{scannedSessionList.length} Added</span>
+              </span>
+              {failedScanList.length > 0 && (
+                <span className="text-rose-400 font-bold flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>{failedScanList.length} Failed</span>
+                </span>
+              )}
             </div>
-          )}
+            <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
+              {statusText}
+            </span>
+          </div>
 
-          {/* Collapsible Session Added Bills Sheet */}
-          {showSessionList && scannedSessionList.length > 0 && (
-            <div className="bg-slate-900/95 border border-white/15 p-2 rounded-2xl max-h-28 overflow-x-auto flex gap-1.5">
-              {scannedSessionList.map((item, idx) => (
-                <div
-                  key={`${item.consumer_number}-${idx}`}
-                  className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1 text-xs shrink-0 flex items-center gap-1.5"
-                >
-                  <Check className="w-3 h-3 text-emerald-400" />
-                  <span className="font-mono font-bold text-amber-300">#{item.consumer_number}</span>
-                  <span className="text-[11px] text-slate-300 max-w-[100px] truncate">{item.consumer_name}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Live session list — fills the rest of the screen so the layout has
+              no dead space, and lets the operator verify what was added. */}
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/50 p-1.5 flex flex-col gap-1">
+            {scannedSessionList.length === 0 && failedScanList.length === 0 && (
+              <div className="flex h-full min-h-[64px] flex-col items-center justify-center text-center gap-1 px-6 py-3">
+                <Camera className="w-5 h-5 text-slate-600" />
+                <p className="text-[11px] font-semibold text-slate-400">Scanned bills appear here</p>
+                <p className="text-[10px] text-slate-500">
+                  Keep only the Cons No + Name line inside the box, then tap 1-Tap AI Snap.
+                </p>
+              </div>
+            )}
 
-          {/* Collapsible Failed Scans Sheet */}
-          {showFailedList && failedScanList.length > 0 && (
-            <div className="bg-rose-950/95 border border-rose-500/40 p-2 rounded-2xl max-h-28 overflow-y-auto flex flex-col gap-1">
-              {failedScanList.map((item, idx) => (
-                <div
-                  key={`fail-${item.raw_number}-${idx}`}
-                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <span className="font-mono font-bold text-rose-200">#{item.raw_number}</span>
-                    <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
+            {scannedSessionList.map((item, idx) => (
+              <div
+                key={`${item.consumer_number}-${idx}`}
+                className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs flex items-center gap-2 shrink-0"
+              >
+                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="font-mono font-bold text-amber-300 shrink-0">#{item.consumer_number}</span>
+                <span className="text-[11px] text-slate-300 truncate">{item.consumer_name}</span>
+              </div>
+            ))}
+
+            {failedScanList.length > 0 && (
+              <div className="mt-auto pt-1.5 border-t border-rose-500/20 flex flex-col gap-1">
+                <p className="text-[9px] font-black uppercase tracking-wider text-rose-400 px-1">
+                  Not added yet — must be resolved before Done
+                </p>
+                {failedScanList.map((item, idx) => (
+                  <div
+                    key={`fail-${item.raw_number}-${idx}`}
+                    className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs shrink-0"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <span className="font-mono font-bold text-rose-200">#{item.raw_number || '???'}</span>
+                      <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </main>
 
@@ -1540,9 +1579,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  // The pending list is always visible in the session panel now.
                   setShowDoneWarning(false);
-                  setShowFailedList(true);
-                  setShowSessionList(false);
                 }}
                 className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
               >
