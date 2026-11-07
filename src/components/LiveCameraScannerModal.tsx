@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Flashlight,
@@ -1015,8 +1016,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between overflow-hidden font-sans select-none">
+  return createPortal(
+    <div className="fixed inset-0 z-[2000] h-[100dvh] w-full bg-black flex flex-col justify-between overflow-hidden font-sans select-none overscroll-none">
       {/* 1. FULLSCREEN VIDEO STREAM VIEWFINDER */}
       <div 
         onClick={triggerFocus}
@@ -1072,7 +1073,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       </div>
 
       {/* 2. FLOATING TOP HEADER OVERLAY */}
-      <div className="relative z-30 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white">
+      <div
+        className="relative z-30 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white"
+        style={{ paddingTop: 'max(0.875rem, env(safe-area-inset-top))' }}
+      >
         <div className="flex items-center justify-between max-w-lg mx-auto">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
@@ -1281,7 +1285,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       )}
 
       {/* 4. FLOATING BOTTOM CONTROL DECK OVERLAY */}
-      <div className="relative z-30 mt-auto bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent p-3 pt-4 text-white">
+      <div
+        className="relative z-30 mt-auto bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent p-3 pt-4 text-white"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+      >
         <div className="max-w-lg mx-auto flex flex-col gap-2.5">
           {/* Main Shutter & Photo Snap Button Row */}
           <div className="flex items-center gap-2">
@@ -1522,7 +1529,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 
