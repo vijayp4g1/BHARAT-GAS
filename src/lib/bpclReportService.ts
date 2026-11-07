@@ -1168,6 +1168,11 @@ export async function clearPendingBillsBulk(params: {
   });
 
   if (!saved) {
+    // saveBpclReportToCloud caches locally before the cloud write. On failure,
+    // restore the pre-clear cache so an offline reload cannot show a phantom clear.
+    try {
+      setLocalBpclReport(params.dateStr, normName, current);
+    } catch (_) {}
     throw new Error('Could not save cleared bills to the database. Nothing was removed.');
   }
 
