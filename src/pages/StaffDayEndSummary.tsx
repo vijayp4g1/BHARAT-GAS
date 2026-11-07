@@ -404,6 +404,11 @@ export const StaffDayEndSummary: React.FC = () => {
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeBoyIdentityRef = useRef<string | null>(selectedBoy ? selectedBoy.name.trim().toUpperCase() : null);
+  // Which (date, delivery boy) the in-memory entries actually belong to.
+  // Every draft/cloud write must match this context; otherwise switching the
+  // date while bills are still in state would copy the previous day's bills
+  // into the new day (the double-bill contamination bug).
+  const entriesContextRef = useRef<{ date: string; agent: string } | null>(null);
   const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
   hasUnsavedChangesRef.current = hasUnsavedChanges;
   const activeTabRef = useRef<'ROSTER' | 'SCAN'>(activeTab);
@@ -690,6 +695,8 @@ export const StaffDayEndSummary: React.FC = () => {
       localStorage.setItem(draftKey, JSON.stringify({
         entries: updatedEntries,
         timestamp: Date.now(),
+        date: dateStr,
+        agent: normName,
       }));
     } catch (_) {}
 
@@ -720,17 +727,29 @@ export const StaffDayEndSummary: React.FC = () => {
   const loadBillsForSelectedBoy = useCallback(async (boy: DeliveryBoy, dateStr: string) => {
     try {
       const normName = boy.name.trim().toUpperCase();
+      // Claim ownership of the list at the exact moment we hand it to React.
+      // Until this runs, date/boy switches keep the context null so neither the
+      // draft writer nor the autosave can touch the new day.
+      const claimEntries = (list: ItemEntry[]) => {
+        entriesContextRef.current = { date: dateStr, agent: normName };
+        setEntries(list);
+      };
 
       // 1. Fetch cloud summary first
       const summary = await fetchDayEndReportForAgent(dateStr, boy.name, boy.id);
       const cloudEntries: ItemEntry[] = (summary && Array.isArray(summary.entries)) ? summary.entries : [];
 
-      // Guard against race conditions when user switches boys quickly
+      // Guard against race conditions when user switches boys/dates quickly
       if (selectedBoyRef.current?.name.trim().toUpperCase() !== normName) {
         return;
       }
+      if (reportDateRef.current !== dateStr) {
+        return;
+      }
 
-      // 2. Check local working draft
+      // 2. Check local working draft — but only if it was written for THIS
+      // date and delivery boy. Older drafts without metadata are still trusted
+      // (they may hold unsaved scans); mismatched ones are discarded.
       const draftKey = getWorkingDraftKey(dateStr, normName);
       let draftEntries: ItemEntry[] = [];
       let draftTimestamp = 0;
@@ -738,7 +757,11 @@ export const StaffDayEndSummary: React.FC = () => {
         const rawDraft = localStorage.getItem(draftKey);
         if (rawDraft) {
           const parsed = JSON.parse(rawDraft);
-          if (Array.isArray(parsed.entries)) {
+          const wrongDate = parsed?.date && parsed.date !== dateStr;
+          const wrongAgent = parsed?.agent && String(parsed.agent).trim().toUpperCase() !== normName;
+          if (wrongDate || wrongAgent) {
+            localStorage.removeItem(draftKey);
+          } else if (Array.isArray(parsed.entries)) {
             draftEntries = parsed.entries;
             draftTimestamp = Number(parsed.timestamp) || 0;
           }
@@ -759,16 +782,16 @@ export const StaffDayEndSummary: React.FC = () => {
           cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
           draftEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
           const mergedEntries = Array.from(mergedMap.values());
-          setEntries(mergedEntries);
+          claimEntries(mergedEntries);
           setHasUnsavedChanges(true);
           try {
-            localStorage.setItem(draftKey, JSON.stringify({ entries: mergedEntries, timestamp: draftTimestamp }));
+            localStorage.setItem(draftKey, JSON.stringify({ entries: mergedEntries, timestamp: draftTimestamp, date: dateStr, agent: normName }));
           } catch (_) {}
         } else {
-          setEntries(cloudEntries);
+          claimEntries(cloudEntries);
           setHasUnsavedChanges(false);
           try {
-            localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: cloudUpdatedMs || Date.now() }));
+            localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: cloudUpdatedMs || Date.now(), date: dateStr, agent: normName }));
           } catch (_) {}
         }
         if (summary?.updated_at) {
@@ -779,10 +802,10 @@ export const StaffDayEndSummary: React.FC = () => {
         // Never wipe a NEWER local draft (unsaved scanned bills) just because the
         // cloud row is empty or stale.
         if (draftIsNewer) {
-          setEntries(draftEntries);
+          claimEntries(draftEntries);
           setHasUnsavedChanges(true);
         } else {
-          setEntries([]);
+          claimEntries([]);
           setLastSavedTime(null);
           setHasUnsavedChanges(false);
           try {
@@ -795,17 +818,17 @@ export const StaffDayEndSummary: React.FC = () => {
           (e) => crossAgentClaimedMap[e.consumer_number.toLowerCase()]
         );
         if (allClaimedByOther && draftEntries.length > 3) {
-          setEntries([]);
+          claimEntries([]);
           setHasUnsavedChanges(false);
           try {
             localStorage.removeItem(draftKey);
           } catch (_) {}
         } else {
-          setEntries(draftEntries);
+          claimEntries(draftEntries);
           setHasUnsavedChanges(true);
         }
       } else {
-        setEntries([]);
+        claimEntries([]);
         setLastSavedTime(null);
         setHasUnsavedChanges(false);
       }
@@ -847,6 +870,8 @@ export const StaffDayEndSummary: React.FC = () => {
         localStorage.setItem(outgoingDraftKey, JSON.stringify({
           entries: entriesRef.current,
           timestamp: Date.now(),
+          date: reportDate,
+          agent: outgoingNorm,
         }));
       } catch (_) {}
     }
@@ -860,6 +885,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
     // 4. CRITICAL: Immediately clear entries in React state so the previous boy's numbers NEVER bleed into the new boy!
     activeBoyIdentityRef.current = targetNorm;
+    entriesContextRef.current = null;
     setEntries([]); // Reset immediately!
 
     // 5. Update selected boy state
@@ -1035,12 +1061,16 @@ export const StaffDayEndSummary: React.FC = () => {
       if (boy && currentEntries.length > 0) {
         const normName = boy.name.trim().toUpperCase();
         if (activeBoyIdentityRef.current !== normName) return;
+        // Never flush the previous day's list into the newly selected date.
+        if (entriesContextRef.current?.date !== currentDate || entriesContextRef.current?.agent !== normName) return;
 
         const draftKey = getWorkingDraftKey(currentDate, normName);
         try {
           localStorage.setItem(draftKey, JSON.stringify({
             entries: currentEntries,
             timestamp: Date.now(),
+            date: currentDate,
+            agent: normName,
           }));
         } catch (_) {}
 
@@ -1093,6 +1123,11 @@ export const StaffDayEndSummary: React.FC = () => {
     const normName = selectedBoy.name.trim().toUpperCase();
     // SAFETY GUARD: Never write entries to disk if they belong to another boy or are mid-switch!
     if (activeBoyIdentityRef.current !== normName) return;
+    // SAFETY GUARD: the list must actually belong to the visible date. On a
+    // date switch the old list is still in state for a moment; writing it under
+    // the new date key is what contaminated day-end reports with yesterday's bills.
+    const owner = entriesContextRef.current;
+    if (!owner || owner.date !== reportDate || owner.agent !== normName) return;
 
     const draftKey = getWorkingDraftKey(reportDate, normName);
     try {
@@ -1109,6 +1144,8 @@ export const StaffDayEndSummary: React.FC = () => {
       localStorage.setItem(draftKey, JSON.stringify({
         entries,
         timestamp: Date.now(),
+        date: reportDate,
+        agent: normName,
       }));
     } catch (_) {}
   }, [entries, selectedBoy, reportDate]);
@@ -1119,12 +1156,18 @@ export const StaffDayEndSummary: React.FC = () => {
     const normName = selectedBoy.name.trim().toUpperCase();
     // SAFETY GUARD: Do not auto-save if entries belong to another boy!
     if (activeBoyIdentityRef.current !== normName) return;
+    // SAFETY GUARD: never save the previous day's list under the new date.
+    const owner = entriesContextRef.current;
+    if (!owner || owner.date !== reportDate || owner.agent !== normName) return;
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
 
     autoSaveTimerRef.current = setTimeout(async () => {
+      // Re-check ownership at fire time (the user may have switched date/boy).
+      const firedOwner = entriesContextRef.current;
+      if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
       try {
         await saveDayEndReportToDatabase({
           report_date: reportDate,
@@ -1363,6 +1406,47 @@ export const StaffDayEndSummary: React.FC = () => {
   // 7. Handle Date Switching
   const handleDateChange = (newDate: string) => {
     if (!newDate || newDate === reportDate) return;
+
+    // 1. Flush any genuinely unsaved work for the OUTGOING date first, so the
+    // pending debounce can never fire later while the new date is active.
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    const outgoingBoy = selectedBoyRef.current;
+    const outgoingEntries = entriesRef.current;
+    const outgoingDate = reportDateRef.current;
+    if (outgoingBoy && outgoingEntries.length > 0 && hasUnsavedChangesRef.current) {
+      const outgoingNorm = outgoingBoy.name.trim().toUpperCase();
+      const owner = entriesContextRef.current;
+      if (owner?.date === outgoingDate && owner?.agent === outgoingNorm) {
+        try {
+          localStorage.setItem(getWorkingDraftKey(outgoingDate, outgoingNorm), JSON.stringify({
+            entries: outgoingEntries,
+            timestamp: Date.now(),
+            date: outgoingDate,
+            agent: outgoingNorm,
+          }));
+        } catch (_) {}
+        saveDayEndReportToDatabase({
+          report_date: outgoingDate,
+          agent_id: outgoingBoy.id,
+          agent_name: outgoingBoy.name,
+          entries: outgoingEntries as any,
+          supervisor_phone: supervisorPhone,
+          sender_session_id: sessionClientIdRef.current,
+        }).catch(() => {});
+      }
+    }
+
+    // 2. Invalidate the list ownership and clear it BEFORE the date changes.
+    // Until the new date's bills finish loading, neither the draft writer nor
+    // the autosave is allowed to persist anything for the new date.
+    entriesContextRef.current = null;
+    setEntries([]);
+    setHasUnsavedChanges(false);
+    setLastSavedTime(null);
+
     activeDateRef.current = newDate;
     setReportDate(newDate);
     setListSearchQuery('');

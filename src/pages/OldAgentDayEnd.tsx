@@ -230,6 +230,9 @@ export const OldAgentDayEnd: React.FC = () => {
   const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
   hasUnsavedChangesRef.current = hasUnsavedChanges;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which (date, agent) the in-memory entries belong to. Draft/cloud writes
+  // must match it so switching dates can never copy yesterday's bills forward.
+  const entriesContextRef = useRef<{ date: string; agent: string } | null>(null);
   const sessionClientIdRef = useRef<string>(Math.random().toString(36).substring(2) + Date.now().toString(36));
 
   // Anti-fraud cross-agent claimed map for detecting duplicate bills
@@ -604,25 +607,32 @@ export const OldAgentDayEnd: React.FC = () => {
     setSingleInput('');
     setShowSuggestions(false);
     setHasUnsavedChanges(false);
+    entriesContextRef.current = null;
     setEntries([]); // Reset entries immediately to prevent cross-boy bleeding
 
     // Instant local draft check for snappy UX
     const norm = boy.name.trim().toUpperCase();
     const draftKey = getWorkingDraftKey(reportDate, norm);
+    const claimEntries = (list: ItemEntry[]) => {
+      entriesContextRef.current = { date: reportDate, agent: norm };
+      setEntries(list);
+    };
     try {
       const raw = localStorage.getItem(draftKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.entries)) {
-          setEntries(normalizeStoredEntries(parsed.entries));
+        const wrongDate = parsed?.date && parsed.date !== reportDate;
+        const wrongAgent = parsed?.agent && String(parsed.agent).trim().toUpperCase() !== norm;
+        if (!wrongDate && !wrongAgent && Array.isArray(parsed.entries)) {
+          claimEntries(normalizeStoredEntries(parsed.entries));
         } else {
-          setEntries([]);
+          claimEntries([]);
         }
       } else {
-        setEntries([]);
+        claimEntries([]);
       }
     } catch {
-      setEntries([]);
+      claimEntries([]);
     }
 
     toast.success(`Active boy: ${boy.name}`);
@@ -639,15 +649,26 @@ export const OldAgentDayEnd: React.FC = () => {
       try {
         const normName = agentName.trim().toUpperCase();
         const draftKey = getWorkingDraftKey(reportDate, normName);
+        // While a new date/agent is loading, block draft writes of the old list.
+        setIsLoaded(false);
+        // Ownership is claimed at the exact moment we hand a list to React.
+        const claimEntries = (list: ItemEntry[]) => {
+          entriesContextRef.current = { date: reportDate, agent: normName };
+          setEntries(list);
+        };
 
-        // 1. Check local working draft first
+        // 1. Check local working draft first (only if it belongs to this date + agent)
         let draftEntries: ItemEntry[] = [];
         let draftTimestamp = 0;
         try {
           const rawDraft = localStorage.getItem(draftKey);
           if (rawDraft) {
             const parsed = JSON.parse(rawDraft);
-            if (Array.isArray(parsed.entries)) {
+            const wrongDate = parsed?.date && parsed.date !== reportDate;
+            const wrongAgent = parsed?.agent && String(parsed.agent).trim().toUpperCase() !== normName;
+            if (wrongDate || wrongAgent) {
+              localStorage.removeItem(draftKey);
+            } else if (Array.isArray(parsed.entries)) {
               draftEntries = parsed.entries;
               draftTimestamp = Number(parsed.timestamp) || 0;
             }
@@ -690,15 +711,17 @@ export const OldAgentDayEnd: React.FC = () => {
             const mergedMap = new Map<string, ItemEntry>();
             cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
             draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
-            setEntries(Array.from(mergedMap.values()));
+            claimEntries(Array.from(mergedMap.values()));
             setHasUnsavedChanges(true);
           } else {
-            setEntries(cloudEntries);
+            claimEntries(cloudEntries);
             setHasUnsavedChanges(false);
             try {
               localStorage.setItem(draftKey, JSON.stringify({
                 entries: cloudEntries,
                 timestamp: cloudUpdatedMs || Date.now(),
+                date: reportDate,
+                agent: normName,
               }));
             } catch (_) {}
           }
@@ -719,10 +742,10 @@ export const OldAgentDayEnd: React.FC = () => {
 
           if (draftIsNewer) {
             // Genuinely unsaved local scans: never throw them away
-            setEntries(draftEntries);
+            claimEntries(draftEntries);
             setHasUnsavedChanges(true);
           } else {
-            setEntries([]);
+            claimEntries([]);
             setLastSavedTime(null);
             setHasUnsavedChanges(false);
             try {
@@ -734,7 +757,7 @@ export const OldAgentDayEnd: React.FC = () => {
         }
 
         if (draftEntries.length > 0) {
-          setEntries(draftEntries);
+          claimEntries(draftEntries);
           setHasUnsavedChanges(true);
           setIsLoaded(true);
           return;
@@ -743,7 +766,7 @@ export const OldAgentDayEnd: React.FC = () => {
         // Fallback to local device cache
         const localItems = loadEntriesForDate(agentId, reportDate);
         if (!isMounted) return;
-        setEntries(localItems);
+        claimEntries(localItems);
         setIsLoaded(true);
       } catch (err) {
         console.warn('Error loading bills:', err);
@@ -765,6 +788,9 @@ export const OldAgentDayEnd: React.FC = () => {
     // Do not persist transient state while the cloud/draft is still loading
     if (!isLoaded) return;
     const normName = agentName.trim().toUpperCase();
+    // Only write when the in-memory list belongs to the visible date + agent.
+    const owner = entriesContextRef.current;
+    if (!owner || owner.date !== reportDate || owner.agent !== normName) return;
     const draftKey = getWorkingDraftKey(reportDate, normName);
     try {
       // Safety: never overwrite a real draft with a transient empty list
@@ -781,6 +807,8 @@ export const OldAgentDayEnd: React.FC = () => {
       localStorage.setItem(draftKey, JSON.stringify({
         entries,
         timestamp: Date.now(),
+        date: reportDate,
+        agent: normName,
       }));
     } catch (_) {}
   }, [entries, agentName, reportDate, isLoaded]);
@@ -788,12 +816,18 @@ export const OldAgentDayEnd: React.FC = () => {
   // 4. Debounced background auto-save to cloud database whenever entries change with unsaved edits
   useEffect(() => {
     if (!agentName || !hasUnsavedChanges || entries.length === 0) return;
+    const normName = agentName.trim().toUpperCase();
+    const owner = entriesContextRef.current;
+    if (!owner || owner.date !== reportDate || owner.agent !== normName) return;
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
 
     autoSaveTimerRef.current = setTimeout(async () => {
+      // Re-check ownership at fire time (the user may have switched date/boy).
+      const firedOwner = entriesContextRef.current;
+      if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
       try {
         await saveDayEndReportToDatabase({
           report_date: reportDate,
@@ -832,11 +866,16 @@ export const OldAgentDayEnd: React.FC = () => {
       if (!currentName || currentEntries.length === 0) return;
 
       const normName = currentName.trim().toUpperCase();
+      // Never flush a list that belongs to a different date/agent context.
+      const owner = entriesContextRef.current;
+      if (!owner || owner.date !== currentDate || owner.agent !== normName) return;
       const draftKey = getWorkingDraftKey(currentDate, normName);
       try {
         localStorage.setItem(draftKey, JSON.stringify({
           entries: currentEntries,
           timestamp: Date.now(),
+          date: currentDate,
+          agent: normName,
         }));
       } catch (_) {}
 
@@ -873,12 +912,18 @@ export const OldAgentDayEnd: React.FC = () => {
 
     const pullCloudBills = async () => {
       try {
+        const targetDate = reportDateRef.current;
+        const targetName = (agentNameRef.current || '').trim();
+        const targetNorm = targetName.toUpperCase();
         const currentId = agentIdRef.current !== 'agent_default' ? agentIdRef.current : undefined;
         const cloudReport = await fetchDayEndReportForAgent(
-          reportDateRef.current,
-          agentNameRef.current,
+          targetDate,
+          targetName,
           currentId
         );
+        // The user may have switched date/boy while this request was in flight.
+        if (reportDateRef.current !== targetDate) return;
+        if ((agentNameRef.current || '').trim().toUpperCase() !== targetNorm) return;
         if (!cloudReport || !Array.isArray(cloudReport.entries) || cloudReport.entries.length === 0) return;
 
         const cloudEntries: ItemEntry[] = cloudReport.entries.map((e: any) => ({
@@ -896,6 +941,7 @@ export const OldAgentDayEnd: React.FC = () => {
           scanned_at: e.scanned_at,
         }));
 
+        entriesContextRef.current = { date: targetDate, agent: targetNorm };
         setEntries((prev) => {
           const localKeys = new Set(prev.map((e) => e.consumer_number.trim().toLowerCase()));
           const hasNewBills = cloudEntries.some((e) => !localKeys.has(e.consumer_number.trim().toLowerCase()));
@@ -1002,23 +1048,37 @@ export const OldAgentDayEnd: React.FC = () => {
   const handleDateChange = async (newDate: string) => {
     if (newDate === reportDate) return;
 
-    // Persist current date before switching
-    if (hasUnsavedChanges && entries.length > 0) {
-      try {
-        await saveDayEndReportToDatabase({
-          report_date: reportDate,
-          agent_id: agentId !== 'agent_default' ? agentId : undefined,
-          agent_name: agentName,
-          entries: entries as any,
-          supervisor_phone: supervisorPhone,
-          sender_session_id: sessionClientIdRef.current,
-        });
-      } catch (_) {}
+    // Cancel a pending debounce so it cannot fire after the date changes.
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
 
+    // Persist current date before switching
+    if (hasUnsavedChanges && entries.length > 0) {
+      const owner = entriesContextRef.current;
+      const normName = agentName.trim().toUpperCase();
+      if (owner?.date === reportDate && owner?.agent === normName) {
+        try {
+          await saveDayEndReportToDatabase({
+            report_date: reportDate,
+            agent_id: agentId !== 'agent_default' ? agentId : undefined,
+            agent_name: agentName,
+            entries: entries as any,
+            supervisor_phone: supervisorPhone,
+            sender_session_id: sessionClientIdRef.current,
+          });
+        } catch (_) {}
+      }
+    }
+
+    // Invalidate ownership and clear the list before the new date loads.
+    entriesContextRef.current = null;
+    setEntries([]);
     activeDateRef.current = newDate;
     setReportDate(newDate);
     setHasUnsavedChanges(false);
+    setLastSavedTime(null);
     setListSearchQuery('');
     toast(`Viewing Date: ${newDate}`, { icon: '📅' });
   };
