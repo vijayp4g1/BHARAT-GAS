@@ -694,8 +694,9 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   };
 
   /**
-   * Capture the full camera frame at optimal clarity (1000px max, lightweight JPEG)
-   * Drastically reduces network upload payload to ~60KB for sub-second Gemini inference.
+   * Capture the full camera frame at receipt-readable clarity.
+   * 1280 px longest edge @ 0.82 JPEG keeps dot-matrix digits readable while
+   * cutting upload payload to ~40–70 KB for fast Gemini inference on mobile data.
    */
   const captureCameraFrame = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
@@ -704,7 +705,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    const maxDim = 1600;
+    const maxDim = 1280;
     let targetW = video.videoWidth;
     let targetH = video.videoHeight;
     if (targetW > maxDim || targetH > maxDim) {
@@ -721,7 +722,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     canvas.height = targetH;
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, targetW, targetH);
 
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.82);
   };
 
   /**
@@ -1017,64 +1018,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[2000] h-[100dvh] w-full bg-black flex flex-col justify-between overflow-hidden font-sans select-none overscroll-none">
-      {/* 1. FULLSCREEN VIDEO STREAM VIEWFINDER */}
-      <div 
-        onClick={triggerFocus}
-        className="absolute inset-0 w-full h-full bg-black flex items-center justify-center cursor-pointer overflow-hidden"
-        title="Tap to focus"
-      >
-        <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
-        <canvas ref={canvasRef} className="hidden" />
-
-        {/* Shutter Flash Animation */}
-        {isShutterFlash && (
-          <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150" />
-        )}
-
-        {/* Target Box Guides: Formatted for Bharatgas Cash Memos */}
-        <div
-          className={`absolute top-[12%] bottom-[25%] inset-x-5 sm:inset-x-12 max-w-sm mx-auto border-2 rounded-3xl pointer-events-none flex flex-col justify-between p-3.5 sm:p-4 transition-all duration-300 z-10 ${
-            isSuccessFlash
-              ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_80px_rgba(16,185,129,0.5)]'
-              : 'border-dashed border-amber-400/80 shadow-[0_0_60px_rgba(245,158,11,0.25)]'
-          }`}
-        >
-          <div className="flex justify-between">
-            <div className="w-6 h-6 sm:w-7 sm:h-7 border-t-4 border-l-4 border-amber-400 rounded-tl-xl" />
-            <div className="w-6 h-6 sm:w-7 sm:h-7 border-t-4 border-r-4 border-amber-400 rounded-tr-xl" />
-          </div>
-
-          {/* Sweeping Laser Animation Line */}
-          <div className="relative w-full h-1 overflow-visible">
-            <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_14px_#fbbf24] animate-pulse" />
-          </div>
-
-          {/* Central Instruction Badge */}
-          <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-[11px] sm:text-xs py-1.5 px-3 sm:py-2 sm:px-4 rounded-full mx-auto border border-amber-400/40 shadow-lg flex items-center gap-1.5 pointer-events-none">
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                <span>Reading Cons No & Name...</span>
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5 text-amber-400" />
-                <span>Align receipt & tap Snap</span>
-              </>
-            )}
-          </div>
-
-          <div className="flex justify-between">
-            <div className="w-6 h-6 sm:w-7 sm:h-7 border-b-4 border-l-4 border-amber-400 rounded-bl-xl" />
-            <div className="w-6 h-6 sm:w-7 sm:h-7 border-b-4 border-r-4 border-amber-400 rounded-br-xl" />
-          </div>
-        </div>
-      </div>
-
+    <div className="fixed inset-0 z-[2000] h-[100dvh] w-full bg-slate-950 flex flex-col overflow-hidden font-sans select-none overscroll-none">
       {/* 2. FLOATING TOP HEADER OVERLAY */}
       <div
-        className="relative z-30 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white"
+        className="relative z-30 shrink-0 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white"
         style={{ paddingTop: 'max(0.875rem, env(safe-area-inset-top))' }}
       >
         <div className="flex items-center justify-between max-w-lg mx-auto">
@@ -1173,6 +1120,193 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* 0. COMPACT CAMERA VIEWFINDER + QUICK ACTIONS (scrollable body) */}
+      <main className="relative z-20 flex-1 min-h-0 overflow-y-auto px-3 pb-2">
+        <div className="mx-auto flex w-full max-w-lg flex-col gap-2">
+          <div
+            onClick={triggerFocus}
+            className="relative w-full overflow-hidden rounded-3xl border border-white/15 bg-black shadow-2xl cursor-pointer"
+            style={{ height: 'clamp(190px, 36dvh, 330px)' }}
+            title="Tap to focus"
+          >
+            <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
+            <canvas ref={canvasRef} className="hidden" />
+
+            {/* Shutter Flash Animation */}
+            {isShutterFlash && (
+              <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150" />
+            )}
+
+            {/* Target Box Guides: Formatted for Bharatgas Cash Memos */}
+            <div
+              className={`absolute inset-x-4 top-3 bottom-3 border-2 rounded-2xl pointer-events-none flex flex-col justify-between p-2.5 transition-all duration-300 z-10 ${
+                isSuccessFlash
+                  ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_60px_rgba(16,185,129,0.45)]'
+                  : 'border-dashed border-amber-400/80 shadow-[0_0_40px_rgba(245,158,11,0.2)]'
+              }`}
+            >
+              <div className="flex justify-between">
+                <div className="w-5 h-5 border-t-4 border-l-4 border-amber-400 rounded-tl-lg" />
+                <div className="w-5 h-5 border-t-4 border-r-4 border-amber-400 rounded-tr-lg" />
+              </div>
+
+              {/* Sweeping Laser Animation Line */}
+              <div className="relative w-full h-1 overflow-visible">
+                <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_14px_#fbbf24] animate-pulse" />
+              </div>
+
+              {/* Central Instruction Badge */}
+              <div className="text-center bg-slate-950/85 backdrop-blur-md text-amber-300 font-extrabold text-[10px] py-1 px-2.5 rounded-full mx-auto border border-amber-400/40 shadow-lg flex items-center gap-1.5 pointer-events-none">
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                    <span>Reading Cons No & Name...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-3 h-3 text-amber-400" />
+                    <span>Align receipt & tap Snap</span>
+                  </>
+                )}
+              </div>
+
+              <div className="flex justify-between">
+                <div className="w-5 h-5 border-b-4 border-l-4 border-amber-400 rounded-bl-lg" />
+                <div className="w-5 h-5 border-b-4 border-r-4 border-amber-400 rounded-br-lg" />
+              </div>
+            </div>
+          </div>
+
+          {/* Compact quick actions — sits directly under the camera preview */}
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+
+            {/* 1-TAP AI SNAP PRIMARY SHUTTER BUTTON */}
+            <button
+              type="button"
+              onClick={performScan}
+              disabled={isProcessing || !isOnline}
+              className={`flex-1 font-black py-2.5 px-3 rounded-xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border text-[11px] uppercase tracking-wide disabled:opacity-60 ${
+                !isOnline
+                  ? 'bg-slate-800 text-amber-300 border-amber-500/40 shadow-none cursor-not-allowed'
+                  : 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-600 text-slate-950 border-amber-300 shadow-orange-500/30'
+              }`}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                  <span>Reading...</span>
+                </>
+              ) : !isOnline ? (
+                <>
+                  <WifiOff className="w-4 h-4 text-amber-400" />
+                  <span>Offline (Type Below)</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-slate-950 animate-pulse" />
+                  <span>1-Tap AI Snap</span>
+                </>
+              )}
+            </button>
+
+            {/* Photo / Gallery Upload Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing}
+              className="bg-slate-900/90 hover:bg-slate-800 text-white font-bold py-2.5 px-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-1 border border-white/20 text-[11px] disabled:opacity-50 shrink-0"
+              title="Snap with phone camera or pick from gallery"
+            >
+              <Camera className="w-4 h-4 text-amber-400" />
+              <span className="font-semibold">Photo</span>
+            </button>
+          </div>
+
+          {/* Quick Expandable Session Status Bar */}
+          {(scannedSessionList.length > 0 || failedScanList.length > 0 || snapAttempts > 0) && (
+            <div className="flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 font-semibold" title="Bills captured this session">
+                  {snapAttempts} scanned
+                </span>
+                {scannedSessionList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSessionList((v) => !v);
+                      setShowFailedList(false);
+                    }}
+                    className="text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{scannedSessionList.length} Added</span>
+                  </button>
+                )}
+                {failedScanList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFailedList((v) => !v);
+                      setShowSessionList(false);
+                    }}
+                    className="text-rose-400 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>{failedScanList.length} Failed</span>
+                  </button>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
+                {statusText}
+              </span>
+            </div>
+          )}
+
+          {/* Collapsible Session Added Bills Sheet */}
+          {showSessionList && scannedSessionList.length > 0 && (
+            <div className="bg-slate-900/95 border border-white/15 p-2 rounded-2xl max-h-28 overflow-x-auto flex gap-1.5">
+              {scannedSessionList.map((item, idx) => (
+                <div
+                  key={`${item.consumer_number}-${idx}`}
+                  className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1 text-xs shrink-0 flex items-center gap-1.5"
+                >
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  <span className="font-mono font-bold text-amber-300">#{item.consumer_number}</span>
+                  <span className="text-[11px] text-slate-300 max-w-[100px] truncate">{item.consumer_name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Collapsible Failed Scans Sheet */}
+          {showFailedList && failedScanList.length > 0 && (
+            <div className="bg-rose-950/95 border border-rose-500/40 p-2 rounded-2xl max-h-28 overflow-y-auto flex flex-col gap-1">
+              {failedScanList.map((item, idx) => (
+                <div
+                  key={`fail-${item.raw_number}-${idx}`}
+                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <span className="font-mono font-bold text-rose-200">#{item.raw_number}</span>
+                    <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
 
       {/* 3. DIRECT SCAN FAILURE MODAL OVERLAY (SCROLLABLE & FULLY VISIBLE ON ANY MOBILE) */}
       {activeScanFailAlert && (
@@ -1284,139 +1418,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         </div>
       )}
 
-      {/* 4. FLOATING BOTTOM CONTROL DECK OVERLAY */}
+      {/* 4. FIXED BOTTOM BAR: manual key-in + finish */}
       <div
-        className="relative z-30 mt-auto bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent p-3 pt-4 text-white"
-        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        className="relative z-30 shrink-0 border-t border-white/10 bg-slate-950/95 px-3 pt-2 text-white"
+        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="max-w-lg mx-auto flex flex-col gap-2.5">
-          {/* Main Shutter & Photo Snap Button Row */}
-          <div className="flex items-center gap-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleFileUpload}
-            />
-
-            {/* BIG 1-TAP AI SNAP PRIMARY SHUTTER BUTTON */}
-            <button
-              type="button"
-              onClick={performScan}
-              disabled={isProcessing || !isOnline}
-              className={`flex-1 font-black py-3.5 px-4 rounded-2xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-2 border text-sm uppercase tracking-wide disabled:opacity-60 ${
-                !isOnline
-                  ? 'bg-slate-800 text-amber-300 border-amber-500/40 shadow-none cursor-not-allowed'
-                  : 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-500 hover:to-orange-600 text-slate-950 border-amber-300 shadow-orange-500/30'
-              }`}
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" />
-                  <span>Reading...</span>
-                </>
-              ) : !isOnline ? (
-                <>
-                  <WifiOff className="w-5 h-5 text-amber-400" />
-                  <span>Offline (Type Below)</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
-                  <span>1-TAP AI SNAP</span>
-                </>
-              )}
-            </button>
-
-            {/* Photo / Gallery Upload Button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
-              className="bg-slate-900/90 hover:bg-slate-800 text-white font-bold py-3.5 px-3.5 rounded-2xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-white/20 text-xs disabled:opacity-50 shrink-0"
-              title="Snap with phone camera or pick from gallery"
-            >
-              <Camera className="w-4 h-4 text-amber-400" />
-              <span className="text-[11px] font-semibold">Photo</span>
-            </button>
-          </div>
-
-          {/* Quick Expandable Session Status Bar */}
-          {(scannedSessionList.length > 0 || failedScanList.length > 0 || snapAttempts > 0) && (
-            <div className="flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-400 font-semibold" title="Bills captured this session">
-                  {snapAttempts} scanned
-                </span>
-                {scannedSessionList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSessionList((v) => !v);
-                      setShowFailedList(false);
-                    }}
-                    className="text-emerald-400 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>{scannedSessionList.length} Added</span>
-                  </button>
-                )}
-                {failedScanList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFailedList((v) => !v);
-                      setShowSessionList(false);
-                    }}
-                    className="text-rose-400 font-bold hover:underline flex items-center gap-1"
-                  >
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>{failedScanList.length} Failed</span>
-                  </button>
-                )}
-              </div>
-              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
-                {statusText}
-              </span>
-            </div>
-          )}
-
-          {/* Collapsible Session Added Bills Sheet */}
-          {showSessionList && scannedSessionList.length > 0 && (
-            <div className="bg-slate-900/95 border border-white/15 p-2 rounded-2xl max-h-28 overflow-x-auto flex gap-1.5">
-              {scannedSessionList.map((item, idx) => (
-                <div
-                  key={`${item.consumer_number}-${idx}`}
-                  className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1 text-xs shrink-0 flex items-center gap-1.5"
-                >
-                  <Check className="w-3 h-3 text-emerald-400" />
-                  <span className="font-mono font-bold text-amber-300">#{item.consumer_number}</span>
-                  <span className="text-[11px] text-slate-300 max-w-[100px] truncate">{item.consumer_name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Collapsible Failed Scans Sheet */}
-          {showFailedList && failedScanList.length > 0 && (
-            <div className="bg-rose-950/95 border border-rose-500/40 p-2 rounded-2xl max-h-28 overflow-y-auto flex flex-col gap-1">
-              {failedScanList.map((item, idx) => (
-                <div
-                  key={`fail-${item.raw_number}-${idx}`}
-                  className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <span className="font-mono font-bold text-rose-200">#{item.raw_number}</span>
-                    <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
+        <div className="mx-auto flex w-full max-w-lg flex-col gap-2">
           {/* Manual Key-in & Finish Session Row */}
           <div className="flex items-center gap-2">
             <form onSubmit={handleManualAdd} className="flex-1 flex items-center gap-1.5">

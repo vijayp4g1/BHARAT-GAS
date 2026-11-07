@@ -93,7 +93,7 @@ async function preprocessImage(
   imageSource: File | Blob | string,
   options: PreprocessOptions = {}
 ): Promise<{ data: string; mimeType: string }> {
-  const { maxDimension = 1600, quality = 0.85, grayscale = false, contrast = 1 } = options;
+  const { maxDimension = 1280, quality = 0.8, grayscale = false, contrast = 1 } = options;
 
   // Already a base64 data URL and no pixel processing requested → use as-is.
   if (
@@ -336,8 +336,24 @@ export async function scanBillWithGemini(
     let response: Response | null = null;
     let usedModel = '';
     let lastError = '';
+    let failedModel = '';
+    let failedStatus = 0;
 
     for (const attempt of attempts) {
+      // Only drop thinkingConfig when the API rejected the request shape
+      // (400/404/415/422). Retrying the same model after a 429/5xx/network
+      // failure just doubles the wait, so move straight to the next model.
+      if (
+        attempt.thinking === 'none' &&
+        attempt.model === failedModel &&
+        failedStatus !== 0 &&
+        ![400, 404, 415, 422].includes(failedStatus)
+      ) {
+        continue;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20_000);
       try {
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${attempt.model}:generateContent?key=${apiKey}`,
@@ -345,6 +361,7 @@ export async function scanBillWithGemini(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(buildRequestBody(attempt.thinking)),
+            signal: controller.signal,
           }
         );
 
@@ -356,6 +373,8 @@ export async function scanBillWithGemini(
 
         const errText = await res.text();
         lastError = `${res.status} - ${errText}`;
+        failedModel = attempt.model;
+        failedStatus = res.status;
 
         // Stop hammering the API if the key itself is rejected.
         if (
@@ -366,7 +385,14 @@ export async function scanBillWithGemini(
           break;
         }
       } catch (networkErr: any) {
-        lastError = networkErr?.message || 'network error';
+        lastError =
+          networkErr?.name === 'AbortError'
+            ? 'request timed out'
+            : networkErr?.message || 'network error';
+        failedModel = attempt.model;
+        failedStatus = -1;
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
 

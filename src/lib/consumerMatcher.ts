@@ -386,6 +386,71 @@ export async function matchConsumerWithDatabase(
     return null;
   }
 
+  // Batch number lookup: one Dexie hit + ONE remote query for all dot-matrix
+  // variants. Previously each variant triggered its own Supabase round-trip,
+  // which made failed scans wait several extra seconds.
+  async function findManyByNumber(nums: string[]): Promise<Map<string, Consumer>> {
+    const map = new Map<string, Consumer>();
+    const candidates = new Set<string>();
+    for (const n of nums) {
+      const raw = (n || '').replace(/[^0-9]/g, '');
+      if (!raw) continue;
+      candidates.add(raw);
+      const unpadded = raw.replace(/^0+/, '');
+      if (unpadded) candidates.add(unpadded);
+    }
+    const list = Array.from(candidates);
+    if (list.length === 0) return map;
+
+    // 1. Local Dexie batch
+    try {
+      const local = await db.consumers.where('consumer_number').anyOfIgnoreCase(list).toArray();
+      for (const c of local) map.set(c.consumer_number.toLowerCase(), c);
+    } catch (_) {}
+
+    // 2. Remote Supabase batch (single request)
+    if (navigator.onLine) {
+      try {
+        const { data } = await supabase
+          .from('manager_consumer_summary')
+          .select('id, consumer_number, consumer_name, address, mobile')
+          .in('consumer_number', list);
+
+        for (const d of data || []) {
+          const cached: Consumer = {
+            id: d.id,
+            consumer_number: d.consumer_number,
+            consumer_name: d.consumer_name,
+            address: d.address || '',
+            mobile: d.mobile || '',
+            verification_status: 'Verified',
+            created_at: new Date().toISOString(),
+            searchWords: [
+              ...d.consumer_name.toLowerCase().split(/\s+/),
+              d.consumer_number.toLowerCase(),
+            ],
+          };
+          map.set(cached.consumer_number.toLowerCase(), cached);
+          await db.consumers.put(cached).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Remote batch number lookup error:', err);
+      }
+    }
+
+    return map;
+  }
+
+  function pickFromMap(map: Map<string, Consumer>, num: string): Consumer | null {
+    const raw = (num || '').replace(/[^0-9]/g, '');
+    if (!raw) return null;
+    return (
+      map.get(raw.toLowerCase()) ||
+      map.get(raw.replace(/^0+/, '').toLowerCase()) ||
+      null
+    );
+  }
+
   // Helper to query consumer by name words
   async function findByName(name: string): Promise<Consumer[]> {
     if (!name) return [];
@@ -458,8 +523,12 @@ export async function matchConsumerWithDatabase(
         console.warn(`[OCR Cross-Check] Name mismatch on #${cleanNum}: Receipt says "${cleanName}", but DB #${cleanNum} is "${directConsumer.consumer_name}". Checking 8/6/0 variants...`);
         
         const variants = generateDotMatrix8Variants(cleanNum);
+        const [variantMap, nameMatches] = await Promise.all([
+          findManyByNumber(variants),
+          cleanName ? findByName(cleanName) : Promise.resolve([] as Consumer[]),
+        ]);
         for (const variant of variants) {
-          const varConsumer = await findByNumber(variant);
+          const varConsumer = pickFromMap(variantMap, variant);
           if (varConsumer && areNamesSimilar(cleanName, varConsumer.consumer_name)) {
             console.log(`[OCR Auto-Recovery] Corrected #${cleanNum} -> #${varConsumer.consumer_number} (${varConsumer.consumer_name}) matching receipt name!`);
             return {
@@ -478,7 +547,6 @@ export async function matchConsumerWithDatabase(
 
         // Also search by name directly in database
         if (cleanName) {
-          const nameMatches = await findByName(cleanName);
           const closeCandidate = nameMatches.find((cand) => {
             if (!cand.consumer_number || cand.consumer_number.length !== cleanNum.length) return false;
             let diff = 0;
@@ -518,13 +586,17 @@ export async function matchConsumerWithDatabase(
       }
     } else {
       // Direct number was NOT found in database!
-      // Check dot-matrix 8/6/0 variants:
+      // Check dot-matrix 8/6/0 variants (batched: one Dexie hit + one remote query)
       const variants = generateDotMatrix8Variants(cleanNum);
+      const [variantMap, nameMatches] = await Promise.all([
+        findManyByNumber(variants),
+        cleanName ? findByName(cleanName) : Promise.resolve([] as Consumer[]),
+      ]);
       for (const variant of variants) {
-        const varConsumer = await findByNumber(variant);
+        const varConsumer = pickFromMap(variantMap, variant);
         if (varConsumer) {
-          const nameMatches = cleanName ? areNamesSimilar(cleanName, varConsumer.consumer_name) : true;
-          if (nameMatches) {
+          const nameOkay = cleanName ? areNamesSimilar(cleanName, varConsumer.consumer_name) : true;
+          if (nameOkay) {
             console.log(`[OCR Auto-Recovery] Unmatched #${cleanNum} recovered to #${varConsumer.consumer_number} (${varConsumer.consumer_name})!`);
             return {
               consumer_id: varConsumer.id,
@@ -543,7 +615,6 @@ export async function matchConsumerWithDatabase(
 
       // Check name in database to recover 1-digit dot-matrix errors
       if (cleanName) {
-        const nameMatches = await findByName(cleanName);
         const closeCandidate = nameMatches.find((cand) => {
           if (!cand.consumer_number || cand.consumer_number.length !== cleanNum.length) return false;
           let diff = 0;
