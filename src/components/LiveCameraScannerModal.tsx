@@ -1203,7 +1203,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           <div
             ref={previewFrameRef}
             onClick={triggerFocus}
-            className="relative w-full h-[136px] sm:h-[160px] overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl cursor-pointer"
+            className="relative w-full h-[min(408px,52dvh)] sm:h-[min(480px,55dvh)] overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl cursor-pointer"
             title="Tap to focus"
           >
             <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
@@ -1217,7 +1217,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             {/* Crop guide: ONLY this rectangle is sent to Gemini. */}
             <div
               ref={guideBoxRef}
-              className={`absolute inset-x-3 top-2.5 bottom-2.5 border-2 rounded-xl pointer-events-none flex flex-col justify-center transition-all duration-300 z-10 ${
+              className={`absolute inset-x-3 top-1/2 -translate-y-1/2 h-[110px] sm:h-[130px] border-2 rounded-xl pointer-events-none flex flex-col justify-center transition-all duration-300 z-10 ${
                 isSuccessFlash
                   ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_40px_rgba(16,185,129,0.45)]'
                   : 'border-dashed border-amber-400/80 shadow-[0_0_24px_rgba(245,158,11,0.2)]'
