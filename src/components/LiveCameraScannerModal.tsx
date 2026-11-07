@@ -201,8 +201,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     };
   }, []);
 
-  // Set of all added consumer numbers to prevent re-adding
-  const scannedSetRef = useRef<Set<string>>(new Set(existingNumbers.map((n) => n.toLowerCase())));
+  // Set of all added consumer numbers to prevent re-adding.
+  // Keys are normalized the same way scanned numbers are (leading zeros, OCR
+  // letter/digit swaps), otherwise "0117231569" and "117231569" count as two
+  // different bills and the same memo gets added twice.
+  const scannedSetRef = useRef<Set<string>>(
+    new Set(existingNumbers.map((n) => cleanAndNormalizeDigits(n).toLowerCase()))
+  );
   
   // Cooldown map to avoid spamming the same bill
   const recentSeenCooldownRef = useRef<Map<string, number>>(new Map());
@@ -216,8 +221,27 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const existingNumbersKey = existingNumbers.join('|');
   useEffect(() => {
     const nums = existingNumbersKey ? existingNumbersKey.split('|') : [];
-    scannedSetRef.current = new Set(nums.map((num) => num.toLowerCase()));
+    scannedSetRef.current = new Set(
+      nums.map((num) => cleanAndNormalizeDigits(num).toLowerCase())
+    );
   }, [existingNumbersKey, agentId, agentName]);
+
+  // Add a bill to the session counter at most once. The counter drives both the
+  // "N Added" badge and the Done button, so a repeated add of the same memo must
+  // never inflate it above the number of unique bills in the delivery list.
+  const pushSessionAdded = (consumerNumber: string, consumerName: string) => {
+    const key = cleanAndNormalizeDigits(consumerNumber).toLowerCase();
+    setScannedSessionList((prev) =>
+      prev.some(
+        (item) => cleanAndNormalizeDigits(item.consumer_number).toLowerCase() === key
+      )
+        ? prev
+        : [
+            { consumer_number: consumerNumber, consumer_name: consumerName, timestamp: Date.now() },
+            ...prev,
+          ]
+    );
+  };
 
   // Reset per-session counters + cooldowns every time the scanner is opened.
   useEffect(() => {
@@ -360,6 +384,17 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
     const finalName = (overrideName || activeScanFailAlert?.consumer_name || '').trim() || `Customer #${cleanNum}`;
 
+    // Force Add must obey the same duplicate guard as a verified scan: the
+    // operator can hit it more than once for the same bill, and each tap used
+    // to add a second copy + inflate the "N Added" counter.
+    if (scannedSetRef.current.has(cleanNum.toLowerCase())) {
+      setAlreadyAddedNotice(`Consumer #${cleanNum} is already in delivery list!`);
+      setTimeout(() => setAlreadyAddedNotice(null), 2500);
+      setActiveScanFailAlert(null);
+      setStatusText(`#${cleanNum} already added — ready for next bill`);
+      return;
+    }
+
     // Mark as added in local scanned set
     scannedSetRef.current.add(cleanNum.toLowerCase());
 
@@ -388,10 +423,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setTimeout(() => setIsSuccessFlash(false), 400);
 
     setLastScanned(`${cleanNum} - ${finalName}`);
-    setScannedSessionList((prev) => [
-      { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
-      ...prev,
-    ]);
+    pushSessionAdded(cleanNum, finalName);
 
     // Add to audit log
     try {
@@ -560,18 +592,20 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     if (!silent) {
       const now = Date.now();
       const lastSeen =
-        recentSeenCooldownRef.current.get(resolvedNum.toLowerCase()) ||
+        recentSeenCooldownRef.current.get(cleanAndNormalizeDigits(resolvedNum).toLowerCase()) ||
         recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
       if (lastSeen && now - lastSeen < 5000) {
         return 'failed';
       }
-      recentSeenCooldownRef.current.set(resolvedNum.toLowerCase(), now);
+      recentSeenCooldownRef.current.set(cleanAndNormalizeDigits(resolvedNum).toLowerCase(), now);
       recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
     }
 
-    const resolvedAlready = scannedSetRef.current.has(resolvedNum.toLowerCase());
-    const rawAlready = scannedSetRef.current.has(cleanNum.toLowerCase());
-    const wasAutoCorrected = cleanNum.toLowerCase() !== resolvedNum.toLowerCase();
+    const resolvedKey = cleanAndNormalizeDigits(resolvedNum).toLowerCase();
+    const rawKey = cleanNum.toLowerCase();
+    const resolvedAlready = scannedSetRef.current.has(resolvedKey);
+    const rawAlready = scannedSetRef.current.has(rawKey);
+    const wasAutoCorrected = rawKey !== resolvedKey;
 
     if (resolvedAlready || rawAlready) {
       if (wasAutoCorrected && resolvedAlready) {
@@ -600,8 +634,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
 
     // INSTANT ADDITION TO UI FOR VERIFIED CONSUMER
-    scannedSetRef.current.add(resolvedNum.toLowerCase());
-    scannedSetRef.current.add(cleanNum.toLowerCase());
+    scannedSetRef.current.add(resolvedKey);
+    scannedSetRef.current.add(rawKey);
     setAlreadyAddedNotice(null);
 
     // ANTI-FRAUD / DOUBLE-BILL SCAM GUARD:
@@ -638,10 +672,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setTimeout(() => setIsSuccessFlash(false), 400);
 
     setLastScanned(`${resolvedNum} - ${finalName}`);
-    setScannedSessionList((prev) => [
-      { consumer_number: resolvedNum, consumer_name: finalName, timestamp: Date.now() },
-      ...prev,
-    ]);
+    pushSessionAdded(resolvedNum, finalName);
 
     // Persistent Write-Ahead Audit Log (Survives app switching, browser refresh & RAM clearing)
     try {
@@ -985,10 +1016,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const finalName = `Customer #${cleanNum}`;
 
       scannedSetRef.current.add(cleanNum.toLowerCase());
-      setScannedSessionList((prev) => [
-        { consumer_number: cleanNum, consumer_name: finalName, timestamp: Date.now() },
-        ...prev,
-      ]);
+      pushSessionAdded(cleanNum, finalName);
       onConsumerScanned({
         consumer_number: cleanNum,
         consumer_name: finalName,
