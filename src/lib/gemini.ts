@@ -397,6 +397,10 @@ export async function scanBillWithGemini(
     }
 
     if (!response) {
+      // Turn raw provider JSON into an actionable message for rotated/invalid keys.
+      if (/^(401|403)\b|API_KEY_INVALID|API key not valid|API key expired|PERMISSION_DENIED/i.test(lastError)) {
+        throw new Error('AI key rejected — update VITE_GEMINI_API_KEY and redeploy');
+      }
       throw new Error(`Gemini API error: ${lastError}`);
     }
 
