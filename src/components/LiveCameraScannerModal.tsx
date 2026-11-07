@@ -993,7 +993,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return;
     }
 
-    let outcome = await processMatchedConsumerNumber(cleanNum, undefined, { silent: true });
+    const outcome = await processMatchedConsumerNumber(cleanNum, undefined, { silent: true });
     if (outcome === 'failed') {
       if (DISTRIBUTOR_BLACKLIST.has(cleanNum) || cleanNum.length > 12) {
         toast.error(`Consumer #${cleanNum} cannot be added`);
@@ -1003,10 +1003,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       // Typed number is not in the database: add exactly what was typed.
       // Never substitute a similar number from the database.
       handleForceAdd(cleanNum);
-      outcome = 'added';
     }
-    if (outcome !== 'failed') {
-      // The bill is now in the list — retire its pending (failed) entry so the
+    // The bill is now in the list — retire its pending (failed) entry so the
       // Done guard and "Add All" do not add a second, mis-read copy of it.
       const editedNumber = editingFailedNumberRef.current;
       const editedDigits = editedNumber ? cleanAndNormalizeDigits(editedNumber) : '';
@@ -1021,8 +1019,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       if (outcome === 'duplicate') {
         toast(`#${cleanNum} is already in the list`, { icon: '⚠️' });
       }
-    } else {
-      toast.error(`Could not add Consumer #${cleanNum}`);
     }
     setIsProcessing(false);
   };
