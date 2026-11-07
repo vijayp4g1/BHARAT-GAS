@@ -1150,12 +1150,11 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       </div>
 
       {/* 0. COMPACT CAMERA VIEWFINDER + QUICK ACTIONS (scrollable body) */}
-      <main className="relative z-20 flex-1 min-h-0 overflow-y-auto px-3 pb-2">
-        <div className="mx-auto flex w-full max-w-lg flex-col gap-2">
+      <main className="relative z-20 flex flex-1 min-h-0 flex-col overflow-y-auto px-3 pb-2">
+        <div className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-2">
           <div
             onClick={triggerFocus}
-            className="relative w-full overflow-hidden rounded-3xl border border-white/15 bg-black shadow-2xl cursor-pointer"
-            style={{ height: 'clamp(190px, 36dvh, 330px)' }}
+            className="relative w-full flex-1 min-h-[190px] overflow-hidden rounded-3xl border border-white/15 bg-black shadow-2xl cursor-pointer"
             title="Tap to focus"
           >
             <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
