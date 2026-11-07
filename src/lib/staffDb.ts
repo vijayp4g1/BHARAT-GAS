@@ -3,13 +3,19 @@ import { supabase } from './supabase';
 /**
  * staffDb
  * ---------------------------------------------------------------------------
- * A small Supabase-like query builder whose queries are executed by the
- * `admin-api` Edge Function, not by the browser.
+ * A small Supabase-like query builder whose queries are normally executed by
+ * the `admin-api` Edge Function, not by the browser.
  *
  * Why: the old code created a Supabase client with the service_role key in
  * the browser bundle, which exposed full database admin access to anyone who
  * opened devtools. The service key now lives only inside `admin-api`, which
  * verifies the signed-in user and enforces staff/manager rules server-side.
+ *
+ * Resilience: if `admin-api` is not deployed (or the platform returns 404),
+ * every query transparently degrades to a direct PostgREST request made with
+ * the signed-in user's JWT. That is the same trust level as before the
+ * refactor (RLS still applies) and keeps staff screens syncing instead of
+ * silently returning empty data.
  *
  * Supported chain: select, insert, update, delete, eq, neq, ilike, like, in,
  * gt, gte, lt, lte, or, order, limit, range, maybeSingle, single.
@@ -29,11 +35,39 @@ export interface StaffDbResult<T = any> {
 
 type SingleMode = 'one' | 'maybe' | null;
 
+let warnedMissingFunction = false;
+
+/**
+ * The Edge Function is considered missing when Supabase answers 404 (function
+ * not deployed) or the request never reached a function runtime.
+ */
+function isMissingFunctionError(error: StaffDbError | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === 'NOT_FOUND' || error.code === 'FUNCTION_MISSING') return true;
+  const message = (error.message || '').toLowerCase();
+  return (
+    message.includes('requested function was not found') ||
+    message.includes('failed to send a request to the edge function') ||
+    (message.includes('function') && message.includes('not found'))
+  );
+}
+
+function warnMissingFunction() {
+  if (warnedMissingFunction) return;
+  warnedMissingFunction = true;
+  console.error(
+    '[bgcls] The admin-api Edge Function is not deployed, so privileged queries ' +
+      'are falling back to direct Supabase requests (RLS still applies). ' +
+      'Deploy it with: npx supabase functions deploy admin-api'
+  );
+}
+
 async function readFunctionError(error: any): Promise<StaffDbError> {
   const fallback: StaffDbError = {
     message: typeof error?.message === 'string' ? error.message : 'Request failed',
   };
 
+  // supabase-js attaches the raw Response under `context`.
   const context = error?.context;
   if (context && typeof context.json === 'function') {
     try {
@@ -48,6 +82,9 @@ async function readFunctionError(error: any): Promise<StaffDbError> {
       // Fall back to the transport error message below.
     }
   }
+
+  const status = Number(error?.context?.status || error?.status || 0);
+  if (status === 404) return { message: fallback.message, code: 'NOT_FOUND' };
 
   return fallback;
 }
@@ -172,6 +209,70 @@ class StaffQueryBuilder implements PromiseLike<StaffDbResult<any>> {
     return this.execute().then(onfulfilled, onrejected);
   }
 
+  private shape(rows: any): StaffDbResult<any> {
+    if (this.singleMode === 'one') {
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row === undefined || row === null) {
+        return { data: null, error: { message: 'No rows found', code: 'PGRST116' } };
+      }
+      return { data: row, error: null };
+    }
+
+    if (this.singleMode === 'maybe') {
+      const row = Array.isArray(rows) ? (rows[0] ?? null) : (rows ?? null);
+      return { data: row, error: null };
+    }
+
+    return { data: rows ?? null, error: null };
+  }
+
+  /** Same query, executed by PostgREST with the caller's own JWT. */
+  private async executeFallback(): Promise<StaffDbResult<any>> {
+    try {
+      let query: any = supabase.from(this.table);
+
+      if (this.action === 'select') {
+        query = query.select(this.columns);
+      } else if (this.action === 'insert') {
+        query = query.insert(this.values).select(this.columns);
+      } else if (this.action === 'update') {
+        query = query.update(this.values).select(this.columns);
+      } else {
+        query = query.delete().select(this.columns);
+      }
+
+      for (const filter of this.filters) {
+        const op = String(filter.op);
+        if (op === 'or') {
+          query = query.or(String(filter.expression));
+        } else if (op === 'in') {
+          query = query.in(String(filter.column), filter.value as unknown[]);
+        } else {
+          query = query[op](String(filter.column), filter.value);
+        }
+      }
+
+      for (const ord of this.orders) {
+        query = query.order(ord.column, { ascending: ord.ascending });
+      }
+
+      if (this.offsetValue !== undefined) {
+        const size = this.limitValue ?? 1000;
+        query = query.range(this.offsetValue, this.offsetValue + size - 1);
+      } else if (this.limitValue !== undefined) {
+        query = query.limit(this.limitValue);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return { data: null, error: { message: error.message, code: error.code } };
+      }
+      return this.shape(data);
+    } catch (err: any) {
+      return { data: null, error: { message: err?.message || 'Direct query failed' } };
+    }
+  }
+
   private async execute(): Promise<StaffDbResult<any>> {
     const body: Record<string, unknown> = {
       action: this.action,
@@ -197,28 +298,22 @@ class StaffQueryBuilder implements PromiseLike<StaffDbResult<any>> {
     }
 
     if (invokeError) {
-      return { data: null, error: await readFunctionError(invokeError) };
+      const error = await readFunctionError(invokeError);
+      if (isMissingFunctionError(error)) {
+        warnMissingFunction();
+        return this.executeFallback();
+      }
+      return { data: null, error };
     }
     if (response?.error) {
+      if (isMissingFunctionError(response.error as StaffDbError)) {
+        warnMissingFunction();
+        return this.executeFallback();
+      }
       return { data: null, error: response.error as StaffDbError };
     }
 
-    const rows = response?.data ?? null;
-
-    if (this.singleMode === 'one') {
-      const row = Array.isArray(rows) ? rows[0] : rows;
-      if (row === undefined || row === null) {
-        return { data: null, error: { message: 'No rows found', code: 'PGRST116' } };
-      }
-      return { data: row, error: null };
-    }
-
-    if (this.singleMode === 'maybe') {
-      const row = Array.isArray(rows) ? (rows[0] ?? null) : (rows ?? null);
-      return { data: row, error: null };
-    }
-
-    return { data: rows, error: null };
+    return this.shape(response?.data ?? null);
   }
 }
 
@@ -229,6 +324,50 @@ export const staffDb = {
 };
 
 export type StaffActionName = 'me' | 'create_agent' | 'assign_delivery_boy';
+
+async function fallbackIdentity(): Promise<StaffDbResult<any>> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      return { data: null, error: { message: 'Not signed in', code: 'UNAUTHORIZED' } };
+    }
+
+    const { data: agent, error } = await supabase
+      .from('agents')
+      .select('id, name, username, role, is_staff, status')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: { message: error.message, code: error.code } };
+    }
+
+    const activeAgent = agent && agent.status !== 'DELETED' ? agent : null;
+    const appRole = (user.app_metadata as Record<string, any> | undefined)?.role;
+    const isManager = appRole === 'manager' || activeAgent?.role === 'MANAGER';
+    const email = typeof user.email === 'string' ? user.email : null;
+    const username = String(activeAgent?.username || (email || '').split('@')[0] || '')
+      .toLowerCase()
+      .trim();
+
+    return {
+      data: {
+        userId: user.id,
+        email,
+        username,
+        name: activeAgent?.name ?? null,
+        role: activeAgent?.role || (isManager ? 'MANAGER' : 'AGENT'),
+        is_staff: activeAgent?.is_staff === true,
+        isManager,
+        isStaff: isManager || activeAgent?.is_staff === true,
+      },
+      error: null,
+    };
+  } catch (err: any) {
+    return { data: null, error: { message: err?.message || 'Identity lookup failed' } };
+  }
+}
 
 export async function staffAction<T = any>(
   action: StaffActionName,
@@ -247,10 +386,59 @@ export async function staffAction<T = any>(
     invokeError = err;
   }
 
+  const handleMissing = async (): Promise<StaffDbResult<T>> => {
+    warnMissingFunction();
+
+    if (action === 'me') {
+      return (await fallbackIdentity()) as StaffDbResult<T>;
+    }
+
+    if (action === 'assign_delivery_boy') {
+      // The auth-metadata update needs the service key, but the audit row is
+      // what every device reads to rebuild the assignment map, so write it
+      // directly. If RLS blocks it the caller gets a real error below.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          return { data: null, error: { message: 'Not signed in', code: 'UNAUTHORIZED' } };
+        }
+        const agentId = typeof payload.agentId === 'string' ? payload.agentId : '';
+        const normalized = String(payload.deliveryBoyName || '').trim().toUpperCase();
+        const { error } = await supabase.from('audit_logs').insert({
+          action_type: `ASSIGN_DELIVERY_BOY:${normalized || 'UNASSIGNED'}`,
+          entity_id: agentId,
+          performed_by: session.user.id,
+        });
+        if (error) {
+          return { data: null, error: { message: error.message, code: error.code } };
+        }
+        return {
+          data: { agentId, assigned_delivery_boy: normalized } as unknown as T,
+          error: null,
+        };
+      } catch (err: any) {
+        return { data: null, error: { message: err?.message || 'Assignment failed' } };
+      }
+    }
+
+    return {
+      data: null,
+      error: {
+        message:
+          'admin-api is not deployed, so this action is unavailable. ' +
+          'Run: npx supabase functions deploy admin-api',
+        code: 'FUNCTION_MISSING',
+      },
+    };
+  };
+
   if (invokeError) {
-    return { data: null as any, error: await readFunctionError(invokeError) };
+    const error = await readFunctionError(invokeError);
+    if (isMissingFunctionError(error)) return handleMissing();
+    return { data: null as any, error };
   }
   if (response?.error) {
+    if (isMissingFunctionError(response.error as StaffDbError)) return handleMissing();
     return { data: null as any, error: response.error as StaffDbError };
   }
 

@@ -1070,6 +1070,23 @@ export const StaffDayEndSummary: React.FC = () => {
     };
   }, [supervisorPhone]);
 
+  // When the tab comes back to the foreground, pull anything another staff
+  // device saved while this screen was backgrounded (Realtime sockets are
+  // often suspended by mobile browsers, so this is the reliable path).
+  useEffect(() => {
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadRosterData(reportDateRef.current, true);
+      const boy = selectedBoyRef.current;
+      if (boy && !hasUnsavedChangesRef.current) {
+        loadBillsForSelectedBoy(boy, reportDateRef.current);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => document.removeEventListener('visibilitychange', handleVisible);
+  }, [loadRosterData, loadBillsForSelectedBoy]);
+
   // Synchronous write-ahead to localStorage on ANY change to entries
   useEffect(() => {
     if (!selectedBoy) return;

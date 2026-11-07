@@ -871,6 +871,59 @@ export const OldAgentDayEnd: React.FC = () => {
     const mySessionId = sessionClientIdRef.current;
     let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const pullCloudBills = async () => {
+      try {
+        const currentId = agentIdRef.current !== 'agent_default' ? agentIdRef.current : undefined;
+        const cloudReport = await fetchDayEndReportForAgent(
+          reportDateRef.current,
+          agentNameRef.current,
+          currentId
+        );
+        if (!cloudReport || !Array.isArray(cloudReport.entries) || cloudReport.entries.length === 0) return;
+
+        const cloudEntries: ItemEntry[] = cloudReport.entries.map((e: any) => ({
+          consumer_id: e.consumer_id,
+          consumer_number: String(e.consumer_number || ''),
+          consumer_name: String(e.consumer_name || 'Consumer Record'),
+          address: e.address,
+          mobile: e.mobile,
+          found: e.found !== undefined ? Boolean(e.found) : true,
+          source: e.source || 'remote',
+          cylinder_type: e.cylinder_type || '14.2KG_STD',
+          payment_mode: e.payment_mode || 'CASH',
+          empty_collected: e.empty_collected !== undefined ? Boolean(e.empty_collected) : true,
+          dispatch_item_id: e.dispatch_item_id,
+          scanned_at: e.scanned_at,
+        }));
+
+        setEntries((prev) => {
+          const localKeys = new Set(prev.map((e) => e.consumer_number.trim().toLowerCase()));
+          const hasNewBills = cloudEntries.some((e) => !localKeys.has(e.consumer_number.trim().toLowerCase()));
+
+          // Don't disturb in-progress edits unless the cloud actually has new bills
+          if (!hasNewBills && hasUnsavedChangesRef.current) return prev;
+
+          const mergedMap = new Map<string, ItemEntry>();
+          cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+          prev.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
+          return Array.from(mergedMap.values());
+        });
+
+        if (cloudReport.updated_at) {
+          setLastSavedTime(
+            new Date(cloudReport.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          );
+        }
+      } catch (err) {
+        console.warn('Realtime bill sync notice:', err);
+      }
+    };
+
+    const schedulePull = (delayMs: number) => {
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      syncDebounceTimer = setTimeout(() => { void pullCloudBills(); }, delayMs);
+    };
+
     const channel = supabase.channel('bgcls_cash_memo_live_sync');
     channel.on('broadcast', { event: 'cash_memos_updated' }, (payload) => {
       const data = payload?.payload;
@@ -880,59 +933,20 @@ export const OldAgentDayEnd: React.FC = () => {
       const currentName = (agentNameRef.current || '').trim().toUpperCase();
       if (data.agent_name && String(data.agent_name).trim().toUpperCase() !== currentName) return;
 
-      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
-      syncDebounceTimer = setTimeout(async () => {
-        try {
-          const currentId = agentIdRef.current !== 'agent_default' ? agentIdRef.current : undefined;
-          const cloudReport = await fetchDayEndReportForAgent(
-            reportDateRef.current,
-            agentNameRef.current,
-            currentId
-          );
-          if (!cloudReport || !Array.isArray(cloudReport.entries) || cloudReport.entries.length === 0) return;
-
-          const cloudEntries: ItemEntry[] = cloudReport.entries.map((e: any) => ({
-            consumer_id: e.consumer_id,
-            consumer_number: String(e.consumer_number || ''),
-            consumer_name: String(e.consumer_name || 'Consumer Record'),
-            address: e.address,
-            mobile: e.mobile,
-            found: e.found !== undefined ? Boolean(e.found) : true,
-            source: e.source || 'remote',
-            cylinder_type: e.cylinder_type || '14.2KG_STD',
-            payment_mode: e.payment_mode || 'CASH',
-            empty_collected: e.empty_collected !== undefined ? Boolean(e.empty_collected) : true,
-            dispatch_item_id: e.dispatch_item_id,
-            scanned_at: e.scanned_at,
-          }));
-
-          setEntries((prev) => {
-            const localKeys = new Set(prev.map((e) => e.consumer_number.trim().toLowerCase()));
-            const hasNewBills = cloudEntries.some((e) => !localKeys.has(e.consumer_number.trim().toLowerCase()));
-
-            // Don't disturb in-progress edits unless the cloud actually has new bills
-            if (!hasNewBills && hasUnsavedChangesRef.current) return prev;
-
-            const mergedMap = new Map<string, ItemEntry>();
-            cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
-            prev.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
-            return Array.from(mergedMap.values());
-          });
-
-          if (cloudReport.updated_at) {
-            setLastSavedTime(
-              new Date(cloudReport.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            );
-          }
-        } catch (err) {
-          console.warn('Realtime bill sync notice:', err);
-        }
-      }, 800);
+      schedulePull(800);
     });
     channel.subscribe();
 
+    // Mobile browsers suspend Realtime sockets in the background, so refresh
+    // the moment the screen becomes visible again.
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') schedulePull(100);
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+
     return () => {
       if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+      document.removeEventListener('visibilitychange', handleVisible);
       supabase.removeChannel(channel);
     };
   }, []);

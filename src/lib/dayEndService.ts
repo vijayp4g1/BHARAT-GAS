@@ -3,6 +3,45 @@ import { staffDb } from './staffDb';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
+const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
+
+/**
+ * A single, long-lived broadcast channel owned by this module.
+ *
+ * Realtime `send()` is only delivered on a channel that has finished joining.
+ * The previous code created a brand-new channel and immediately called
+ * `send()` on it, so the broadcast was dropped and other staff devices only
+ * refreshed when the user manually reloaded. Subscribing once here keeps the
+ * socket joined, which makes cross-device updates actually arrive.
+ */
+let liveSyncChannel: ReturnType<typeof supabase.channel> | null = null;
+let liveSyncJoined = false;
+
+function getLiveSyncChannel() {
+  if (!liveSyncChannel) {
+    liveSyncChannel = supabase.channel(LIVE_SYNC_TOPIC);
+    liveSyncChannel.subscribe((status: string) => {
+      liveSyncJoined = status === 'SUBSCRIBED';
+    });
+  }
+  return liveSyncChannel;
+}
+
+/** Wait briefly for the socket to join, then broadcast. Failures are non-fatal. */
+async function broadcastCashMemosUpdated(payload: Record<string, unknown>): Promise<void> {
+  try {
+    const channel = getLiveSyncChannel();
+    if (!liveSyncJoined) {
+      for (let i = 0; i < 10 && !liveSyncJoined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    await channel.send({ type: 'broadcast', event: 'cash_memos_updated', payload });
+  } catch (_) {
+    // Realtime is an optimisation; the database write has already succeeded.
+  }
+}
+
 export interface DayEndEntry {
   consumer_id?: string;
   consumer_number: string;
@@ -648,22 +687,16 @@ export async function saveDayEndReportToDatabase(payload: {
     } catch (_) {}
   }
 
-  // 6. Broadcast live WebSocket event to all other open staff screens
-  try {
-    const channel = supabase.channel('bgcls_cash_memo_live_sync');
-    channel.send({
-      type: 'broadcast',
-      event: 'cash_memos_updated',
-      payload: {
-        report_date: payload.report_date,
-        agent_name: payload.agent_name,
-        agent_id: payload.agent_id,
-        total_deliveries: summary.total,
-        sender_session_id: payload.sender_session_id,
-        updated_at: nowIso,
-      },
-    });
-  } catch (_) {}
+  // 6. Broadcast live WebSocket event to all other open staff screens.
+  // Do not block the save on the socket round-trip.
+  void broadcastCashMemosUpdated({
+    report_date: payload.report_date,
+    agent_name: payload.agent_name,
+    agent_id: payload.agent_id,
+    total_deliveries: summary.total,
+    sender_session_id: payload.sender_session_id,
+    updated_at: nowIso,
+  });
 
   // Local window dispatch
   window.dispatchEvent(
