@@ -563,7 +563,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const isMismatch = match.name_verified === false && Boolean(match.consumer_name);
       const failReason = isMismatch
         ? `Receipt has "${extractedName || 'Unknown'}", but Agency Database has "${match.consumer_name}".`
-        : `Consumer #${cleanNum} is NOT found in agency database.`;
+        : `Consumer number #${cleanNum} not found in data.`;
 
       if (!silent) {
         playWarningAlarm();
@@ -864,41 +864,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           return;
         }
 
-        // Not verified — try ONE high-contrast re-read of the same frame.
-        let reportNumber = first.consumerNumber;
-        let reportName = first.consumerName;
-        setStatusText('Re-reading faint print (enhanced)...');
-        toast.loading('Re-reading faint print...', { id: 'scan-snap' });
-        const enhanced = await enhanceImageForOcr(imageInput);
-        if (enhanced) {
-          const retry = await scanBillWithGemini(enhanced);
-          if (retry.found && retry.consumerNumber) {
-            const retryOutcome = await processMatchedConsumerNumber(
-              retry.consumerNumber,
-              retry.consumerName,
-              { silent: true }
-            );
-            if (retryOutcome === 'added') {
-              toast.success(
-                `✨ Recovered: #${retry.consumerNumber} (${retry.consumerName})`,
-                { id: 'scan-snap' }
-              );
-              setStatusText(`Recovered #${retry.consumerNumber}! Ready for next bill`);
-              return;
-            }
-            if (retryOutcome === 'duplicate') {
-              toast(`#${retry.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
-              setStatusText(`#${retry.consumerNumber} already added — ready for next bill`);
-              return;
-            }
-            // Surface the enhanced reading (usually the more reliable one).
-            reportNumber = retry.consumerNumber;
-            reportName = retry.consumerName;
-          }
-        }
-
-        // Still unverified → now show the actionable popup / record the bill.
-        await processMatchedConsumerNumber(reportNumber, reportName);
+        // Not in the database: show exactly the number that was read. No
+        // look-alike substitutes (8/6/0 or one-digit) and no second guess from
+        // a re-read, so a different consumer is never added for this bill.
+        await processMatchedConsumerNumber(first.consumerNumber, first.consumerName);
         return;
       }
 
@@ -1395,7 +1364,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                     {activeScanFailAlert.type === 'NAME_MISMATCH'
                       ? '⚠️ Name Mismatch!'
                       : activeScanFailAlert.type === 'NOT_FOUND'
-                      ? '❌ Not In Database!'
+                      ? '❌ Not Found In Data!'
                       : activeScanFailAlert.type === 'NOT_DETECTED'
                       ? '🔍 Cons No Not Detected!'
                       : '⚠️ Bill Not Added!'}

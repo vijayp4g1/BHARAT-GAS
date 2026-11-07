@@ -1648,7 +1648,7 @@ export const StaffDayEndSummary: React.FC = () => {
     setHasUnsavedChanges(true);
     setSingleInput('');
     setShowSuggestions(false);
-    toast(`Added #${cleanInput} as unverified entry`, { icon: 'ℹ️' });
+    toast(`Consumer number #${cleanInput} not found in data. Added as typed.`, { icon: 'ℹ️' });
   };
 
   // 11. Bulk Process Numbers
