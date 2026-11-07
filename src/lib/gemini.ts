@@ -48,9 +48,10 @@ export function getScanModelCandidates(): string[] {
 }
 
 function getGeminiApiKey(): string | null {
+  // Only VITE_-prefixed variables are inlined by Vite. A plain GEMINI_API_KEY
+  // in Vercel is never visible to this code, so don't pretend to read it.
   return (
     (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) ||
-    (import.meta.env.GEMINI_API_KEY as string | undefined) ||
     localStorage.getItem('VITE_GEMINI_API_KEY') ||
     localStorage.getItem('GEMINI_API_KEY') ||
     null
