@@ -20,14 +20,12 @@ import {
   Pencil,
   Edit2,
   Layers,
-  ListFilter,
-  ListChecks
+  ListFilter
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
   deleteBpclBill, 
   clearPendingBillAndMarkDelivered,
-  clearPendingBillsBulk,
   addBpclBillManually, 
   updateBpclBill,
   type BpclBillItem, 
@@ -52,9 +50,6 @@ interface BpclBillsViewProps {
   onConvertAllOnlineConflicts?: () => void;
 }
 
-const normalizeConsNo = (value: string | undefined | null): string =>
-  String(value || '').trim().toLowerCase();
-
 export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   report,
   agentName,
@@ -72,12 +67,6 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ONLINE'>('PENDING');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
-  // Bulk clear (Pending tab only): select several bills and remove them in one save.
-  const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
-  const [selectedNumbers, setSelectedNumbers] = useState<Set<string>>(new Set());
-  const [bulkConfirmMode, setBulkConfirmMode] = useState<'SELECTED' | 'KEEP_SELECTED' | 'ALL' | null>(null);
-  const [isBulkClearing, setIsBulkClearing] = useState<boolean>(false);
 
   // Manual Add Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
@@ -193,95 +182,6 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
       (b.order_no && b.order_no.toLowerCase().includes(q))
     );
   });
-
-  // ---- Bulk clear state (Pending tab only) ----
-  const pendingFiltered = activeTab === 'PENDING' ? filteredBills : [];
-  const selectedPendingBills = pendingBills.filter((b) =>
-    selectedNumbers.has(normalizeConsNo(b.consumer_number))
-  );
-  const selectedCount = selectedPendingBills.length;
-  const scannedPendingVisible = pendingFiltered.filter((b) =>
-    scannedAnySet.has(normalizeConsNo(b.consumer_number))
-  );
-  const keepOnlyCount = Math.max(0, pendingBills.length - selectedCount);
-  const bulkPreview =
-    bulkConfirmMode === 'ALL'
-      ? pendingBills
-      : bulkConfirmMode === 'KEEP_SELECTED'
-        ? pendingBills.filter((b) => !selectedNumbers.has(normalizeConsNo(b.consumer_number)))
-        : selectedPendingBills;
-
-  // Selection only makes sense for one Pending list of one date/boy.
-  useEffect(() => {
-    setIsSelectMode(false);
-    setSelectedNumbers(new Set());
-    setBulkConfirmMode(null);
-  }, [activeTab, reportDate, agentName]);
-
-  // Drop selected numbers that another device already removed.
-  useEffect(() => {
-    setSelectedNumbers((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(
-        (report?.pending_bills || []).map((b) => normalizeConsNo(b.consumer_number))
-      );
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((num) => {
-        if (live.has(num)) next.add(num);
-        else changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [report?.pending_bills]);
-
-  const toggleBillSelected = (consumerNo: string) => {
-    const key = normalizeConsNo(consumerNo);
-    setSelectedNumbers((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const handleSelectAllVisible = () => {
-    setSelectedNumbers(new Set(pendingFiltered.map((b) => normalizeConsNo(b.consumer_number))));
-  };
-
-  const handleSelectScanned = () => {
-    setSelectedNumbers(new Set(scannedPendingVisible.map((b) => normalizeConsNo(b.consumer_number))));
-  };
-
-  const handleClearSelection = () => setSelectedNumbers(new Set());
-
-  const handleConfirmBulkClear = async () => {
-    if (!bulkConfirmMode || bulkPreview.length === 0) return;
-    setIsBulkClearing(true);
-    try {
-      const { report: updated, cleared } = await clearPendingBillsBulk({
-        dateStr: reportDate,
-        agentName,
-        agentId: report?.agent_id,
-        consumerNumbers: bulkPreview.map((b) => b.consumer_number),
-      });
-      if (onReportUpdated) onReportUpdated(updated);
-      setSelectedNumbers(new Set());
-      setIsSelectMode(false);
-      setBulkConfirmMode(null);
-      if (cleared.length === 0) {
-        toast('Those bills are no longer in the pending list', { icon: 'ℹ️' });
-      } else {
-        toast.success(
-          `Cleared ${cleared.length} pending bill${cleared.length === 1 ? '' : 's'} — online bills were not changed`
-        );
-      }
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to clear pending bills');
-    } finally {
-      setIsBulkClearing(false);
-    }
-  };
 
   const handleCopySingle = (consNo: string) => {
     navigator.clipboard.writeText(consNo);
@@ -739,94 +639,6 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
             </div>
           )}
 
-          {/* Bulk clear pending bills: remove from Pending only, online list untouched */}
-          {activeTab === 'PENDING' && pendingBills.length > 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-2 space-y-2">
-              {!isSelectMode ? (
-                <button
-                  type="button"
-                  onClick={() => setIsSelectMode(true)}
-                  className="w-full py-1.5 px-2.5 rounded-xl bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <ListChecks className="w-3.5 h-3.5" />
-                  <span>Select bills to clear</span>
-                </button>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={handleSelectAllVisible}
-                        disabled={pendingFiltered.length === 0}
-                        className="px-2 py-1 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 text-[10px] font-bold disabled:opacity-40 transition-colors"
-                      >
-                        Select all ({pendingFiltered.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSelectScanned}
-                        disabled={scannedPendingVisible.length === 0}
-                        className="px-2 py-1 rounded-lg bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-bold disabled:opacity-40 transition-colors"
-                        title="Select pending bills already present in Completed Deliveries"
-                      >
-                        Select scanned ({scannedPendingVisible.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleClearSelection}
-                        disabled={selectedCount === 0}
-                        className="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-[10px] font-bold disabled:opacity-40 transition-colors"
-                      >
-                        Clear selection
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsSelectMode(false);
-                        setSelectedNumbers(new Set());
-                      }}
-                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-black transition-colors"
-                    >
-                      Done
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-amber-200">
-                    <span className="text-[10px] font-black text-amber-900 mr-auto">
-                      {selectedCount} selected
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setBulkConfirmMode('SELECTED')}
-                      disabled={selectedCount === 0}
-                      className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black disabled:opacity-40 transition-colors"
-                    >
-                      Clear selected ({selectedCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBulkConfirmMode('KEEP_SELECTED')}
-                      disabled={selectedCount === 0 || keepOnlyCount === 0}
-                      className="px-2 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black disabled:opacity-40 transition-colors"
-                      title="Remove every pending bill except the selected ones"
-                    >
-                      Keep only selected (clear {keepOnlyCount})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBulkConfirmMode('ALL')}
-                      className="px-2 py-1 rounded-lg bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 text-[10px] font-black transition-colors"
-                    >
-                      Clear all ({pendingBills.length})
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
           {/* Online Bills Scanned as CASH Conflict Banner */}
           {activeTab === 'ONLINE' && onlineCashConflicts.length > 0 && (
             <div className="mb-2.5 p-2.5 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-600 text-white rounded-2xl flex items-center justify-between gap-2 shadow-sm border border-rose-300">
@@ -900,27 +712,10 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   activeTab === 'PENDING'
                     ? 'bg-amber-50/50 border-amber-200 hover:bg-amber-50'
                     : 'bg-indigo-50/50 border-indigo-200 hover:bg-indigo-50'
-                } ${
-                  activeTab === 'PENDING' && isSelectMode && selectedNumbers.has(cleanConsNo)
-                    ? 'ring-2 ring-amber-500 border-amber-400 bg-amber-100/70'
-                    : ''
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    {activeTab === 'PENDING' && isSelectMode && (
-                      <label className="flex items-center gap-1.5 mb-1 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={selectedNumbers.has(cleanConsNo)}
-                          onChange={() => toggleBillSelected(bill.consumer_number)}
-                          className="w-4 h-4 accent-amber-600 rounded"
-                        />
-                        <span className="text-[10px] font-black text-amber-900">
-                          {selectedNumbers.has(cleanConsNo) ? 'Selected' : 'Select'}
-                        </span>
-                      </label>
-                    )}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-mono font-black text-slate-900 text-xs">
                         #{bill.consumer_number}
@@ -1009,7 +804,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
                   </div>
 
                   {/* Actions Bar for Individual Bill */}
-                  <div className={`flex items-center gap-1.5 shrink-0 ${activeTab === 'PENDING' && isSelectMode ? 'hidden' : ''}`}>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {/* Action for Pending: 1-Click Delivered & Clear */}
                     {activeTab === 'PENDING' && (
                       <button
@@ -1051,89 +846,6 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
       </div>
     </div>
   )}
-
-      {/* ========================================================================= */}
-      {/* BULK CLEAR PENDING CONFIRMATION                                          */}
-      {/* ========================================================================= */}
-      {bulkConfirmMode && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[120] flex items-center justify-center p-3 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden text-slate-100">
-            <div className="p-4 border-b border-slate-800 bg-slate-950/90 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
-                <Trash2 className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight">
-                  {bulkConfirmMode === 'ALL'
-                    ? 'Clear all pending bills?'
-                    : bulkConfirmMode === 'KEEP_SELECTED'
-                      ? 'Keep only selected bills?'
-                      : 'Clear selected pending bills?'}
-                </h3>
-                <p className="text-[10px] text-slate-400">{agentName} • {reportDate}</p>
-              </div>
-            </div>
-
-            <div className="p-4 space-y-3">
-              <p className="text-xs text-slate-300">
-                <b className="text-white">{bulkPreview.length}</b>{' '}
-                pending bill{bulkPreview.length === 1 ? '' : 's'} will be removed from this list.
-                {bulkConfirmMode === 'KEEP_SELECTED' && (
-                  <>
-                    {' '}The <b className="text-white">{selectedCount}</b> selected bill
-                    {selectedCount === 1 ? '' : 's'} will stay.
-                  </>
-                )}
-              </p>
-
-              <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60 divide-y divide-slate-800">
-                {bulkPreview.slice(0, 8).map((bill, index) => (
-                  <div
-                    key={`${bill.consumer_number}-${index}`}
-                    className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px]"
-                  >
-                    <span className="font-mono font-bold text-slate-200">#{bill.consumer_number}</span>
-                    <span className="text-slate-400 truncate">{bill.consumer_name || 'Consumer'}</span>
-                  </div>
-                ))}
-                {bulkPreview.length > 8 && (
-                  <div className="px-3 py-1.5 text-[11px] text-slate-500 font-bold">
-                    + {bulkPreview.length - 8} more
-                  </div>
-                )}
-              </div>
-
-              <p className="text-[11px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5">
-                Online bills are not changed. Completed deliveries and day-end counts are not affected.
-              </p>
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setBulkConfirmMode(null)}
-                  disabled={isBulkClearing}
-                  className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmBulkClear}
-                  disabled={isBulkClearing || bulkPreview.length === 0}
-                  className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                >
-                  {isBulkClearing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  <span>{isBulkClearing ? 'Clearing...' : `Clear ${bulkPreview.length}`}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ========================================================================= */}
       {/* ADD BILL MODAL (1-CLICK PICK FROM TODAY'S DELIVERIES OR SEARCH 33K DB)    */}

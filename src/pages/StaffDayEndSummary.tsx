@@ -35,7 +35,8 @@ import {
   Globe,
   Printer,
   Archive,
-  Ban
+  Ban,
+  ListChecks
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -70,6 +71,7 @@ import { BpclReportModal } from '../components/BpclReportModal';
 import { BpclBillsView } from '../components/BpclBillsView';
 import { ExportOnlineBillsModal } from '../components/ExportOnlineBillsModal';
 import { ExportPendingBillsModal } from '../components/ExportPendingBillsModal';
+import { PendingClearAllModal } from '../components/PendingClearAllModal';
 
 export type ItemEntry = DayEndEntry;
 
@@ -139,6 +141,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
   // BPCL AI Status Report & "Bills Checked Done" state
   const [bpclReportsMap, setBpclReportsMap] = useState<Record<string, BpclReportData>>({});
+  const [isPendingClearOpen, setIsPendingClearOpen] = useState<boolean>(false);
   const [activeBpclReport, setActiveBpclReport] = useState<BpclReportData | null>(null);
   const [isBpclModalOpen, setIsBpclModalOpen] = useState<boolean>(false);
   const [isExportOnlineModalOpen, setIsExportOnlineModalOpen] = useState<boolean>(false);
@@ -2323,13 +2326,22 @@ export const StaffDayEndSummary: React.FC = () => {
             </div>
 
             {/* Mobile Date Picker */}
-            <div className="sm:hidden shrink-0">
+            <div className="sm:hidden shrink-0 flex items-center gap-1.5">
               <input
                 type="date"
                 value={reportDate}
                 onChange={(e) => handleDateChange(e.target.value)}
                 className="bg-white/10 border border-white/20 rounded-xl px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-bold"
               />
+              <button
+                type="button"
+                onClick={() => setIsPendingClearOpen(true)}
+                title="Select and clear pending bills for every delivery boy"
+                className="bg-amber-400/90 hover:bg-amber-300 text-slate-950 px-2 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 active:scale-95 transition-all"
+              >
+                <ListChecks className="w-3.5 h-3.5" />
+                <span>Pending ({totalRosterPendingCount})</span>
+              </button>
             </div>
           </div>
 
@@ -2341,6 +2353,15 @@ export const StaffDayEndSummary: React.FC = () => {
               onChange={(e) => handleDateChange(e.target.value)}
               className="bg-white/10 border border-white/20 rounded-xl px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-bold"
             />
+            <button
+              type="button"
+              onClick={() => setIsPendingClearOpen(true)}
+              title="Select and clear pending bills for every delivery boy"
+              className="bg-amber-400/90 hover:bg-amber-300 text-slate-950 px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1 active:scale-95 transition-all"
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              <span>Clear Pending ({totalRosterPendingCount})</span>
+            </button>
           </div>
         </div>
 
@@ -3509,6 +3530,20 @@ export const StaffDayEndSummary: React.FC = () => {
           reportDate={reportDate}
           deliveryBoys={deliveryBoys}
           bpclReportsMap={bpclReportsMap}
+        />
+      )}
+
+      {/* Clear pending bills for all delivery boys (select, then clear) */}
+      {isPendingClearOpen && (
+        <PendingClearAllModal
+          isOpen={isPendingClearOpen}
+          onClose={() => setIsPendingClearOpen(false)}
+          reportDate={reportDate}
+          bpclReportsMap={bpclReportsMap}
+          rosterSummaries={rosterSummaries}
+          onReportUpdated={(norm, report) => {
+            setBpclReportsMap((prev) => ({ ...prev, [norm]: report }));
+          }}
         />
       )}
 
