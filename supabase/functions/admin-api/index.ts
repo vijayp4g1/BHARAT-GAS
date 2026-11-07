@@ -510,9 +510,17 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // New-style secret key (`sb_secret_...`) is independent of the legacy JWT
+    // secret, so the leaked `service_role` JWT can be revoked without breaking
+    // this function. Fallback keeps older deployments/local dev working.
+    const adminKey =
+      Deno.env.get('ADMIN_API_KEY') ??
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+      ''
+
     const admin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      adminKey,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
