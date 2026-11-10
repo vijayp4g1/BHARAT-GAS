@@ -1,26 +1,14 @@
 import db, { type Consumer } from './db';
 import { supabase } from './supabase';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  DISTRIBUTOR_BLACKLIST,
+  generateAmbiguousDigitVariants,
+  mapOcrDigits,
+  normalizeDigits,
+  numberKey,
+} from './scanUtils';
 
-export const DISTRIBUTOR_BLACKLIST = new Set([
-  '169624',
-  '23092200',
-  '23192200',
-  '23192211',
-  '1800224344',
-  '7718012345',
-  '7715012345',
-  '1718012345',
-  '17718012345',
-  '17715012345',
-  '36406262986',
-  '500054',
-  '271119',
-  '99400',
-  '94666',
-  '2367',
-  '19441220350',
-]);
+export { DISTRIBUTOR_BLACKLIST };
 
 export interface MatchResult {
   consumer_id?: string;
@@ -29,10 +17,6 @@ export interface MatchResult {
   address: string;
   mobile: string;
   found: boolean;
-  corrected?: boolean;
-  original_number?: string;
-  is_new?: boolean;
-  name_verified?: boolean;
 }
 
 /**
@@ -112,228 +96,22 @@ export function cleanNameWords(raw: string): string[] {
 }
 
 /**
- * Computes digit suffix match score. If the last 3+ digits match (e.g. 69994449 vs 89994449),
- * this strongly confirms a 1-digit dot-matrix OCR distortion.
- */
-export function scoreDigitsSuffix(targetNum: string, queryNum: string): number {
-  if (!targetNum || !queryNum) return 0;
-  let score = 0;
-  for (let i = 1; i <= Math.min(targetNum.length, queryNum.length); i++) {
-    if (targetNum[targetNum.length - i] === queryNum[queryNum.length - i]) {
-      score++;
-    } else {
-      break;
-    }
-  }
-  return score;
-}
-
-/**
- * Disambiguates candidate consumers to eliminate collisions:
- * 1. Requires ALL search words to match the candidate name.
- * 2. If exactly one candidate matches all words:
- *    - Confident if suffix score >= 3 (dot-matrix OCR fix) OR multi-word distinctive name (>= 2 strong tokens).
- * 3. If multiple candidates share the name (COLLISION RISK):
- *    - ONLY accepts if exactly ONE candidate has a high suffix score (>= 3) and strictly beats all other candidates.
- *    - Otherwise, rejects the match as ambiguous to prevent misattributing deliveries.
- */
-function disambiguateCandidates(
-  candidates: Consumer[],
-  cleanNum: string,
-  words: string[]
-): { best: Consumer | null; isConfident: boolean } {
-  if (candidates.length === 0) {
-    return { best: null, isConfident: false };
-  }
-
-  // 1. Strict Filter: Candidate name must contain ALL search words
-  const matchingCandidates = candidates.filter((c) => {
-    const cName = (c.consumer_name || '').toUpperCase();
-    return words.every((w) => cName.includes(w));
-  });
-
-  if (matchingCandidates.length === 0) {
-    return { best: null, isConfident: false };
-  }
-
-  // 2. Exactly one unique match in the database
-  if (matchingCandidates.length === 1) {
-    const cand = matchingCandidates[0];
-    const strongTokens = words.filter((w) => w.length >= 3);
-
-    if (cleanNum) {
-      const suffixScore = scoreDigitsSuffix(cand.consumer_number, cleanNum);
-      // High-confidence 1-digit OCR distortion (e.g. 89994449 vs 69994449)
-      if (suffixScore >= 3) {
-        return { best: cand, isConfident: true };
-      }
-      // If suffix score is low, only accept if there are >= 2 strong distinctive name tokens
-      if (strongTokens.length >= 2) {
-        return { best: cand, isConfident: true };
-      }
-      // Single short token with non-matching number: too risky/ambiguous
-      return { best: null, isConfident: false };
-    } else {
-      // Pure name query: accept if >= 2 strong tokens or >= 2 words
-      if (strongTokens.length >= 2 || words.length >= 2) {
-        return { best: cand, isConfident: true };
-      }
-      return { best: null, isConfident: false };
-    }
-  }
-
-  // 3. MULTIPLE candidates match all name tokens (AMBIGUOUS COLLISION RISK)
-  if (cleanNum) {
-    const scored = matchingCandidates.map((c) => ({
-      consumer: c,
-      score: scoreDigitsSuffix(c.consumer_number, cleanNum),
-    }));
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const highestScore = scored[0].score;
-    const secondHighestScore = scored.length > 1 ? scored[1].score : 0;
-
-    if (highestScore >= 3 && highestScore > secondHighestScore) {
-      return { best: scored[0].consumer, isConfident: true };
-    }
-  }
-
-  // Cannot safely disambiguate without collision: Reject match
-  console.warn(
-    `[ConsumerMatcher] Ambiguous name collision detected for words "${words.join(' ')}" (${matchingCandidates.length} matches). Rejected auto-correction.`
-  );
-  return { best: null, isConfident: false };
-}
-
-/**
- * Directly registers a new customer into the master database:
- * 1. Inserts into local Dexie IndexedDB cache immediately.
- * 2. If online, immediately pushes to Supabase via sync_consumer RPC & consumers table.
- * 3. Notifies application components so new consumer is instantly searchable.
- */
-export async function registerNewConsumer(
-  cleanNum: string,
-  rawName?: string,
-  address?: string,
-  mobile?: string
-): Promise<Consumer> {
-  const newId = uuidv4();
-  const cleanName =
-    rawName &&
-    rawName.trim().length > 0 &&
-    !rawName.toUpperCase().includes('UNVERIFIED') &&
-    !rawName.toUpperCase().includes('RECORD NOT FOUND')
-      ? rawName.trim().toUpperCase()
-      : `Consumer #${cleanNum}`;
-  const nowIso = new Date().toISOString();
-
-  const newConsumer: Consumer = {
-    id: newId,
-    consumer_number: cleanNum,
-    consumer_name: cleanName,
-    mobile: mobile || '',
-    address: address || 'New Customer / Registered via Day End',
-    cylinder_type: '14.2KG_STD',
-    verification_status: 'Verified',
-    created_at: nowIso,
-    updated_at: nowIso,
-    synced: false,
-    searchWords: [
-      ...cleanName.toLowerCase().split(/\s+/),
-      cleanNum.toLowerCase(),
-      ...(mobile ? [mobile.toLowerCase()] : []),
-    ],
-  };
-
-  // 1. Immediately store in local Dexie IndexedDB
-  try {
-    await db.consumers.put(newConsumer);
-  } catch (dexErr) {
-    console.warn('Failed to put new consumer in local Dexie:', dexErr);
-  }
-
-  // 2. If online, sync to Supabase via sync_consumer RPC (which bypasses RLS safely)
-  if (navigator.onLine) {
-    try {
-      const { data, error } = await supabase.rpc('sync_consumer', {
-        p_id: newId,
-        p_consumer_number: cleanNum,
-        p_consumer_name: cleanName,
-        p_mobile: mobile || '',
-        p_address: newConsumer.address,
-        p_verification_status: 'Verified',
-        p_assigned_agent_id: null,
-        p_area_code: null,
-        p_created_at: nowIso,
-        p_updated_at: nowIso,
-      });
-
-      if (!error && data) {
-        newConsumer.synced = true;
-        await db.consumers.update(newId, { synced: true }).catch(() => {});
-        console.log(`[New Consumer] Registered #${cleanNum} (${cleanName}) into Supabase cloud.`);
-      } else {
-        console.warn('[New Consumer] sync_consumer notice (will retry on next sync):', error);
-      }
-    } catch (supErr) {
-      console.warn('[New Consumer] Cloud push error:', supErr);
-    }
-  }
-
-  // 3. Dispatch global event to update consumer counts across the app
-  window.dispatchEvent(new CustomEvent('bgcls-consumers-synced', { detail: { newConsumer } }));
-
-  return newConsumer;
-}
-
-/**
- * Generates variants where dot-matrix ambiguous digits (8 <-> 6, 8 <-> 0) are swapped.
- * Because dot-matrix printer pin wear causes '8' to appear as '6' (missing top-right dot)
- * or as '0' (missing center cross-bar).
- */
-export function generateDotMatrix8Variants(num: string): string[] {
-  if (!num || num.length < 2) return [];
-  const variants = new Set<string>();
-  const chars = num.split('');
-
-  for (let i = 0; i < chars.length; i++) {
-    const c = chars[i];
-    // If OCR saw '6' or '0', it could actually be an '8'
-    if (c === '6' || c === '0') {
-      const copy = [...chars];
-      copy[i] = '8';
-      variants.add(copy.join(''));
-    }
-    // If OCR saw '8', check if it could be '6' or '0'
-    if (c === '8') {
-      const copy6 = [...chars];
-      copy6[i] = '6';
-      variants.add(copy6.join(''));
-      const copy0 = [...chars];
-      copy0[i] = '0';
-      variants.add(copy0.join(''));
-    }
-  }
-
-  return Array.from(variants);
-}
-
-/**
  * Consumer lookup by printed consumer number ONLY.
  *
  * The consumer number is the single key. The name on a bill (OCR or typed) is
- * never used to choose, correct, or reject a consumer, and a number that is not
- * in the database is never swapped for a similar number (8/6/0 variants or a
- * one-digit neighbour). A number that is not found is returned as found: false
- * with the exact number that was read or typed, so the operator decides.
+ * never used to choose or reject a consumer, and a number that is not in the
+ * database is never swapped for a similar number automatically. A dot-matrix
+ * 8/6/0 variant may only be *offered* for operator confirmation
+ * (findConsumersByAmbiguousVariants); it is never added silently.
  */
 export async function matchConsumerWithDatabase(
   rawNum: string,
   _rawName?: string
 ): Promise<MatchResult> {
-  const digitsOnly = (rawNum || '').replace(/[^0-9]/g, '');
-  const cleanNum = digitsOnly.replace(/^0+/, '') || digitsOnly;
+  // Keep the padded form as a lookup candidate: some agency records store
+  // "0117231569" while the bill prints "117231569" (and vice versa).
+  const digitsWithLeadingZeros = mapOcrDigits(rawNum);
+  const cleanNum = normalizeDigits(rawNum);
 
   if (!cleanNum || DISTRIBUTOR_BLACKLIST.has(cleanNum)) {
     return {
@@ -345,7 +123,7 @@ export async function matchConsumerWithDatabase(
     };
   }
 
-  const consumer = await findConsumerByExactNumber(digitsOnly, cleanNum);
+  const consumer = await findConsumerByExactNumber(digitsWithLeadingZeros, cleanNum);
   if (!consumer) {
     return {
       consumer_number: cleanNum,
@@ -407,4 +185,103 @@ async function findConsumerByExactNumber(rawDigits: string, cleanNum: string): P
     console.warn('Remote consumer number lookup error:', err);
     return null;
   }
+}
+
+export interface AmbiguousConsumerMatch {
+  consumer_id?: string;
+  consumer_number: string;
+  consumer_name: string;
+  address?: string;
+  mobile?: string;
+}
+
+/**
+ * Finds database consumers whose number differs from the printed number ONLY at
+ * dot-matrix ambiguous positions (8 ↔ 6 ↔ 0).
+ *
+ * IMPORTANT: this never selects or adds a consumer. It is used only to offer a
+ * "possible match" that the operator must confirm, so a worn printer pin can be
+ * corrected without ever silently swapping in a different consumer.
+ */
+export async function findConsumersByAmbiguousVariants(
+  rawNum: string
+): Promise<AmbiguousConsumerMatch[]> {
+  const padded = mapOcrDigits(rawNum);
+  const clean = normalizeDigits(rawNum);
+  const bases = Array.from(new Set([padded, clean].filter(Boolean)));
+  // If the model dropped a printed leading zero, offer the zero-padded spelling
+  // as well (e.g. DB "041179880"). Confirm-first, so this is safe.
+  if (clean && !clean.startsWith('0') && clean.length < 12) {
+    bases.push(`0${clean}`);
+  }
+  if (bases.length === 0) return [];
+
+  const keys = new Set<string>();
+  bases.forEach((base) => {
+    generateAmbiguousDigitVariants(base).forEach((variant) => keys.add(variant));
+  });
+  if (keys.size === 0) return [];
+
+  const allKeys = Array.from(keys);
+  type Row = {
+    id?: string;
+    consumer_number: string;
+    consumer_name: string;
+    address?: string | null;
+    mobile?: string | null;
+  };
+
+  const rows: Row[] = [];
+
+  try {
+    const local = await db.consumers.where('consumer_number').anyOf(allKeys).toArray();
+    local.forEach((consumer) => {
+      rows.push({
+        id: consumer.id,
+        consumer_number: consumer.consumer_number,
+        consumer_name: consumer.consumer_name,
+        address: consumer.address,
+        mobile: consumer.mobile,
+      });
+    });
+  } catch (_) {}
+
+  if (navigator.onLine) {
+    try {
+      const { data } = await supabase
+        .from('manager_consumer_summary')
+        .select('id, consumer_number, consumer_name, address, mobile')
+        .in('consumer_number', allKeys);
+      if (Array.isArray(data)) {
+        data.forEach((row) => {
+          rows.push({
+            id: row.id,
+            consumer_number: row.consumer_number,
+            consumer_name: row.consumer_name,
+            address: row.address,
+            mobile: row.mobile,
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('Ambiguous variant lookup error:', err);
+    }
+  }
+
+  // Deduplicate by the number used for equality elsewhere (leading zeros).
+  const seen = new Set<string>();
+  return rows
+    .filter((row) => {
+      const key = numberKey(row.consumer_number);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((row) => ({
+      consumer_id: row.id,
+      consumer_number: row.consumer_number,
+      consumer_name: row.consumer_name,
+      address: row.address || '',
+      mobile: row.mobile || '',
+    }));
 }

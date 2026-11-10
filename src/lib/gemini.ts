@@ -94,7 +94,7 @@ async function preprocessImage(
   imageSource: File | Blob | string,
   options: PreprocessOptions = {}
 ): Promise<{ data: string; mimeType: string }> {
-  const { maxDimension = 1280, quality = 0.8, grayscale = false, contrast = 1 } = options;
+  const { maxDimension = 1536, quality = 0.85, grayscale = false, contrast = 1 } = options;
 
   // Already a base64 data URL and no pixel processing requested → use as-is.
   if (
@@ -184,7 +184,7 @@ async function preprocessImage(
 /**
  * Produces a high-contrast grayscale version of a receipt image.
  * Dot-matrix bills often have faint, broken digits; the enhanced copy is
- * re-read only when the first OCR pass cannot be verified in the database.
+ * re-read only when the first OCR pass detects no number at all.
  */
 export async function enhanceImageForOcr(
   imageSource: File | Blob | string
@@ -258,6 +258,7 @@ Carefully examine the receipt image:
      * A '0' is a single hollow oval with NO middle cross-bar.
      * If the digit has a middle horizontal cross-bar or two stacked loops, it is strictly an '8' (eight), NOT a '6' or '0'.
    - Read the exact printed digits one by one. Never merge digits from the label, date, amount or a neighbouring field.
+   - If the consumer number is printed with a leading zero, keep that zero in the output.
    - Never invent digits. If the number is genuinely unreadable, return an empty string.
 2. "consumerName": The customer's full name printed next to "Name:" under "Details of Receiver:" or directly under "Cons No:".
    - Copy the spelling exactly as printed. If unreadable, return an empty string.

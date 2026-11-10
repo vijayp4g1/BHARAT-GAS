@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { scanBillWithGemini, enhanceImageForOcr } from '../lib/gemini';
-import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
+import { matchConsumerWithDatabase, areNamesSimilar, findConsumersByAmbiguousVariants } from '../lib/consumerMatcher';
+import { DISTRIBUTOR_BLACKLIST, normalizeDigits, numberKey, isAddableConsumerNumber } from '../lib/scanUtils';
 
 interface LiveCameraScannerModalProps {
   isOpen: boolean;
@@ -40,47 +41,62 @@ interface ScannedSessionItem {
   consumer_number: string;
   consumer_name: string;
   timestamp: number;
+  /** Number verified, but the printed name does not resemble the DB name. */
+  name_mismatch?: boolean;
 }
 
 interface FailedScanItem {
+  /** Unique per physical capture: unread bills must never collapse into one row. */
+  id: string;
   raw_number: string;
   reason: string;
   timestamp: number;
 }
 
 export interface ActiveScanFailAlert {
-  type: 'NOT_FOUND' | 'NAME_MISMATCH' | 'TOO_LONG' | 'BLACKLISTED' | 'NOT_DETECTED';
+  type: 'NOT_FOUND' | 'TOO_LONG' | 'BLACKLISTED' | 'NOT_DETECTED';
   consumer_number?: string;
   consumer_name?: string;
-  db_consumer_name?: string;
+  /**
+   * A database consumer that differs from the printed number only at
+   * dot-matrix ambiguous 8/6/0 positions. Offered for confirmation only —
+   * never added automatically.
+   */
+  suggested_match?: {
+    consumer_id?: string;
+    consumer_number: string;
+    consumer_name: string;
+    address?: string;
+    mobile?: string;
+  };
   reason: string;
 }
 
-const DISTRIBUTOR_BLACKLIST = new Set([
-  '169624',
-  '23092200',
-  '23192200',
-  '23192211',
-  '1800224344',
-  '7718012345',
-  '7715012345',
-  '1718012345',
-  '17718012345',
-  '17715012345',
-  '36406262986',
-  '500054',
-  '271119',
-  '99400',
-  '94666',
-  '2367',
-  '19441220350',
-]);
+// One shared AudioContext: creating a new one per beep leaks contexts (Chrome
+// allows only a handful) and the double-bill fraud alarm goes silent after a
+// few scans. Nodes are still created per beep, only the context is reused.
+let sharedAudioCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext | null {
+  try {
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return null;
+      sharedAudioCtx = new AudioCtx();
+    }
+    if (sharedAudioCtx.state === 'suspended') {
+      void sharedAudioCtx.resume().catch(() => {});
+    }
+    return sharedAudioCtx;
+  } catch (_) {
+    return null;
+  }
+}
 
 function playSuccessBeep() {
+  const ctx = getSharedAudioContext();
+  if (!ctx) return;
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -100,10 +116,9 @@ function playSuccessBeep() {
 }
 
 function playWarningAlarm() {
+  const ctx = getSharedAudioContext();
+  if (!ctx) return;
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -124,22 +139,6 @@ function playWarningAlarm() {
   }
 }
 
-function cleanAndNormalizeDigits(raw: string): string {
-  const digits = raw
-    .toUpperCase()
-    .replace(/I|L|\|/g, '1')
-    .replace(/O|Q/g, '0')
-    .replace(/B/g, '8')
-    .replace(/Z/g, '2')
-    .replace(/S/g, '5')
-    .replace(/G/g, '6')
-    .replace(/T/g, '7')
-    .replace(/[^0-9]/g, '');
-
-  const unpadded = digits.replace(/^0+/, '');
-  return unpadded || digits;
-}
-
 export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   isOpen,
   onClose,
@@ -156,10 +155,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // area is cropped and sent to Gemini, which keeps image tokens (cost) low.
   const previewFrameRef = useRef<HTMLDivElement | null>(null);
   const guideBoxRef = useRef<HTMLDivElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isVideoReady, setIsVideoReady] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [alreadyAddedNotice, setAlreadyAddedNotice] = useState<string | null>(null);
+  const [nameMismatchNotice, setNameMismatchNotice] = useState<{
+    consumer_number: string;
+    receipt_name: string;
+    db_name: string;
+  } | null>(null);
   const [duplicateScamNotice, setDuplicateScamNotice] = useState<{
     consumer_number: string;
     consumer_name: string;
@@ -178,12 +183,24 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [isShutterFlash, setIsShutterFlash] = useState<boolean>(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [snapAttempts, setSnapAttempts] = useState<number>(0);
+  // Bills that resolved as "already in the delivery list" this session. Tracked
+  // separately so "N snaps vs M added" can be reconciled instead of looking
+  // like lost bills.
+  const [duplicateCount, setDuplicateCount] = useState<number>(0);
   const [showDoneWarning, setShowDoneWarning] = useState<boolean>(false);
 
   // Hard guard against double-taps / overlapping async scans (prevents duplicate
   // API calls, wrong counts and single-bill double reads).
   const isProcessingRef = useRef<boolean>(false);
   const prevOpenRef = useRef<boolean>(false);
+
+  // The live MediaStream lives in a ref, not state: cleanup must always stop the
+  // tracks that are actually running, even when the component unmounts or React
+  // StrictMode re-runs the start effect while getUserMedia is still pending.
+  const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef<number>(0);
+  const failedScanIdRef = useRef<number>(0);
+  const pendingUnreadRetakeRef = useRef<string[]>([]);
 
   // Monitor network online/offline state
   useEffect(() => {
@@ -208,7 +225,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // letter/digit swaps), otherwise "0117231569" and "117231569" count as two
   // different bills and the same memo gets added twice.
   const scannedSetRef = useRef<Set<string>>(
-    new Set(existingNumbers.map((n) => cleanAndNormalizeDigits(n).toLowerCase()))
+    new Set(existingNumbers.map((n) => numberKey(n)))
   );
   
   // Cooldown map to avoid spamming the same bill
@@ -224,22 +241,29 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   useEffect(() => {
     const nums = existingNumbersKey ? existingNumbersKey.split('|') : [];
     scannedSetRef.current = new Set(
-      nums.map((num) => cleanAndNormalizeDigits(num).toLowerCase())
+      nums.map((num) => numberKey(num))
     );
   }, [existingNumbersKey, agentId, agentName]);
 
   // Add a bill to the session counter at most once. The counter drives both the
   // "N Added" badge and the Done button, so a repeated add of the same memo must
   // never inflate it above the number of unique bills in the delivery list.
-  const pushSessionAdded = (consumerNumber: string, consumerName: string) => {
-    const key = cleanAndNormalizeDigits(consumerNumber).toLowerCase();
+  const pushSessionAdded = (
+    consumerNumber: string,
+    consumerName: string,
+    nameMismatch: boolean = false
+  ) => {
+    const key = numberKey(consumerNumber);
     setScannedSessionList((prev) =>
-      prev.some(
-        (item) => cleanAndNormalizeDigits(item.consumer_number).toLowerCase() === key
-      )
+      prev.some((item) => numberKey(item.consumer_number) === key)
         ? prev
         : [
-            { consumer_number: consumerNumber, consumer_name: consumerName, timestamp: Date.now() },
+            {
+              consumer_number: consumerNumber,
+              consumer_name: consumerName,
+              timestamp: Date.now(),
+              name_mismatch: nameMismatch,
+            },
             ...prev,
           ]
     );
@@ -252,11 +276,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       setFailedScanList([]);
       setLastScanned(null);
       setAlreadyAddedNotice(null);
+      setNameMismatchNotice(null);
       setDuplicateScamNotice(null);
       setActiveScanFailAlert(null);
       setSnapAttempts(0);
+      setDuplicateCount(0);
       setShowDoneWarning(false);
       recentSeenCooldownRef.current.clear();
+      pendingUnreadRetakeRef.current = [];
       editingFailedNumberRef.current = null;
     }
     if (!isOpen) {
@@ -272,30 +299,48 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     recentSeenCooldownRef.current.clear();
   }, [agentId, agentName, isOpen]);
 
-  // Start video stream when modal opens
+  // Start the camera while the modal is open. The cleanup invalidates any
+  // in-flight getUserMedia request and stops the *real* tracks via a ref, so a
+  // late permission result can never leave the camera running after close.
   useEffect(() => {
-    if (!isOpen) {
-      stopCamera();
-      return;
-    }
+    if (!isOpen) return;
 
-    startCamera();
+    void startCamera();
 
     return () => {
+      cameraRequestRef.current += 1;
       stopCamera();
     };
+    // startCamera/stopCamera only touch refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  const releaseStreamTracks = () => {
+    const active = streamRef.current;
+    if (active) {
+      active.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  };
+
   const startCamera = async () => {
+    const requestId = ++cameraRequestRef.current;
+    setIsVideoReady(false);
+    setCameraError(false);
+    setTorchOn(false);
+    // A previous stream can still be alive on StrictMode remount / fast re-open.
+    releaseStreamTracks();
+
     try {
       setStatusText('Connecting to HD camera...');
-      
-      // Request natural aspect ratio and continuous autofocus for sharp receipts
+
+      // Request the sharpest stream the phone can give us; the crop below is
+      // what actually goes to Gemini. `ideal` lets weak devices fall back.
       const constraints: any = {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 2560 },
+          height: { ideal: 1440 },
           focusMode: { ideal: 'continuous' },
           advanced: [
             { focusMode: 'continuous' },
@@ -315,10 +360,22 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         });
       }
 
-      setStream(mediaStream);
+      // Modal closed (or a newer request started) while permission was pending.
+      if (requestId !== cameraRequestRef.current) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      streamRef.current = mediaStream;
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          // iOS can defer autoplay until metadata is ready; the video's
+          // onPlaying handler below still marks the preview ready.
+          console.warn('Camera preview play() deferred:', playErr);
+        }
       }
 
       // Attempt to apply continuous autofocus capability
@@ -332,24 +389,29 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         }
       }
 
+      if (requestId !== cameraRequestRef.current) return;
       setStatusText('Gemini AI Vision Active — Hold bill steady');
     } catch (err) {
+      if (requestId !== cameraRequestRef.current) return;
       console.error('Camera access error:', err);
       setStatusText('Camera unavailable or permission denied');
+      setIsVideoReady(false);
+      setCameraError(true);
     }
   };
 
   const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
+    releaseStreamTracks();
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
+    setIsVideoReady(false);
+    setTorchOn(false);
   };
 
   // Toggle flashlight/torch
   const toggleTorch = async () => {
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
+    const track = streamRef.current?.getVideoTracks()[0];
     if (track && (track.getCapabilities() as any)?.torch) {
       try {
         await track.applyConstraints({
@@ -364,8 +426,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   // Tap-to-focus on mobile
   const triggerFocus = async () => {
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
+    const track = streamRef.current?.getVideoTracks()[0];
     if (track) {
       const capabilities: any = track.getCapabilities ? track.getCapabilities() : {};
       if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
@@ -379,17 +440,18 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // Direct action handlers for on-screen scan failure alert
   const handleForceAdd = (overrideNum?: string, overrideName?: string) => {
     const targetNum = overrideNum || activeScanFailAlert?.consumer_number || '';
-    const cleanNum = cleanAndNormalizeDigits(targetNum);
-    if (!cleanNum) {
+    const cleanNum = normalizeDigits(targetNum);
+    if (!isAddableConsumerNumber(cleanNum)) {
       toast.error('Invalid Consumer Number');
       return;
     }
+    const numKey = numberKey(cleanNum);
     const finalName = (overrideName || activeScanFailAlert?.consumer_name || '').trim() || `Customer #${cleanNum}`;
 
     // Force Add must obey the same duplicate guard as a verified scan: the
     // operator can hit it more than once for the same bill, and each tap used
     // to add a second copy + inflate the "N Added" counter.
-    if (scannedSetRef.current.has(cleanNum.toLowerCase())) {
+    if (scannedSetRef.current.has(numKey)) {
       setAlreadyAddedNotice(`Consumer #${cleanNum} is already in delivery list!`);
       setTimeout(() => setAlreadyAddedNotice(null), 2500);
       setActiveScanFailAlert(null);
@@ -398,10 +460,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
 
     // Mark as added in local scanned set
-    scannedSetRef.current.add(cleanNum.toLowerCase());
+    scannedSetRef.current.add(numKey);
 
     // Check for double bill scam
-    const otherClaimant = claimedByOtherAgents[cleanNum.toLowerCase()];
+    const otherClaimant = claimedByOtherAgents[numKey];
     if (otherClaimant) {
       playWarningAlarm();
       setDuplicateScamNotice({
@@ -424,6 +486,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setIsSuccessFlash(true);
     setTimeout(() => setIsSuccessFlash(false), 400);
 
+    setNameMismatchNotice(null);
     setLastScanned(`${cleanNum} - ${finalName}`);
     pushSessionAdded(cleanNum, finalName);
 
@@ -463,7 +526,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
     // Remove from failedScanList if present (compare normalized digits)
     setFailedScanList((prev) =>
-      prev.filter((item) => cleanAndNormalizeDigits(item.raw_number) !== cleanNum)
+      prev.filter((item) => normalizeDigits(item.raw_number) !== cleanNum)
     );
 
     // Clear alert
@@ -494,8 +557,63 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }, 100);
   };
 
-  const handleRetrySnap = () => {
+  // The operator confirmed that a scanned number is the database record which
+  // differs only in faint 8/6/0 digits. Add exactly that record through the
+  // normal verified-add path (duplicate + double-bill guards included).
+  const handleAcceptSuggestedMatch = async () => {
+    const suggestion = activeScanFailAlert?.suggested_match;
+    const printedNumber = activeScanFailAlert?.consumer_number;
+    if (!suggestion) return;
+
     setActiveScanFailAlert(null);
+    const outcome = await processMatchedConsumerNumber(
+      suggestion.consumer_number,
+      suggestion.consumer_name
+    );
+
+    if (outcome !== 'failed' && printedNumber) {
+      // The printed (misread) number was recorded as pending; it is now resolved.
+      setFailedScanList((prev) =>
+        prev.filter((item) => numberKey(item.raw_number) !== numberKey(printedNumber))
+      );
+
+      if (outcome === 'added') {
+        setStatusText(
+          `Added #${suggestion.consumer_number} (corrected 8/6/0) — ready for next bill`
+        );
+        toast.success(
+          `✨ Added #${suggestion.consumer_number} — corrected faint 8/6/0 from #${printedNumber}`,
+          { id: 'scan-snap', duration: 5000 }
+        );
+      } else {
+        setStatusText(`#${suggestion.consumer_number} already added — ready for next bill`);
+      }
+    }
+  };
+
+  // A retake replaces one "unread" capture (a bill where no number could be
+  // read). The row is only retired once a capture actually starts, so a retake
+  // that never happens can never silently clear a not-added bill.
+  const queueUnreadRetake = (id?: string) => {
+    const targetId =
+      id ||
+      failedScanList.find((item) => !numberKey(item.raw_number))?.id ||
+      '';
+    if (targetId) pendingUnreadRetakeRef.current.push(targetId);
+  };
+
+  const consumeQueuedUnreadRetake = () => {
+    const id = pendingUnreadRetakeRef.current.shift();
+    if (!id) return;
+    setFailedScanList((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleRetrySnap = () => {
+    // A retake only replaces an "unread" capture. Retrying a bill that DID have
+    // a number must not consume an unrelated unread row.
+    const alertHadNumber = Boolean(activeScanFailAlert?.consumer_number);
+    setActiveScanFailAlert(null);
+    if (!alertHadNumber) queueUnreadRetake();
     setTimeout(() => {
       performScan();
     }, 150);
@@ -504,12 +622,40 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // Records a bill that could not be auto-added so it is never silently lost.
   // The operator gets a final "N bills not added" guard when closing the scanner.
   const recordFailedScan = (rawNumber: string, reason: string) => {
+    const digits = numberKey(rawNumber);
+    // Generate the id once, outside the updater: React may invoke updaters more
+    // than once (StrictMode), and side effects inside them are unreliable.
+    const id = `fail-${Date.now()}-${failedScanIdRef.current++}`;
     setFailedScanList((prev) => {
-      if (prev.some((item) => item.raw_number === rawNumber && item.reason === reason)) {
+      // The same numbered bill retried with a different reason stays one row.
+      if (digits && prev.some((item) => numberKey(item.raw_number) === digits)) {
         return prev;
       }
-      return [{ raw_number: rawNumber, reason, timestamp: Date.now() }, ...prev];
+      // A capture with no readable number is its own physical bill: never
+      // dedupe those, otherwise many unread bills collapse into one "???" and
+      // disappear from the Done guard.
+      return [
+        {
+          id,
+          raw_number: digits,
+          reason,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ];
     });
+  };
+
+  const handleRemoveFailedScan = (id: string) => {
+    setFailedScanList((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleRescanUnread = (id: string) => {
+    queueUnreadRetake(id);
+    setShowDoneWarning(false);
+    setTimeout(() => {
+      void performScan();
+    }, 250);
   };
 
   // Process a candidate consumer number match.
@@ -523,7 +669,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     options: { silent?: boolean } = {}
   ): Promise<'added' | 'duplicate' | 'failed'> => {
     const silent = options.silent === true;
-    const cleanNum = cleanAndNormalizeDigits(rawNum);
+    const cleanNum = normalizeDigits(rawNum);
 
     if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 12) {
       const reason =
@@ -563,32 +709,47 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       return 'failed';
     }
 
-    // Match with local Dexie or remote Supabase, checking number, name, and 8/6/0 variants!
-    const match = await matchConsumerWithDatabase(cleanNum, extractedName);
+    // Exact-number lookup: the printed number is the only key used to select a
+    // consumer. A number that is not in the database is never swapped for a
+    // look-alike (8/6/0 variants, one-digit neighbours).
+    // Pass the raw OCR string so a leading-zero spelling is tried too.
+    const match = await matchConsumerWithDatabase(rawNum, extractedName);
 
     // STRICT DATABASE VERIFICATION GUARD:
     // If consumer is not verified in the database, show prominent alert directly on screen!
     if (!match.found) {
-      const isMismatch = match.name_verified === false && Boolean(match.consumer_name);
-      const failReason = isMismatch
-        ? `Receipt has "${extractedName || 'Unknown'}", but Agency Database has "${match.consumer_name}".`
-        : `Consumer number #${cleanNum} not found in data.`;
-
       if (!silent) {
+        // Before declaring "not found", look for the one printer defect we can
+        // reason about safely: faint dot-matrix 8/6/0 digits. Only a single
+        // candidate whose name matches the printed name is offered, and the
+        // operator must confirm it — the scanner never auto-adds it.
+        let suggestedMatch: ActiveScanFailAlert['suggested_match'];
+        if (isAddableConsumerNumber(cleanNum) && extractedName) {
+          const variants = await findConsumersByAmbiguousVariants(rawNum);
+          const named = variants.filter((candidate) =>
+            areNamesSimilar(extractedName, candidate.consumer_name)
+          );
+          if (named.length === 1) {
+            suggestedMatch = named[0];
+          }
+        }
+
         playWarningAlarm();
         if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
 
         // Trigger direct on-screen popup alert immediately
         setActiveScanFailAlert({
-          type: isMismatch ? 'NAME_MISMATCH' : 'NOT_FOUND',
+          type: 'NOT_FOUND',
           consumer_number: cleanNum,
           consumer_name: extractedName || '',
-          db_consumer_name: isMismatch ? match.consumer_name : undefined,
-          reason: failReason,
+          suggested_match: suggestedMatch,
+          reason: suggestedMatch
+            ? `#${cleanNum} is not in the data, but it differs from #${suggestedMatch.consumer_number} only in 8/6/0 digits and the name matches. Confirm the database number below.`
+            : `Consumer number #${cleanNum} not found in data.`,
         });
 
         setStatusText(`Bill #${cleanNum} not verified. Action required above.`);
-        recordFailedScan(cleanNum, isMismatch ? 'Name mismatch' : 'Not found in database');
+        recordFailedScan(cleanNum, 'Not found in database');
       }
       return 'failed';
     }
@@ -598,48 +759,37 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     const finalAddress = match.address || 'Verified in Agency Database';
     const finalMobile = match.mobile || '';
 
+    // ADVISORY NAME CHECK (never used to select a consumer):
+    // The number decides which database record is added. If the printed name
+    // shares nothing with that record, flag it so a misread number that happens
+    // to be valid cannot slip in silently — the operator still sees the bill.
+    const nameMismatch =
+      Boolean(extractedName) && Boolean(finalName) && !areNamesSimilar(extractedName as string, finalName);
+
     // Anti-spam cooldown (5 seconds for the same number). Skipped for internal
     // silent passes so they never suppress the final user-facing error.
     if (!silent) {
       const now = Date.now();
       const lastSeen =
-        recentSeenCooldownRef.current.get(cleanAndNormalizeDigits(resolvedNum).toLowerCase()) ||
-        recentSeenCooldownRef.current.get(cleanNum.toLowerCase());
+        recentSeenCooldownRef.current.get(numberKey(resolvedNum)) ||
+        recentSeenCooldownRef.current.get(numberKey(cleanNum));
       if (lastSeen && now - lastSeen < 5000) {
-        return 'failed';
+        // Same bill snapped again moments later: treat it as an already-handled
+        // duplicate (not a lost bill) so the session counters stay honest.
+        return 'duplicate';
       }
-      recentSeenCooldownRef.current.set(cleanAndNormalizeDigits(resolvedNum).toLowerCase(), now);
-      recentSeenCooldownRef.current.set(cleanNum.toLowerCase(), now);
+      recentSeenCooldownRef.current.set(numberKey(resolvedNum), now);
+      recentSeenCooldownRef.current.set(numberKey(cleanNum), now);
     }
 
-    const resolvedKey = cleanAndNormalizeDigits(resolvedNum).toLowerCase();
-    const rawKey = cleanNum.toLowerCase();
-    const resolvedAlready = scannedSetRef.current.has(resolvedKey);
-    const rawAlready = scannedSetRef.current.has(rawKey);
-    const wasAutoCorrected = rawKey !== resolvedKey;
+    const resolvedKey = numberKey(resolvedNum);
+    const rawKey = numberKey(cleanNum);
 
-    if (resolvedAlready || rawAlready) {
-      if (wasAutoCorrected && resolvedAlready) {
-        // A NEW physical bill was auto-corrected onto a number that is already
-        // in the list. That usually means an OCR digit error collided with a
-        // different bill — flag it instead of silently dropping it.
-        if (!silent) {
-          playWarningAlarm();
-          setActiveScanFailAlert({
-            type: 'NOT_FOUND',
-            consumer_number: cleanNum,
-            consumer_name: extractedName,
-            reason: `OCR auto-corrected this receipt to #${resolvedNum}, which is already in the list. The printed number may be #${cleanNum}. Verify the bill and Force Add if it is different.`,
-          });
-          recordFailedScan(cleanNum, `Auto-corrected onto already added #${resolvedNum}`);
-          setStatusText(`Possible missed bill #${cleanNum}. Verify above.`);
-        }
-        return 'failed';
-      }
-
+    if (scannedSetRef.current.has(resolvedKey) || scannedSetRef.current.has(rawKey)) {
       if (!silent) {
         setAlreadyAddedNotice(`Consumer #${resolvedNum} is already in delivery list!`);
         setTimeout(() => setAlreadyAddedNotice(null), 2500);
+        setStatusText(`#${resolvedNum} already added — ready for next bill`);
       }
       return 'duplicate';
     }
@@ -648,12 +798,26 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     scannedSetRef.current.add(resolvedKey);
     scannedSetRef.current.add(rawKey);
     setAlreadyAddedNotice(null);
+    setNameMismatchNotice(
+      nameMismatch
+        ? { consumer_number: resolvedNum, receipt_name: extractedName as string, db_name: finalName }
+        : null
+    );
+    // Retire any earlier failed row for this bill (e.g. DB was unreachable on
+    // the first attempt, then a retry verified it). Without this the pending
+    // row survives and blocks Done while the bill is already added.
+    setFailedScanList((prev) =>
+      prev.filter((item) => {
+        const itemKey = numberKey(item.raw_number);
+        return itemKey !== resolvedKey && itemKey !== rawKey;
+      })
+    );
 
     // ANTI-FRAUD / DOUBLE-BILL SCAM GUARD:
     // Check if this cash memo was ALREADY submitted by another delivery boy!
     const otherClaimant =
-      claimedByOtherAgents[resolvedNum.toLowerCase()] ||
-      claimedByOtherAgents[cleanNum.toLowerCase()];
+      claimedByOtherAgents[resolvedKey] ||
+      claimedByOtherAgents[rawKey];
 
     if (otherClaimant) {
       if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
@@ -683,7 +847,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setTimeout(() => setIsSuccessFlash(false), 400);
 
     setLastScanned(`${resolvedNum} - ${finalName}`);
-    pushSessionAdded(resolvedNum, finalName);
+    pushSessionAdded(resolvedNum, finalName, nameMismatch);
 
     // Persistent Write-Ahead Audit Log (Survives app switching, browser refresh & RAM clearing)
     try {
@@ -718,18 +882,14 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
     });
 
-    if (match.corrected) {
-      toast.success(
-        `✨ Verified: #${resolvedNum} (${finalName}) [Auto-corrected dot-matrix 8/6 from #${match.original_number}]`,
-        { id: 'scan-snap', duration: 4500 }
-      );
-    } else if (match.name_verified) {
-      toast.success(
-        `✨ Verified: #${resolvedNum} (${finalName})`,
-        { id: 'scan-snap' }
+    if (nameMismatch) {
+      setStatusText(`Added #${resolvedNum} — printed name differs, verify bill`);
+      toast(
+        `⚠ Added #${resolvedNum} (${finalName}), but the receipt name reads "${extractedName}". Verify this bill.`,
+        { id: 'scan-snap', icon: '⚠️', duration: 6500 }
       );
     } else {
-      toast.success(`✨ Added #${resolvedNum} (${finalName})!`, { id: 'scan-snap' });
+      toast.success(`✨ Verified: #${resolvedNum} (${finalName})`, { id: 'scan-snap' });
     }
 
     return 'added';
@@ -789,9 +949,9 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       }
     }
 
-    // Keep enough pixels for faint dot-matrix print, but cap the crop so one
-    // scan stays a small image (low token cost) even on a 4K camera sensor.
-    const maxDim = 960;
+    // Keep enough pixels for faint dot-matrix print. 1280 wide keeps the broken
+    // 8/6/0 pin dots readable; the crop is still a tiny image for Gemini.
+    const maxDim = 1280;
     let targetW = sw;
     let targetH = sh;
     if (targetW > maxDim || targetH > maxDim) {
@@ -810,7 +970,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.92);
   };
 
   /**
@@ -818,8 +978,9 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
    *
    * Accuracy/cost strategy:
    *   1. Cheapest Flash-Lite model reads the bill.
-   *   2. If the number is valid but cannot be verified, ONE high-contrast
-   *      grayscale re-read is attempted (faint dot-matrix digits recover here).
+   *   2. If NO number is detected, ONE high-contrast grayscale re-read is
+   *      attempted (faint dot-matrix digits recover here). A number that was
+   *      read but is not in the database is never re-read or substituted.
    *   3. If it still fails, the actionable popup is shown and the bill is
    *      recorded so it cannot be silently lost when the scanner is closed.
    */
@@ -832,7 +993,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
 
     isProcessingRef.current = true;
+    // This capture is a real retake: retire the queued unread row now.
+    consumeQueuedUnreadRetake();
     setActiveScanFailAlert(null);
+    setNameMismatchNotice(null);
     setIsProcessing(true);
     setIsShutterFlash(true);
     setSnapAttempts((n) => n + 1);
@@ -847,27 +1011,31 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         playWarningAlarm();
         setActiveScanFailAlert({
           type: 'NOT_DETECTED',
-          reason: `AI Notice: ${first.error}`,
+          reason: `AI could not read this bill: ${first.error}. The bill was NOT added — rescan it.`,
         });
         toast.error(`AI Notice: ${first.error}`, { id: 'scan-snap' });
-        setStatusText('Hold bill steady and tap Snap...');
+        // Previously this path recorded nothing, so every timeout/quota/network
+        // failure silently vanished from the "bills not added" guard.
+        recordFailedScan('', `AI could not read the bill (${first.error})`);
+        setStatusText('AI could not read this bill — tap Retry or rescan it');
         return;
       }
 
       if (first.found && first.consumerNumber) {
-        // Silent pass: don't show the failure popup until the enhanced re-read
-        // has also had a chance to recover the number.
+        // Silent pass: no popup/record yet, so a retry or a confirmed suggestion
+        // can resolve the bill without leaving a stale "not added" row.
         const firstOutcome = await processMatchedConsumerNumber(
           first.consumerNumber,
           first.consumerName,
           { silent: true }
         );
         if (firstOutcome === 'added') {
-          toast.success('Matched successfully!', { id: 'scan-snap' });
+          // The add path already showed a success or name-mismatch toast.
           setStatusText(`Matched #${first.consumerNumber}! Ready for next bill`);
           return;
         }
         if (firstOutcome === 'duplicate') {
+          setDuplicateCount((n) => n + 1);
           toast(`#${first.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
           setStatusText(`#${first.consumerNumber} already added — ready for next bill`);
           return;
@@ -876,7 +1044,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         // Not in the database: show exactly the number that was read. No
         // look-alike substitutes (8/6/0 or one-digit) and no second guess from
         // a re-read, so a different consumer is never added for this bill.
-        await processMatchedConsumerNumber(first.consumerNumber, first.consumerName);
+        const finalOutcome = await processMatchedConsumerNumber(
+          first.consumerNumber,
+          first.consumerName
+        );
+        if (finalOutcome === 'duplicate') {
+          setDuplicateCount((n) => n + 1);
+        }
         return;
       }
 
@@ -893,12 +1067,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             retry.consumerName
           );
           if (recovered === 'added') {
-            toast.success(
-              `✨ Recovered: #${retry.consumerNumber} (${retry.consumerName})`,
-              { id: 'scan-snap' }
-            );
+            // The add path already showed a success or name-mismatch toast.
             setStatusText(`Recovered #${retry.consumerNumber}! Ready for next bill`);
           } else if (recovered === 'duplicate') {
+            setDuplicateCount((n) => n + 1);
             toast(`#${retry.consumerNumber} is already in the list`, { id: 'scan-snap', icon: '⚠️' });
             setStatusText(`#${retry.consumerNumber} already added — ready for next bill`);
           }
@@ -913,14 +1085,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         type: 'NOT_DETECTED',
         reason: 'Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.',
       });
-      recordFailedScan('', 'Cons No not detected');
-      setStatusText('Cons No not detected. Tap Retry or type number.');
+      recordFailedScan('', 'Cons No not detected — rescan this bill');
+      setStatusText('Cons No not detected. Tap Retry or rescan the bill.');
       toast.error('Cons No: not detected. Make sure "Details of Receiver:" is in view & in focus.', {
         id: 'scan-snap',
         duration: 3500,
       });
     } catch (err: any) {
       console.warn('Scan cycle error:', err);
+      // Never let an unexpected pipeline error drop a capture silently.
+      recordFailedScan('', `Scan failed (${err?.message || 'check connection'})`);
       toast.error(`Scan error: ${err.message || 'Check connection'}`, { id: 'scan-snap' });
     } finally {
       isProcessingRef.current = false;
@@ -930,15 +1104,25 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
   // Main Scan Trigger (Exclusively Gemini AI Vision - 1-Tap Snap)
   const performScan = async () => {
-    if (isProcessingRef.current || !videoRef.current) return;
+    if (isProcessingRef.current) return;
 
     if (!navigator.onLine) {
       toast.error('Offline: AI Snap requires internet. Type Cons No below.', { id: 'scan-snap' });
       return;
     }
 
+    if (!isVideoReady || !videoRef.current || videoRef.current.videoWidth === 0) {
+      toast.error('Camera is still starting — hold on a moment', { id: 'scan-snap' });
+      setStatusText('Camera starting… please wait');
+      return;
+    }
+
     const imgDataUrl = captureCameraFrame();
-    if (!imgDataUrl) return;
+    if (!imgDataUrl) {
+      toast.error('Could not capture the bill — hold steady and retry', { id: 'scan-snap' });
+      setStatusText('Capture failed — hold steady and tap Snap');
+      return;
+    }
 
     await runScanPipeline(imgDataUrl, 'cash memo');
   };
@@ -963,7 +1147,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     if (!manualInput.trim()) return;
 
     setIsProcessing(true);
-    const cleanNum = cleanAndNormalizeDigits(manualInput);
+    const cleanNum = normalizeDigits(manualInput);
 
     if (!cleanNum) {
       toast.error('Please enter valid digits for Consumer Number');
@@ -985,10 +1169,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // The bill is now in the list — retire its pending (failed) entry so the
     // Done guard and "Add All" do not add a second, mis-read copy of it.
     const editedNumber = editingFailedNumberRef.current;
-    const editedDigits = editedNumber ? cleanAndNormalizeDigits(editedNumber) : '';
+    const editedDigits = editedNumber ? normalizeDigits(editedNumber) : '';
     setFailedScanList((prev) =>
       prev.filter((item) => {
-        const digits = cleanAndNormalizeDigits(item.raw_number);
+        const digits = normalizeDigits(item.raw_number);
         return digits !== cleanNum && digits !== editedDigits;
       })
     );
@@ -1011,7 +1195,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const pendingBills = (() => {
     const seen = new Set<string>();
     return failedScanList.filter((item) => {
-      const digits = cleanAndNormalizeDigits(item.raw_number);
+      const digits = normalizeDigits(item.raw_number);
       if (
         digits.length < 1 ||
         digits.length > 12 ||
@@ -1025,29 +1209,36 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     });
   })();
 
+  // Captures with no usable number (AI timeout/quota, blurry line, or a
+  // nonsensical digit run). There is nothing to force-add: each one must be
+  // physically rescanned or explicitly acknowledged. They used to be collapsed
+  // into one "???" row and then silently cleared by "Add All", which is how a
+  // session could show "36 scanned, 22 added" with no trace of the other 14.
+  const pendingKeys = new Set(pendingBills.map((item) => numberKey(item.raw_number)));
+  const unreadBills = failedScanList.filter(
+    (item) => !pendingKeys.has(numberKey(item.raw_number))
+  );
+  const unresolvedCount = pendingBills.length + unreadBills.length;
+
   const handleForceAddAllPending = () => {
     const items = [...pendingBills];
-    if (items.length === 0) {
-      setShowDoneWarning(false);
-      onClose();
-      return;
-    }
+    if (items.length === 0) return;
 
     const batch = items
       .map((item) => {
-        const cleanNum = cleanAndNormalizeDigits(item.raw_number);
+        const cleanNum = normalizeDigits(item.raw_number);
         return { item, cleanNum };
       })
       .filter(
         ({ cleanNum }) =>
-          Boolean(cleanNum) && !scannedSetRef.current.has(cleanNum.toLowerCase())
+          Boolean(cleanNum) && !scannedSetRef.current.has(numberKey(cleanNum))
       );
 
     batch.forEach(({ cleanNum }) => {
-      const otherClaimant = claimedByOtherAgents[cleanNum.toLowerCase()];
+      const otherClaimant = claimedByOtherAgents[numberKey(cleanNum)];
       const finalName = `Customer #${cleanNum}`;
 
-      scannedSetRef.current.add(cleanNum.toLowerCase());
+      scannedSetRef.current.add(numberKey(cleanNum));
       pushSessionAdded(cleanNum, finalName);
       onConsumerScanned({
         consumer_number: cleanNum,
@@ -1060,15 +1251,39 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       });
     });
 
-    setFailedScanList([]);
+    // Retire every numbered pending bill now that it has been resolved: either
+    // added just now, or already present in the delivery list. Unread captures
+    // stay so "Add All" can never clear them as a side effect.
+    const resolvedKeys = new Set(pendingBills.map((item) => numberKey(item.raw_number)));
+    setFailedScanList((prev) =>
+      prev.filter(
+        (item) => !item.raw_number || !resolvedKeys.has(numberKey(item.raw_number))
+      )
+    );
+
+    if (unreadBills.length > 0) {
+      toast.error(
+        `${unreadBills.length} bill${unreadBills.length === 1 ? '' : 's'} still unread — rescan before closing`,
+        { id: 'scan-snap', duration: 5000 }
+      );
+      setStatusText(`${unreadBills.length} unread bill(s) still not added`);
+      return;
+    }
+
     setShowDoneWarning(false);
-    toast.success(`Added ${batch.length} pending bill(s) ✓`, { id: 'scan-snap' });
-    setStatusText(`Added ${batch.length} pending bill(s). Done!`);
+    setNameMismatchNotice(null);
+    if (batch.length > 0) {
+      toast.success(`Added ${batch.length} pending bill(s) ✓`, { id: 'scan-snap' });
+      setStatusText(`Added ${batch.length} pending bill(s). Done!`);
+    } else {
+      toast('Those bills were already in the delivery list', { id: 'scan-snap', icon: '⚠️' });
+      setStatusText('No new bills needed — already in the list');
+    }
     onClose();
   };
 
   const handleDone = () => {
-    if (pendingBills.length > 0) {
+    if (unresolvedCount > 0) {
       setShowDoneWarning(true);
       return;
     }
@@ -1172,7 +1387,29 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             </div>
           )}
 
-          {lastScanned && !alreadyAddedNotice && !duplicateScamNotice && (
+          {nameMismatchNotice && (
+            <div className="bg-amber-500 text-slate-950 p-2 rounded-xl shadow-lg flex items-start gap-2 border border-amber-300 text-xs font-bold animate-in zoom-in-95 duration-200">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate">
+                  #{nameMismatchNotice.consumer_number} added as {nameMismatchNotice.db_name}
+                </p>
+                <p className="text-[10px] font-semibold truncate">
+                  Receipt name reads "{nameMismatchNotice.receipt_name}" — verify this bill
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNameMismatchNotice(null)}
+                className="p-0.5 shrink-0"
+                title="Dismiss"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {lastScanned && !alreadyAddedNotice && !duplicateScamNotice && !nameMismatchNotice && (
             <div className="bg-emerald-600/95 text-white p-2 rounded-xl shadow-lg flex items-center gap-2 border border-emerald-400/40">
               <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
               <span className="text-xs font-black truncate uppercase">ADDED: #{lastScanned}</span>
@@ -1190,12 +1427,30 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             className="relative w-full h-[min(408px,52dvh)] sm:h-[min(480px,55dvh)] overflow-hidden rounded-2xl border border-white/15 bg-black shadow-2xl cursor-pointer"
             title="Tap to focus"
           >
-            <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="absolute inset-0 h-full w-full object-cover"
+              onLoadedMetadata={() => setIsVideoReady(true)}
+              onPlaying={() => setIsVideoReady(true)}
+            />
             <canvas ref={canvasRef} className="hidden" />
 
             {/* Shutter Flash Animation */}
             {isShutterFlash && (
               <div className="absolute inset-0 bg-white/70 pointer-events-none z-30 transition-opacity duration-150" />
+            )}
+
+            {/* Camera unavailable: the guide box would be misleading here. */}
+            {cameraError && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 bg-slate-950/85 px-6 text-center pointer-events-none">
+                <Camera className="w-6 h-6 text-slate-500" />
+                <p className="text-xs font-black text-amber-300">Camera unavailable</p>
+                <p className="text-[10px] text-slate-400">
+                  Allow camera access, or use the Photo button / type the Cons No below.
+                </p>
+              </div>
             )}
 
             {/* Crop guide: ONLY this rectangle is sent to Gemini. */}
@@ -1250,7 +1505,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             <button
               type="button"
               onClick={performScan}
-              disabled={isProcessing || !isOnline}
+              disabled={isProcessing || !isOnline || !isVideoReady}
               className={`flex-1 font-black py-2.5 px-3 rounded-xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5 border text-[11px] uppercase tracking-wide disabled:opacity-60 ${
                 !isOnline
                   ? 'bg-slate-800 text-amber-300 border-amber-500/40 shadow-none cursor-not-allowed'
@@ -1267,6 +1522,18 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                   <WifiOff className="w-4 h-4 text-amber-400" />
                   <span>Offline (Type Below)</span>
                 </>
+              ) : !isVideoReady ? (
+                cameraError ? (
+                  <>
+                    <Camera className="w-4 h-4 text-slate-950" />
+                    <span>Camera Off — Type Below</span>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>Starting Camera…</span>
+                  </>
+                )
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-slate-950 animate-pulse" />
@@ -1289,23 +1556,31 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           </div>
 
           {/* Quick Session Status Bar */}
-          <div className="shrink-0 flex items-center justify-between text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400 font-semibold" title="Bills captured this session">
-                {snapAttempts} scanned
+          <div className="shrink-0 flex items-center justify-between gap-2 text-[11px] bg-slate-900/80 border border-white/10 px-3 py-1.5 rounded-xl">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+              <span className="text-slate-400 font-semibold" title="Snap attempts this session (retakes included)">
+                {snapAttempts} snaps
               </span>
               <span className="text-emerald-400 font-bold flex items-center gap-1">
                 <Check className="w-3.5 h-3.5" />
                 <span>{scannedSessionList.length} Added</span>
               </span>
-              {failedScanList.length > 0 && (
+              {duplicateCount > 0 && (
+                <span
+                  className="text-sky-300 font-bold"
+                  title="Already in the delivery list — not lost bills"
+                >
+                  {duplicateCount} already
+                </span>
+              )}
+              {unresolvedCount > 0 && (
                 <span className="text-rose-400 font-bold flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
-                  <span>{failedScanList.length} Failed</span>
+                  <span>{unresolvedCount} Not added</span>
                 </span>
               )}
             </div>
-            <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">
+            <span className="text-[10px] text-slate-400 font-medium truncate max-w-[130px] shrink-0">
               {statusText}
             </span>
           </div>
@@ -1326,29 +1601,49 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             {scannedSessionList.map((item, idx) => (
               <div
                 key={`${item.consumer_number}-${idx}`}
-                className="bg-slate-800/90 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs flex items-center gap-2 shrink-0"
+                className={`border rounded-xl px-2.5 py-1.5 text-xs flex items-center gap-2 shrink-0 ${
+                  item.name_mismatch
+                    ? 'bg-amber-900/40 border-amber-500/40'
+                    : 'bg-slate-800/90 border-white/10'
+                }`}
+                title={
+                  item.name_mismatch
+                    ? 'Number verified, but the printed name differs from the database name'
+                    : undefined
+                }
               >
-                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                {item.name_mismatch ? (
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
                 <span className="font-mono font-bold text-amber-300 shrink-0">#{item.consumer_number}</span>
                 <span className="text-[11px] text-slate-300 truncate">{item.consumer_name}</span>
+                {item.name_mismatch && (
+                  <span className="ml-auto text-[9px] font-black uppercase tracking-wide text-amber-300 shrink-0">
+                    Verify
+                  </span>
+                )}
               </div>
             ))}
 
             {failedScanList.length > 0 && (
               <div className="mt-auto pt-1.5 border-t border-rose-500/20 flex flex-col gap-1">
                 <p className="text-[9px] font-black uppercase tracking-wider text-rose-400 px-1">
-                  Not added yet — must be resolved before Done
+                  Not added yet — resolve or rescan before Done
                 </p>
-                {failedScanList.map((item, idx) => (
+                {failedScanList.map((item) => (
                   <div
-                    key={`fail-${item.raw_number}-${idx}`}
+                    key={item.id}
                     className="bg-rose-900/60 border border-rose-500/30 rounded-xl px-2.5 py-1 flex items-start gap-2 text-xs shrink-0"
                   >
                     <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                     <div className="min-w-0 flex-1">
-                      <span className="font-mono font-bold text-rose-200">#{item.raw_number || '???'}</span>
+                      <span className="font-mono font-bold text-rose-200">
+                        {item.raw_number ? `#${item.raw_number}` : 'Unread bill'}
+                      </span>
                       <p className="text-[10px] text-rose-300 leading-tight">{item.reason}</p>
-                      {item.raw_number && (
+                      {item.raw_number ? (
                         <div className="flex gap-1.5 mt-1">
                           <button
                             type="button"
@@ -1365,6 +1660,24 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                           >
                             <Plus className="w-3 h-3" />
                             <span>Edit</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1.5 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRescanUnread(item.id)}
+                            className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black py-1 px-2 rounded-lg text-[10px] flex items-center justify-center gap-1 active:scale-95 transition-all"
+                          >
+                            <Camera className="w-3 h-3" />
+                            <span>Rescan</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFailedScan(item.id)}
+                            className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-slate-300 font-bold py-1 px-2 rounded-lg text-[10px] active:scale-95 transition-all"
+                          >
+                            <span>Resolved</span>
                           </button>
                         </div>
                       )}
@@ -1390,15 +1703,19 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-xs sm:text-sm font-black text-rose-300 uppercase tracking-wide">
-                    {activeScanFailAlert.type === 'NAME_MISMATCH'
-                      ? '⚠️ Name Mismatch!'
+                    {activeScanFailAlert.suggested_match
+                      ? '✅ Possible Match Found!'
                       : activeScanFailAlert.type === 'NOT_FOUND'
                       ? '❌ Not Found In Data!'
                       : activeScanFailAlert.type === 'NOT_DETECTED'
                       ? '🔍 Cons No Not Detected!'
                       : '⚠️ Bill Not Added!'}
                   </h3>
-                  <p className="text-[10px] text-slate-300 font-medium">Choose action for this bill</p>
+                  <p className="text-[10px] text-slate-300 font-medium">
+                    {activeScanFailAlert.suggested_match
+                      ? 'Confirm the 8/6/0 correction before adding'
+                      : 'Choose action for this bill'}
+                  </p>
                 </div>
               </div>
               <button
@@ -1428,14 +1745,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                   </span>
                 </div>
               )}
-              {activeScanFailAlert.db_consumer_name && (
-                <div className="flex items-start justify-between gap-2 border-t border-white/5 pt-1.5">
-                  <span className="text-[10px] uppercase font-bold text-rose-400 shrink-0">Database Name</span>
-                  <span className="text-xs font-bold text-rose-200 text-right truncate">
-                    {activeScanFailAlert.db_consumer_name}
-                  </span>
-                </div>
-              )}
 
               {/* Reason Explanation */}
               <div className="bg-rose-950/40 rounded-xl p-2 border border-rose-500/20 text-[11px] text-rose-200 font-semibold leading-relaxed mt-0.5">
@@ -1443,9 +1752,61 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               </div>
             </div>
 
+            {/* Confirm-first 8/6/0 recovery. NOTHING is added automatically. */}
+            {activeScanFailAlert.suggested_match && (
+              <div className="bg-emerald-950/50 border-2 border-emerald-500/60 rounded-2xl p-3 flex flex-col gap-2.5">
+                <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                  Possible 8 / 6 / 0 correction
+                </p>
+
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/70 border border-emerald-500/30 px-2.5 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[9px] uppercase font-bold text-slate-400">Printed on bill</p>
+                    <p className="font-mono text-sm font-black text-amber-400">
+                      #{activeScanFailAlert.consumer_number}
+                    </p>
+                  </div>
+                  <span className="text-emerald-400 font-black text-sm shrink-0">→</span>
+                  <div className="min-w-0 text-right">
+                    <p className="text-[9px] uppercase font-bold text-slate-400">Database match</p>
+                    <p className="font-mono text-sm font-black text-emerald-200">
+                      #{activeScanFailAlert.suggested_match.consumer_number}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white truncate">
+                    {activeScanFailAlert.suggested_match.consumer_name}
+                  </p>
+                  <p className="text-[10px] text-emerald-200/80 leading-snug mt-0.5">
+                    The two numbers differ only in faint 8/6/0 digits and the name matches.
+                    <b className="text-emerald-300"> Nothing is added until you confirm.</b>
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAcceptSuggestedMatch}
+                  className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/60"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Confirm &amp; Add #{activeScanFailAlert.suggested_match.consumer_number}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveScanFailAlert(null)}
+                  className="w-full bg-slate-800 hover:bg-slate-700 border border-white/20 text-slate-300 font-bold py-2 px-3 rounded-xl text-[11px] active:scale-95 transition-all"
+                >
+                  No — keep printed #{activeScanFailAlert.consumer_number}
+                </button>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex flex-col gap-2 pt-0.5">
-              {activeScanFailAlert.consumer_number && (
+              {activeScanFailAlert.consumer_number && !activeScanFailAlert.suggested_match && (
                 <button
                   type="button"
                   onClick={() => handleForceAdd()}
@@ -1522,13 +1883,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               type="button"
               onClick={handleDone}
               className={`font-bold px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all shrink-0 whitespace-nowrap ${
-                pendingBills.length > 0
+                unresolvedCount > 0
                   ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 animate-pulse'
                   : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
               }`}
             >
               Done ({scannedSessionList.length})
-              {pendingBills.length > 0 ? ` · ${pendingBills.length} pending` : ''}
+              {unresolvedCount > 0 ? ` · ${unresolvedCount} not added` : ''}
             </button>
           </div>
         </div>
@@ -1545,39 +1906,64 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               <div>
                 <h3 className="text-sm font-black text-amber-300">⚠️ Bills Not Added Yet</h3>
                 <p className="text-[11px] text-slate-300">
-                  You scanned {snapAttempts} bill{snapAttempts === 1 ? '' : 's'}, added {scannedSessionList.length}.
+                  {snapAttempts} snap{snapAttempts === 1 ? '' : 's'}: {scannedSessionList.length} added
+                  {duplicateCount > 0 ? `, ${duplicateCount} already in the list` : ''}
+                  {unresolvedCount > 0 ? `, ${unresolvedCount} not added` : ''}.
                 </p>
               </div>
             </div>
 
-            <div className="bg-slate-950/80 rounded-2xl p-3 border border-amber-500/30 text-xs text-amber-100 leading-relaxed">
-              <b>{pendingBills.length}</b> scanned bill{pendingBills.length === 1 ? '' : 's'} could not be
-              auto-verified in the agency database. Add them now so no cash memo is missed.
+            <div className="bg-slate-950/80 rounded-2xl p-3 border border-amber-500/30 text-xs text-amber-100 leading-relaxed space-y-2">
               {pendingBills.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {pendingBills.slice(0, 12).map((item, idx) => (
-                    <span
-                      key={`${item.raw_number}-${idx}`}
-                      className="font-mono text-[11px] bg-amber-500/15 border border-amber-400/30 text-amber-200 px-1.5 py-0.5 rounded-md"
-                    >
-                      #{item.raw_number || '???'}
-                    </span>
-                  ))}
-                  {pendingBills.length > 12 && (
-                    <span className="text-[11px] text-amber-300">+{pendingBills.length - 12} more</span>
-                  )}
+                <div>
+                  <b>{pendingBills.length}</b> scanned bill{pendingBills.length === 1 ? '' : 's'} could not be
+                  auto-verified in the agency database. Add them now so no cash memo is missed.
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {pendingBills.slice(0, 12).map((item) => (
+                      <span
+                        key={item.id}
+                        className="font-mono text-[11px] bg-amber-500/15 border border-amber-400/30 text-amber-200 px-1.5 py-0.5 rounded-md"
+                      >
+                        #{item.raw_number}
+                      </span>
+                    ))}
+                    {pendingBills.length > 12 && (
+                      <span className="text-[11px] text-amber-300">+{pendingBills.length - 12} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {unreadBills.length > 0 && (
+                <div className="border-t border-amber-500/20 pt-2">
+                  <b>{unreadBills.length}</b> bill{unreadBills.length === 1 ? '' : 's'} have no usable
+                  number (AI timeout / quota / blurry print / merged digits). They cannot be force-added —{' '}
+                  <b>rescan those bills</b>, or mark each row Resolved after checking the paper.
                 </div>
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={handleForceAddAllPending}
-              className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
-            >
-              <Check className="w-4 h-4" />
-              Add All {pendingBills.length} Bill{pendingBills.length === 1 ? '' : 's'}
-            </button>
+            {pendingBills.length > 0 && (
+              <button
+                type="button"
+                onClick={handleForceAddAllPending}
+                className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide border border-emerald-400/50"
+              >
+                <Check className="w-4 h-4" />
+                Add All {pendingBills.length} Bill{pendingBills.length === 1 ? '' : 's'}
+              </button>
+            )}
+
+            {unreadBills.length > 0 && (
+              <button
+                type="button"
+                onClick={() => unreadBills[0] && handleRescanUnread(unreadBills[0].id)}
+                className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black py-3 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide"
+              >
+                <Camera className="w-4 h-4" />
+                Retake Unread Bill
+              </button>
+            )}
 
             <div className="flex gap-2">
               <button

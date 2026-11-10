@@ -41,6 +41,7 @@ import {
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
+import { numberKey } from '../lib/scanUtils';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
 import { 
   getDayEndDeliveryBoys, 
@@ -427,9 +428,14 @@ export const StaffDayEndSummary: React.FC = () => {
     // 1. Populate from preceding 7 days bills (flags same boy or other boys!)
     if (past7DaysBillsMap) {
       Object.entries(past7DaysBillsMap).forEach(([cleanCons, pastInfo]) => {
+        // Re-key here too: cached maps written by older builds may still hold
+        // raw numbers ("0117231569") and must not miss the scanner's normalized
+        // lookup ("117231569").
+        const key = numberKey(cleanCons);
+        if (!key) return;
         const pastAgentName = (pastInfo.agentName || '').trim().toUpperCase();
         const isSame = pastAgentName === currentAgentName;
-        map[cleanCons] = {
+        map[key] = {
           ...pastInfo,
           isPast7Days: true,
           isSameAgent: isSame,
@@ -450,9 +456,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
         if (Array.isArray(report.entries)) {
           report.entries.forEach((entry) => {
-            if (entry.consumer_number) {
-              const clean = entry.consumer_number.trim().toLowerCase();
-              map[clean] = {
+            const key = numberKey(entry.consumer_number);
+            if (key) {
+              map[key] = {
                 agentName: report.agent_name,
                 agentId: report.agent_id,
                 date: report.report_date,
@@ -474,7 +480,7 @@ export const StaffDayEndSummary: React.FC = () => {
     return entries.filter((e) => {
       const claimant = e.duplicate_of_agent 
         ? { agentName: e.duplicate_of_agent }
-        : crossAgentClaimedMap[e.consumer_number.toLowerCase()];
+        : crossAgentClaimedMap[numberKey(e.consumer_number)];
       return !!claimant;
     }).length;
   }, [entries, crossAgentClaimedMap]);
@@ -492,7 +498,8 @@ export const StaffDayEndSummary: React.FC = () => {
       if (Array.isArray(report.entries)) {
         report.entries.forEach((entry) => {
           if (entry.consumer_number) {
-            const clean = entry.consumer_number.trim().toLowerCase();
+            const clean = numberKey(entry.consumer_number);
+            if (!clean) return;
             if (!billOccurrences[clean]) {
               billOccurrences[clean] = [];
             }
@@ -526,7 +533,8 @@ export const StaffDayEndSummary: React.FC = () => {
 
       if (summary && Array.isArray(summary.entries)) {
         summary.entries.forEach((entry) => {
-          const clean = (entry.consumer_number || '').trim().toLowerCase();
+          const clean = numberKey(entry.consumer_number);
+          if (!clean) return;
 
           // 1. Check if this bill was already submitted in the last 7 days!
           const pastClaim = past7DaysBillsMap ? past7DaysBillsMap[clean] : undefined;
@@ -836,7 +844,7 @@ export const StaffDayEndSummary: React.FC = () => {
       } else if (draftEntries.length > 0) {
         // Cross-contamination safeguard: if every entry in draft belongs to another delivery boy, purge it!
         const allClaimedByOther = draftEntries.every(
-          (e) => crossAgentClaimedMap[e.consumer_number.toLowerCase()]
+          (e) => crossAgentClaimedMap[numberKey(e.consumer_number)]
         );
         if (allClaimedByOther && draftEntries.length > 3) {
           claimEntries([]);
@@ -1347,12 +1355,12 @@ export const StaffDayEndSummary: React.FC = () => {
 
     // Anti-Fraud Warning Guard: Check if there are duplicate bills claimed (today or last 7 days)
     const duplicateList = entries.filter((e) => {
-      return e.duplicate_of_agent || crossAgentClaimedMap[e.consumer_number.toLowerCase()];
+      return e.duplicate_of_agent || crossAgentClaimedMap[numberKey(e.consumer_number)];
     });
 
     if (duplicateList.length > 0) {
       const firstDup = duplicateList[0];
-      const firstClaimant = crossAgentClaimedMap[firstDup.consumer_number.toLowerCase()];
+      const firstClaimant = crossAgentClaimedMap[numberKey(firstDup.consumer_number)];
       const duplicateNotice = firstClaimant
         ? formatDuplicateClaimNotice(firstClaimant, reportDate).shortNotice
         : `already given by ${firstDup.duplicate_of_agent || 'another delivery boy'}`;
@@ -1529,7 +1537,7 @@ export const StaffDayEndSummary: React.FC = () => {
       return;
     }
 
-    const otherClaimant = crossAgentClaimedMap[consumer.consumer_number.toLowerCase()];
+    const otherClaimant = crossAgentClaimedMap[numberKey(consumer.consumer_number)];
     if (otherClaimant) {
       const notice = formatDuplicateClaimNotice(otherClaimant, reportDate);
       toast.error(
@@ -1587,7 +1595,7 @@ export const StaffDayEndSummary: React.FC = () => {
         return;
       }
 
-      const otherClaimant = crossAgentClaimedMap[match.consumer_number.toLowerCase()] || crossAgentClaimedMap[cleanInput.toLowerCase()];
+      const otherClaimant = crossAgentClaimedMap[numberKey(match.consumer_number)] || crossAgentClaimedMap[numberKey(cleanInput)];
       if (otherClaimant) {
         const notice = formatDuplicateClaimNotice(otherClaimant, reportDate);
         toast.error(
@@ -1621,7 +1629,7 @@ export const StaffDayEndSummary: React.FC = () => {
       return;
     }
 
-    const otherClaimantUnverified = crossAgentClaimedMap[cleanInput.toLowerCase()];
+    const otherClaimantUnverified = crossAgentClaimedMap[numberKey(cleanInput)];
     if (otherClaimantUnverified) {
       const notice = formatDuplicateClaimNotice(otherClaimantUnverified, reportDate);
       toast.error(
@@ -1707,7 +1715,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
       const finalResolved: ItemEntry[] = uniqueNewNumbers.map((num) => {
         const found = resolvedMap.get(num.toLowerCase());
-        const otherClaimant = crossAgentClaimedMap[num.toLowerCase()];
+        const otherClaimant = crossAgentClaimedMap[numberKey(num)];
         if (found) {
           return {
             ...found,
@@ -1768,10 +1776,11 @@ export const StaffDayEndSummary: React.FC = () => {
   }) => {
     const otherClaimant = scannedItem.duplicate_of_agent
       ? { agentName: scannedItem.duplicate_of_agent, date: scannedItem.duplicate_claimed_date }
-      : crossAgentClaimedMap[scannedItem.consumer_number.toLowerCase()];
+      : crossAgentClaimedMap[numberKey(scannedItem.consumer_number)];
 
     setEntries((prev) => {
-      const existingIdx = prev.findIndex((e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase());
+      const scannedKey = numberKey(scannedItem.consumer_number);
+      const existingIdx = prev.findIndex((e) => numberKey(e.consumer_number) === scannedKey);
       if (existingIdx !== -1) {
         if (!prev[existingIdx].found && scannedItem.found) {
           const updated = [...prev];
@@ -3204,7 +3213,7 @@ export const StaffDayEndSummary: React.FC = () => {
                   const originalIndex = entries.findIndex((e) => e.consumer_number === item.consumer_number);
                   const otherClaimant = item.duplicate_of_agent
                     ? { agentName: item.duplicate_of_agent, date: item.duplicate_claimed_date }
-                    : crossAgentClaimedMap[item.consumer_number.toLowerCase()];
+                    : crossAgentClaimedMap[numberKey(item.consumer_number)];
 
                   return (
                     <div

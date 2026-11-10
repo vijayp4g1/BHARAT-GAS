@@ -38,6 +38,7 @@ import {
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
+import { numberKey } from '../lib/scanUtils';
 import { 
   getDayEndDeliveryBoys,
   fetchAllDayEndReportsForDate,
@@ -250,14 +251,13 @@ export const OldAgentDayEnd: React.FC = () => {
 
       if (Array.isArray(report.entries)) {
         report.entries.forEach((entry) => {
-          if (entry.consumer_number) {
-            const clean = entry.consumer_number.trim().toLowerCase();
-            map[clean] = {
-              agentName: report.agent_name,
-              date: report.report_date,
-              consumerName: entry.consumer_name,
-            };
-          }
+          const key = numberKey(entry.consumer_number);
+          if (!key) return;
+          map[key] = {
+            agentName: report.agent_name,
+            date: report.report_date,
+            consumerName: entry.consumer_name,
+          };
         });
       }
     });
@@ -270,7 +270,7 @@ export const OldAgentDayEnd: React.FC = () => {
     return entries.filter((e) => {
       const claimant = e.duplicate_of_agent
         ? { agentName: e.duplicate_of_agent }
-        : crossAgentClaimedMap[e.consumer_number.toLowerCase()];
+        : crossAgentClaimedMap[numberKey(e.consumer_number)];
       return !!claimant;
     }).length;
   }, [entries, crossAgentClaimedMap]);
@@ -1151,7 +1151,7 @@ export const OldAgentDayEnd: React.FC = () => {
       return;
     }
 
-    const claimant = crossAgentClaimedMap[consumer.consumer_number.toLowerCase()];
+    const claimant = crossAgentClaimedMap[numberKey(consumer.consumer_number)];
     if (claimant) {
       toast.error(`🚨 SCAM ALERT: #${consumer.consumer_number} was already claimed by ${claimant.agentName} today!`);
     }
@@ -1199,7 +1199,7 @@ export const OldAgentDayEnd: React.FC = () => {
       }
     }
 
-    const claimant = crossAgentClaimedMap[cleanInput.toLowerCase()];
+    const claimant = crossAgentClaimedMap[numberKey(cleanInput)];
     if (claimant) {
       toast.error(`🚨 SCAM ALERT: #${cleanInput} was already claimed by ${claimant.agentName} today!`);
     }
@@ -1275,7 +1275,7 @@ export const OldAgentDayEnd: React.FC = () => {
           continue;
         }
 
-        const claimant = crossAgentClaimedMap[token.toLowerCase()];
+        const claimant = crossAgentClaimedMap[numberKey(token)];
         const match = await matchConsumerWithDatabase(token);
         if (match.found) {
           toAdd.push({
@@ -1333,14 +1333,15 @@ export const OldAgentDayEnd: React.FC = () => {
     found: boolean;
     cylinder_type?: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM';
   }) => {
-    const claimant = crossAgentClaimedMap[scannedItem.consumer_number.toLowerCase()];
+    const claimant = crossAgentClaimedMap[numberKey(scannedItem.consumer_number)];
     if (claimant) {
       toast.error(`🚨 SCAM ALERT: #${scannedItem.consumer_number} was already claimed by ${claimant.agentName} today!`);
     }
 
     setEntries((prev) => {
+      const scannedKey = numberKey(scannedItem.consumer_number);
       const existingIdx = prev.findIndex(
-        (e) => e.consumer_number.toLowerCase() === scannedItem.consumer_number.toLowerCase()
+        (e) => numberKey(e.consumer_number) === scannedKey
       );
 
       if (existingIdx >= 0) {
@@ -2016,7 +2017,7 @@ export const OldAgentDayEnd: React.FC = () => {
           <div className="space-y-2 pr-0.5">
             {displayedEntries.map((item, index) => {
               const origIndex = entries.findIndex((e) => e.consumer_number === item.consumer_number);
-              const claimantAgent = item.duplicate_of_agent || crossAgentClaimedMap[item.consumer_number.toLowerCase()]?.agentName;
+              const claimantAgent = item.duplicate_of_agent || crossAgentClaimedMap[numberKey(item.consumer_number)]?.agentName;
 
               return (
                 <div

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { staffDb } from './staffDb';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
+import { numberKey } from './scanUtils';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
@@ -902,7 +903,16 @@ export interface PastClaimantInfo {
 export function getLocalPast7DaysBills(reportDateStr: string): Record<string, PastClaimantInfo> {
   try {
     const raw = localStorage.getItem(`bgcls_past_7days_bills_${reportDateStr}`);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    // Re-key on read: caches written before the shared normalizer may still use
+    // raw numbers ("0117231569") that would never match a normalized lookup.
+    const parsed = JSON.parse(raw) as Record<string, PastClaimantInfo>;
+    const result: Record<string, PastClaimantInfo> = {};
+    Object.entries(parsed).forEach(([num, info]) => {
+      const key = numberKey(num);
+      if (key) result[key] = info;
+    });
+    return result;
   } catch {
     return {};
   }
@@ -950,7 +960,8 @@ export async function fetchPast7DaysBills(
         if (Array.isArray(parsed)) {
           parsed.forEach((bill) => {
             if (bill && bill.consumer_number) {
-              const clean = bill.consumer_number.trim().toLowerCase();
+              const clean = numberKey(bill.consumer_number);
+              if (!clean) return;
               // Retain the latest past submission date
               if (!result[clean]) {
                 result[clean] = {
