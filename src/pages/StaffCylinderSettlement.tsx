@@ -41,6 +41,7 @@ import * as XLSX from 'xlsx';
 import { performLogout } from '../lib/auth';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
 import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
+import { findSettlementRowForAgent } from '../lib/bpclReportService';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 import { AddDeliveryBoyModal } from '../components/AddDeliveryBoyModal';
 import { ManageDeliveryBoysModal } from '../components/ManageDeliveryBoysModal';
@@ -216,6 +217,8 @@ export const StaffCylinderSettlement: React.FC = () => {
               );
             }
 
+            // Always refresh the in-memory list, even when the cloud has no
+            // rows: the delete-reconciliation above may have removed local ones.
             const merged = await db.staff_cylinder_settlements
               .where('settlement_date')
               .equals(date)
@@ -485,13 +488,45 @@ export const StaffCylinderSettlement: React.FC = () => {
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Are you sure you want to remove the settlement record for ${name}?`)) return;
 
+    if (!navigator.onLine) {
+      toast.error('Connect to the internet to delete a saved settlement.');
+      return;
+    }
+
+    const localRecord = settlements.find((s) => s.id === id);
+
     try {
-      await db.staff_cylinder_settlements.delete(id);
-      if (navigator.onLine) {
-        try {
-          await supabase.from('staff_cylinder_settlements').delete().eq('id', id);
-        } catch {}
+      // Delete in the cloud FIRST. If this fails, keep the local row so the
+      // list cannot show a deletion that the next refresh will resurrect.
+      let { data: deleted, error } = await supabase
+        .from('staff_cylinder_settlements')
+        .delete()
+        .eq('id', id)
+        .select('id');
+
+      // Older local rows can carry an id that differs from the cloud row.
+      // Fall back to the natural key (date + delivery boy) before giving up.
+      if (!error && (!deleted || deleted.length === 0) && localRecord?.agent_id) {
+        const fallback = await supabase
+          .from('staff_cylinder_settlements')
+          .delete()
+          .eq('settlement_date', selectedDate)
+          .eq('agent_id', localRecord.agent_id)
+          .select('id');
+        deleted = fallback.data;
+        error = fallback.error;
       }
+
+      if (error || !deleted || deleted.length === 0) {
+        toast.error(
+          error?.message
+            ? `Could not delete from the database: ${error.message}`
+            : 'Could not find this settlement in the database. Refresh and retry.'
+        );
+        return;
+      }
+
+      await db.staff_cylinder_settlements.delete(id);
       setSettlements((prev) => prev.filter((s) => s.id !== id));
       toast.success(`Removed settlement for ${name}`);
 
@@ -526,35 +561,32 @@ export const StaffCylinderSettlement: React.FC = () => {
     const agentName = selectedAgent?.name || 'Delivery Boy';
 
     setIsSaving(true);
-    // Safe ID Resolution: If already settled for this date, reuse existing ID to prevent unique constraint conflicts
-    let recordId = editingId;
+    // Prefer the id of the row that already exists in the cloud. The day-end
+    // and BPCL paths can create this row first, and using a fresh UUID would
+    // make the local row and the cloud row diverge.
     const existing = settlements.find((s) => (editingId && s.id === editingId) || s.agent_id === selectedAgentId);
-    if (!recordId) {
-      if (existing) {
-        recordId = existing.id;
-      } else {
-        recordId = crypto.randomUUID();
-      }
-    }
 
     // Preserve internal tags (__BGCLS_SCANNED_BILLS__ & __BGCLS_BPCL_REPORT__)
     // Re-read the freshest notes from the database immediately before writing.
     // Without this, a settlement page left open for hours overwrites bills that
     // the day-end scanner saved in the meantime.
     let freshNotes = existing?.notes || '';
+    let freshRow: Awaited<ReturnType<typeof findSettlementRowForAgent>> = null;
     if (navigator.onLine) {
       try {
-        const { data: freshRow } = await supabase
-          .from('staff_cylinder_settlements')
-          .select('notes')
-          .eq('settlement_date', selectedDate)
-          .eq('agent_id', selectedAgentId)
-          .maybeSingle();
+        freshRow = await findSettlementRowForAgent(
+          selectedDate,
+          agentName,
+          selectedAgentId
+        );
         if (freshRow?.notes) {
           freshNotes = freshRow.notes;
         }
       } catch (_) {}
     }
+
+    const recordId =
+      freshRow?.id || editingId || existing?.id || crypto.randomUUID();
 
     let internalTags = '';
     if (freshNotes) {
@@ -608,59 +640,92 @@ export const StaffCylinderSettlement: React.FC = () => {
       await db.staff_cylinder_settlements.put(record);
 
       // 2. Sync to Supabase with safe onConflict upsert
+      let cloudSynced = false;
       if (navigator.onLine) {
         try {
-          const { error } = await supabase.from('staff_cylinder_settlements').upsert(
-            {
-              id: record.id,
-              settlement_date: record.settlement_date,
-              agent_id: record.agent_id,
-              agent_name: record.agent_name,
-              cylinder_price: record.cylinder_price,
-              supplied_cylinders: record.supplied_cylinders,
-              cash_cylinders: record.cash_cylinders,
-              online_cylinders: record.online_cylinders,
-              upi_cylinders: record.upi_cylinders,
-              due_cylinders: record.due_cylinders,
-              returned_full_cylinders: record.returned_full_cylinders,
-              empty_cylinders: record.empty_cylinders,
-              expected_cash: record.expected_cash,
-              actual_cash: record.actual_cash,
-              cash_difference: record.cash_difference,
-              online_amount: record.online_amount,
-              upi_amount: record.upi_amount,
-              total_amount: record.total_amount,
-              status: record.status,
-              notes: record.notes,
-              updated_at: nowIso,
-            },
-            { onConflict: 'settlement_date, agent_id' }
-          );
+          const { data: upserted, error } = await supabase
+            .from('staff_cylinder_settlements')
+            .upsert(
+              {
+                id: record.id,
+                settlement_date: record.settlement_date,
+                agent_id: record.agent_id,
+                agent_name: record.agent_name,
+                cylinder_price: record.cylinder_price,
+                supplied_cylinders: record.supplied_cylinders,
+                cash_cylinders: record.cash_cylinders,
+                online_cylinders: record.online_cylinders,
+                upi_cylinders: record.upi_cylinders,
+                due_cylinders: record.due_cylinders,
+                returned_full_cylinders: record.returned_full_cylinders,
+                empty_cylinders: record.empty_cylinders,
+                expected_cash: record.expected_cash,
+                actual_cash: record.actual_cash,
+                cash_difference: record.cash_difference,
+                online_amount: record.online_amount,
+                upi_amount: record.upi_amount,
+                total_amount: record.total_amount,
+                status: record.status,
+                notes: record.notes,
+                updated_at: nowIso,
+              },
+              // PostgREST expects a comma-separated column list. The previous
+              // "settlement_date, agent_id" (with a space) could be rejected,
+              // which made every cloud save fail silently.
+              { onConflict: 'settlement_date,agent_id' }
+            )
+            .select('id')
+            .maybeSingle();
 
-          if (!error) {
+          if (error) {
+            console.error('Failed to sync settlement to cloud:', error.message);
+          } else {
+            cloudSynced = true;
+            const cloudId = upserted?.id;
+            if (cloudId && cloudId !== record.id) {
+              // The cloud already had this (date, boy) row under another id.
+              // Keep the local copy aligned with the authoritative id.
+              await db.staff_cylinder_settlements.delete(record.id);
+              record.id = cloudId;
+            }
             record.synced = true;
-            await db.staff_cylinder_settlements.update(record.id, { synced: true });
+            await db.staff_cylinder_settlements.put(record);
           }
-        } catch {}
+        } catch (cloudErr) {
+          console.error('Failed to sync settlement to cloud:', cloudErr);
+        }
       }
 
       await fetchSettlements(selectedDate);
       setIsFormOpen(false);
-      toast.success(`Settlement saved for ${agentName}!`);
 
-      // 3. Instant Realtime Broadcast to other devices
-      try {
-        syncChannelRef.current?.send({
-          type: 'broadcast',
-          event: 'settlement_changed',
-          payload: {
-            action: 'SAVE',
-            settlement_date: selectedDate,
-            record: { ...record, synced: true },
-            sender: staffUserName,
-          },
+      if (cloudSynced) {
+        toast.success(`Settlement saved for ${agentName}!`);
+      } else if (!navigator.onLine) {
+        toast.success('Settlement saved on this device. It will sync when online.', {
+          icon: '📴',
         });
-      } catch {}
+      } else {
+        toast.error(
+          'Saved on this device, but the cloud sync failed. It will retry automatically.'
+        );
+      }
+
+      // 3. Instant Realtime Broadcast to other devices (only if the cloud has it)
+      if (cloudSynced) {
+        try {
+          syncChannelRef.current?.send({
+            type: 'broadcast',
+            event: 'settlement_changed',
+            payload: {
+              action: 'SAVE',
+              settlement_date: selectedDate,
+              record: { ...record, synced: true },
+              sender: staffUserName,
+            },
+          });
+        } catch {}
+      }
     } catch (err: any) {
       console.error('Save error:', err);
       toast.error('Failed to save settlement');

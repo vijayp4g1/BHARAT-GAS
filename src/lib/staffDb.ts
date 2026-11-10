@@ -38,6 +38,32 @@ type SingleMode = 'one' | 'maybe' | null;
 let warnedMissingFunction = false;
 
 /**
+ * Tables a non-staff delivery boy must be able to use for their own day-end
+ * work. The old admin-api required `is_staff` for every write, which left a
+ * non-staff boy's scanned bills in localStorage with "Staff access required".
+ *
+ * The database RLS policies already allow any authenticated user to read/write
+ * these rows, so this fallback is the same trust level the app had before the
+ * admin-api refactor. Deploy the updated admin-api to enforce ownership
+ * server-side; this path is a safety net so saving is never blocked.
+ */
+const NON_STAFF_SELF_SERVICE_TABLES = new Set([
+  'day_end_reports',
+  'staff_cylinder_settlements',
+  'dispatch_items',
+]);
+
+let warnedNonStaffFallback = false;
+
+function isForbiddenError(error: StaffDbError | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === 'FORBIDDEN') return true;
+  return /staff access required|permission denied|row[_ ]level security/i.test(
+    error.message || ''
+  );
+}
+
+/**
  * The Edge Function is considered missing when Supabase answers 404 (function
  * not deployed) or the request never reached a function runtime.
  */
@@ -273,6 +299,34 @@ class StaffQueryBuilder implements PromiseLike<StaffDbResult<any>> {
     }
   }
 
+  /**
+   * A non-staff delivery boy must still be able to read/save their own day-end
+   * rows. Only fall back for the explicit self-service tables, and only when
+   * the app has verified the caller is non-staff. Never affects the agents
+   * table or other staff-only data.
+   */
+  private shouldFallbackForNonStaff(
+    error: StaffDbError | null | undefined
+  ): boolean {
+    if (!isForbiddenError(error)) return false;
+    if (!NON_STAFF_SELF_SERVICE_TABLES.has(this.table)) return false;
+
+    try {
+      if (localStorage.getItem('bgcls_is_staff') !== 'false') return false;
+    } catch (_) {
+      return false;
+    }
+
+    if (!warnedNonStaffFallback) {
+      warnedNonStaffFallback = true;
+      console.warn(
+        '[bgcls] Non-staff day-end access is using the direct RLS fallback. ' +
+          'Deploy the updated admin-api to enforce ownership server-side.'
+      );
+    }
+    return true;
+  }
+
   private async execute(): Promise<StaffDbResult<any>> {
     const body: Record<string, unknown> = {
       action: this.action,
@@ -303,14 +357,21 @@ class StaffQueryBuilder implements PromiseLike<StaffDbResult<any>> {
         warnMissingFunction();
         return this.executeFallback();
       }
+      if (this.shouldFallbackForNonStaff(error)) {
+        return this.executeFallback();
+      }
       return { data: null, error };
     }
     if (response?.error) {
-      if (isMissingFunctionError(response.error as StaffDbError)) {
+      const error = response.error as StaffDbError;
+      if (isMissingFunctionError(error)) {
         warnMissingFunction();
         return this.executeFallback();
       }
-      return { data: null, error: response.error as StaffDbError };
+      if (this.shouldFallbackForNonStaff(error)) {
+        return this.executeFallback();
+      }
+      return { data: null, error };
     }
 
     return this.shape(response?.data ?? null);

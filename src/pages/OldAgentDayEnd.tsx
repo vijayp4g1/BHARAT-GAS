@@ -52,6 +52,7 @@ import {
 } from '../lib/dayEndService';
 import type { DeliveryBoy } from '../lib/agentService';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { PERMISSIONS_TOPIC } from '../lib/realtimeBus';
 import { 
   getAgentAssignedDeliveryBoy, 
   fetchAgentDeliveryBoyAssignments,
@@ -320,7 +321,7 @@ export const OldAgentDayEnd: React.FC = () => {
     verifyAccess();
 
     // Listen for realtime route assignment updates from Manager Dashboard
-    const channel = supabase.channel('bgcls_old_day_end_perm_channel');
+    const channel = supabase.channel(PERMISSIONS_TOPIC);
     channel.on('broadcast', { event: 'delivery_boy_assignment_changed' }, (payload) => {
       const currentId = localStorage.getItem('bgcls_agent_id');
       const currentUser = (

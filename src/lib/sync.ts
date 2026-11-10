@@ -1,5 +1,10 @@
 import db from './db';
 import { supabase } from './supabase';
+import {
+  extractBpclReportFromNotes,
+  findSettlementRowForAgent,
+  mergeBpclIntoNotes,
+} from './bpclReportService';
 
 const LAST_PULL_KEY = 'bgcls_last_pull_timestamp';
 
@@ -12,7 +17,10 @@ export async function pullLatestCloudData() {
 
   try {
     const lastPull = localStorage.getItem(LAST_PULL_KEY);
-    const nowIso = new Date().toISOString();
+    // Overlap the high-water mark by 2 minutes: client clocks can drift, and a
+    // record written just before the previous pull must not be skipped.
+    const highWaterIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    let incrementalFailed = false;
 
     // 1. Fetch updated locations from Supabase
     let locQuery = supabase.from('consumer_locations').select('*');
@@ -20,6 +28,7 @@ export async function pullLatestCloudData() {
       locQuery = locQuery.gte('uploaded_at', lastPull);
     }
     const { data: remoteLocations, error: locError } = await locQuery;
+    if (locError) incrementalFailed = true;
 
     if (!locError && remoteLocations && remoteLocations.length > 0) {
       const formattedLocs = remoteLocations.map((l) => ({
@@ -48,6 +57,7 @@ export async function pullLatestCloudData() {
       photoQuery = photoQuery.gte('uploaded_at', lastPull);
     }
     const { data: remotePhotos, error: photoError } = await photoQuery;
+    if (photoError) incrementalFailed = true;
 
     if (!photoError && remotePhotos && remotePhotos.length > 0) {
       const formattedPhotos = remotePhotos.map((p) => ({
@@ -78,6 +88,7 @@ export async function pullLatestCloudData() {
       notesQuery = notesQuery.gte('created_at', lastPull);
     }
     const { data: remoteNotes, error: notesError } = await notesQuery;
+    if (notesError) incrementalFailed = true;
 
     if (!notesError && remoteNotes && remoteNotes.length > 0) {
       const formattedNotes = remoteNotes.map((n) => ({
@@ -177,8 +188,11 @@ export async function pullLatestCloudData() {
       });
     }
 
-    // Update last pull timestamp
-    localStorage.setItem(LAST_PULL_KEY, nowIso);
+    // Only advance the incremental high-water mark when all three pulls
+    // succeeded; otherwise a transient error would permanently skip records.
+    if (!incrementalFailed) {
+      localStorage.setItem(LAST_PULL_KEY, highWaterIso);
+    }
     console.log('Pulled latest cloud data into local database successfully');
   } catch (err) {
     console.error('Failed to pull cloud data:', err);
@@ -385,6 +399,30 @@ export async function syncOfflineData() {
     if (unsyncedSettlements.length > 0) {
       await Promise.all(
         unsyncedSettlements.map(async (s) => {
+          // Never let a stale local Notes blob clobber a newer archive /
+          // no-supply flag that another device wrote to the cloud. Keep the
+          // newest BPCL section while pushing the local scanned bills.
+          let notesToPush = s.notes || '';
+          try {
+            const cloudRow = await findSettlementRowForAgent(
+              s.settlement_date,
+              s.agent_name,
+              s.agent_id
+            );
+            const cloudBpcl = extractBpclReportFromNotes(cloudRow?.notes);
+            const localBpcl = extractBpclReportFromNotes(notesToPush);
+            const cloudTime = Date.parse(cloudBpcl?.updated_at || '') || 0;
+            const localTime = Date.parse(localBpcl?.updated_at || '') || 0;
+            if (cloudBpcl && (!localBpcl || cloudTime >= localTime)) {
+              notesToPush = mergeBpclIntoNotes(notesToPush, cloudBpcl);
+            }
+          } catch (_) {}
+
+          // The row is being written now, so its updated_at must be now. Using
+          // the offline record's old timestamp made the row appear older than
+          // concurrent cloud writes and broke the optimistic checks.
+          const pushedAt = new Date().toISOString();
+
           const { error } = await supabase
             .from('staff_cylinder_settlements')
             .upsert(
@@ -408,14 +446,18 @@ export async function syncOfflineData() {
                 upi_amount: s.upi_amount,
                 total_amount: s.total_amount,
                 status: s.status,
-                notes: s.notes,
-                updated_at: s.updated_at || new Date().toISOString(),
+                notes: notesToPush,
+                updated_at: pushedAt,
               },
-              { onConflict: 'settlement_date, agent_id' }
+              { onConflict: 'settlement_date,agent_id' }
             );
 
           if (!error) {
-            await db.staff_cylinder_settlements.update(s.id, { synced: true });
+            await db.staff_cylinder_settlements.update(s.id, {
+              synced: true,
+              notes: notesToPush,
+              updated_at: pushedAt,
+            });
           }
         })
       );

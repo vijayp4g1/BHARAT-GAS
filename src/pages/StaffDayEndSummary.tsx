@@ -211,13 +211,23 @@ export const StaffDayEndSummary: React.FC = () => {
       const baseNoSupply = storedNoSupply ? new Set<string>(JSON.parse(storedNoSupply)) : new Set<string>();
 
       Object.entries(bpclReportsMap).forEach(([normName, rep]) => {
-        if (rep?.archived) {
+        if (!rep) return;
+
+        // The cloud report is authoritative once it carries an explicit flag.
+        // Previously only `true` was applied, so unarchiving on another device
+        // could never remove this device's cached flag.
+        if (rep.archived === true) {
           baseArchived.add(normName);
           baseNoSupply.delete(normName);
+        } else if (rep.archived === false) {
+          baseArchived.delete(normName);
         }
-        if (rep?.no_supply) {
+
+        if (rep.no_supply === true) {
           baseNoSupply.add(normName);
           baseArchived.delete(normName);
+        } else if (rep.no_supply === false) {
+          baseNoSupply.delete(normName);
         }
       });
 
@@ -228,15 +238,47 @@ export const StaffDayEndSummary: React.FC = () => {
         }
       });
 
+      // Persist the reconciled sets so a reload does not briefly show a stale
+      // downside status before the cloud map is applied.
+      try {
+        localStorage.setItem(
+          `bgcls_archived_boys_${reportDate}`,
+          JSON.stringify(Array.from(baseArchived))
+        );
+        localStorage.setItem(
+          `bgcls_no_supply_boys_${reportDate}`,
+          JSON.stringify(Array.from(baseNoSupply))
+        );
+      } catch (_) {}
+
       setArchivedBoyNames(baseArchived);
       setNoSupplyBoyNames(baseNoSupply);
     } catch (_) {}
   }, [reportDate, bpclReportsMap, rosterSummaries]);
 
+  // Persist both downside status sets atomically. Used for optimistic updates
+  // and to roll back the UI when the database write fails.
+  const persistBoyStatusSets = (archived: Set<string>, noSupply: Set<string>) => {
+    setArchivedBoyNames(new Set(archived));
+    setNoSupplyBoyNames(new Set(noSupply));
+    try {
+      localStorage.setItem(
+        `bgcls_archived_boys_${reportDate}`,
+        JSON.stringify(Array.from(archived))
+      );
+      localStorage.setItem(
+        `bgcls_no_supply_boys_${reportDate}`,
+        JSON.stringify(Array.from(noSupply))
+      );
+    } catch (_) {}
+  };
+
   // 1-Click Toggle for Delivery Boy Archive
   const handleToggleArchive = async (boyName: string, boyId?: string, forceStatus?: boolean) => {
     const norm = boyName.trim().toUpperCase();
-    const isCurrentlyArchived = archivedBoyNames.has(norm);
+    const prevArchived = new Set(archivedBoyNames);
+    const prevNoSupply = new Set(noSupplyBoyNames);
+    const isCurrentlyArchived = prevArchived.has(norm);
     const nextStatus = forceStatus !== undefined ? forceStatus : !isCurrentlyArchived;
 
     // 1. Instant local reactive update
@@ -264,21 +306,39 @@ export const StaffDayEndSummary: React.FC = () => {
         } catch (_) {}
         return next;
       });
-      toast.success(`📦 Archived ${boyName}! Moved to downside.`, { id: `archive-${norm}` });
-    } else {
-      toast.success(`↩️ Restored ${boyName} to Active Roster.`, { id: `archive-${norm}` });
     }
 
-    // 2. Persist to cloud in background
+    // 2. Persist to cloud. Only announce success if the DB write really worked.
+    let saved = false;
     try {
-      await toggleBoyArchived(reportDate, boyName, boyId, nextStatus);
+      saved = await toggleBoyArchived(reportDate, boyName, boyId, nextStatus);
+    } catch (err) {
+      console.warn('Could not persist archive status to cloud:', err);
+    }
+
+    if (!saved) {
+      // Undo the optimistic UI so this device cannot show a status the
+      // database (and therefore other devices) never received.
+      persistBoyStatusSets(prevArchived, prevNoSupply);
+      toast.error(`Could not save archive status for ${boyName} to the database. Please retry.`, {
+        id: `archive-${norm}`,
+      });
+    } else {
+      toast.success(
+        nextStatus ? `📦 Archived ${boyName}! Moved to downside.` : `↩️ Restored ${boyName} to Active Roster.`,
+        { id: `archive-${norm}` }
+      );
+    }
+
+    // 3. Reconcile with the database (also after a failed write).
+    try {
       const updated = await fetchAllBpclReportsForDate(reportDate);
       setBpclReportsMap(updated);
       if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
         setActiveBpclReport(updated[norm] || null);
       }
     } catch (err) {
-      console.warn('Could not persist archive status to cloud:', err);
+      console.warn('Could not refresh BPCL status after archive toggle:', err);
     }
   };
 
@@ -286,7 +346,9 @@ export const StaffDayEndSummary: React.FC = () => {
   const handleToggleNoSupply = async (boyName: string, boyId?: string, forceStatus?: boolean) => {
     const norm = boyName.trim().toUpperCase();
     const boyHasBills = (rosterSummaries[norm]?.total_deliveries ?? 0) > 0;
-    const isCurrentlyNoSupply = noSupplyBoyNames.has(norm);
+    const prevArchived = new Set(archivedBoyNames);
+    const prevNoSupply = new Set(noSupplyBoyNames);
+    const isCurrentlyNoSupply = prevNoSupply.has(norm);
     const nextStatus = forceStatus !== undefined ? forceStatus : !isCurrentlyNoSupply;
 
     if (nextStatus && boyHasBills) {
@@ -319,21 +381,37 @@ export const StaffDayEndSummary: React.FC = () => {
         } catch (_) {}
         return next;
       });
-      toast.success(`🚫 Marked ${boyName} as No Supply Today! Moved to downside.`, { id: `nosupply-${norm}` });
-    } else {
-      toast.success(`↩️ Restored ${boyName} to Active Roster.`, { id: `nosupply-${norm}` });
     }
 
-    // 2. Persist to cloud in background
+    // 2. Persist to cloud. Only announce success if the DB write really worked.
+    let saved = false;
     try {
-      await toggleBoyNoSupply(reportDate, boyName, boyId, nextStatus);
+      saved = await toggleBoyNoSupply(reportDate, boyName, boyId, nextStatus);
+    } catch (err) {
+      console.warn('Could not persist no supply status to cloud:', err);
+    }
+
+    if (!saved) {
+      persistBoyStatusSets(prevArchived, prevNoSupply);
+      toast.error(`Could not save No Supply status for ${boyName} to the database. Please retry.`, {
+        id: `nosupply-${norm}`,
+      });
+    } else {
+      toast.success(
+        nextStatus ? `🚫 Marked ${boyName} as No Supply Today! Moved to downside.` : `↩️ Restored ${boyName} to Active Roster.`,
+        { id: `nosupply-${norm}` }
+      );
+    }
+
+    // 3. Reconcile with the database (also after a failed write).
+    try {
       const updated = await fetchAllBpclReportsForDate(reportDate);
       setBpclReportsMap(updated);
       if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
         setActiveBpclReport(updated[norm] || null);
       }
     } catch (err) {
-      console.warn('Could not persist no supply status to cloud:', err);
+      console.warn('Could not refresh BPCL status after no-supply toggle:', err);
     }
   };
 

@@ -31,6 +31,44 @@ const BPCL_STORAGE_PREFIX = 'bgcls_bpcl_report_';
 const BPCL_TAG = '__BGCLS_BPCL_REPORT__';
 const SCANNED_TAG = '__BGCLS_SCANNED_BILLS__';
 
+/**
+ * One long-lived channel for BPCL/archive/no-supply broadcasts.
+ *
+ * Realtime `send()` is only delivered on a channel that has finished joining.
+ * Creating a channel and immediately calling send() (the previous behaviour)
+ * dropped every broadcast, so other staff devices only saw archive / no-supply
+ * changes after a manual reload. The day-end scanner already uses this pattern.
+ */
+let bpclBroadcastChannel: ReturnType<typeof supabase.channel> | null = null;
+let bpclBroadcastJoined = false;
+
+function getBpclBroadcastChannel() {
+  if (!bpclBroadcastChannel) {
+    bpclBroadcastChannel = supabase.channel('bgcls_bpcl_channel', {
+      config: { broadcast: { self: false } },
+    });
+    bpclBroadcastChannel.subscribe((status: string) => {
+      bpclBroadcastJoined = status === 'SUBSCRIBED';
+    });
+  }
+  return bpclBroadcastChannel;
+}
+
+async function broadcastBpclUpdate(payload: Record<string, unknown>): Promise<void> {
+  try {
+    const channel = getBpclBroadcastChannel();
+    if (!bpclBroadcastJoined) {
+      for (let i = 0; i < 10 && !bpclBroadcastJoined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    await channel.send({ type: 'broadcast', event: 'bpcl_report_updated', payload });
+  } catch (err) {
+    // Realtime is an optimisation; the database write has already succeeded.
+    console.warn('BPCL realtime broadcast skipped:', err);
+  }
+}
+
 const getStorageKey = (dateStr: string, agentName: string): string => {
   const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
   return `${BPCL_STORAGE_PREFIX}${dateStr}_${norm}`;
@@ -549,6 +587,64 @@ export function setLocalBpclReport(dateStr: string, agentName: string, data: Bpc
   }
 }
 
+interface SettlementStatusRow {
+  id: string;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  notes?: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * Finds the settlement row for a (date, delivery boy) pair.
+ *
+ * Matching is done in JS after one query for the date because:
+ *  - PostgREST `or=(agent_id.eq...,agent_name.ilike...)` breaks when a name
+ *    contains a comma or other filter characters,
+ *  - agent_id can be NULL on rows created by other screens,
+ *  - duplicate rows can exist (the DB unique key includes agent_id, and NULLs
+ *    are distinct), so maybeSingle() would otherwise pick an arbitrary one.
+ * The most recently updated matching row wins.
+ */
+export async function findSettlementRowForAgent(
+  dateStr: string,
+  agentName: string,
+  agentId?: string
+): Promise<SettlementStatusRow | null> {
+  try {
+    const { data, error } = await staffDb
+      .from('staff_cylinder_settlements')
+      .select('id, agent_id, agent_name, notes, updated_at')
+      .eq('settlement_date', dateStr);
+
+    if (error) {
+      console.warn('Settlement lookup failed:', error.message);
+      return null;
+    }
+
+    const rows = (Array.isArray(data) ? data : []) as SettlementStatusRow[];
+    const normName = (agentName || '').trim().toUpperCase();
+
+    const matches = rows.filter((row) => {
+      if (agentId && row.agent_id === agentId) return true;
+      return (row.agent_name || '').trim().toUpperCase() === normName;
+    });
+
+    if (matches.length === 0) return null;
+
+    matches.sort((a, b) => {
+      const aTime = Date.parse(a.updated_at || '') || 0;
+      const bTime = Date.parse(b.updated_at || '') || 0;
+      return bTime - aTime;
+    });
+
+    return matches[0];
+  } catch (err) {
+    console.warn('Settlement lookup error:', err);
+    return null;
+  }
+}
+
 /**
  * Fetch BPCL report for a single delivery boy on a specific date (Cloud + Local)
  */
@@ -561,20 +657,9 @@ export async function fetchBpclReport(
 
   // 1. Try cloud from staff_cylinder_settlements
   try {
-    let query = staffDb
-      .from('staff_cylinder_settlements')
-      .select('notes, updated_at')
-      .eq('settlement_date', dateStr);
-
-    if (agentId) {
-      query = query.or(`agent_id.eq.${agentId},agent_name.ilike.${agentName}`);
-    } else {
-      query = query.ilike('agent_name', agentName);
-    }
-
-    const { data } = await query.maybeSingle();
-    if (data && data.notes) {
-      const parsed = extractBpclReportFromNotes(data.notes);
+    const row = await findSettlementRowForAgent(dateStr, agentName, agentId);
+    if (row?.notes) {
+      const parsed = extractBpclReportFromNotes(row.notes);
       if (parsed) {
         setLocalBpclReport(dateStr, normName, parsed);
         return parsed;
@@ -655,7 +740,31 @@ export async function fetchAllBpclReportsForDate(
 }
 
 /**
+ * Broadcast + local event once a BPCL/archive/no-supply write is committed.
+ */
+async function finishBpclSave(
+  dateStr: string,
+  agentName: string,
+  reportData: BpclReportData
+): Promise<void> {
+  await broadcastBpclUpdate({ dateStr, agentName, reportData });
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent('bgcls-bpcl-updated', {
+        detail: { dateStr, agentName, reportData },
+      })
+    );
+  } catch (_) {}
+}
+
+/**
  * Save BPCL Report to Cloud & Local Storage
+ *
+ * Returns false when the database write actually failed. Callers must not
+ * pretend success in that case: the old code ignored update/insert errors, so
+ * an archive / no-supply change could live only in localStorage and never
+ * reach the database or other devices.
  */
 export async function saveBpclReportToCloud(payload: {
   dateStr: string;
@@ -671,107 +780,241 @@ export async function saveBpclReportToCloud(payload: {
 }): Promise<boolean> {
   const normName = payload.agentName.trim().toUpperCase();
   const nowIso = new Date().toISOString();
+  let rollbackLocal: (() => void) | null = null;
 
-  const reportData: BpclReportData = {
-    agent_name: normName,
-    agent_id: payload.agentId,
-    report_date: payload.dateStr,
-    checked_done: payload.checked_done,
-    checked_at: payload.checked_done ? nowIso : undefined,
-    checked_by: payload.checked_by || localStorage.getItem('bgcls_agent_name') || 'Staff',
-    archived: payload.archived,
-    no_supply: payload.no_supply,
-    pending_bills: payload.pending_bills,
-    online_bills: payload.online_bills,
-    raw_text: payload.raw_text,
-    updated_at: nowIso,
-  };
-
-  // 1. Immediately cache locally
-  setLocalBpclReport(payload.dateStr, normName, reportData);
-
-  // 2. Persist to Supabase staff_cylinder_settlements
   try {
-    let query = staffDb
-      .from('staff_cylinder_settlements')
-      .select('id, notes, supplied_cylinders, empty_cylinders')
-      .eq('settlement_date', payload.dateStr);
+    // Read the current row first so we can:
+    //  a) preserve archive / no-supply when a caller (the BPCL paste modal)
+    //     does not pass them, and
+    //  b) update the right row instead of inserting a duplicate.
+    const existing = await findSettlementRowForAgent(
+      payload.dateStr,
+      payload.agentName,
+      payload.agentId
+    );
+    const previous =
+      extractBpclReportFromNotes(existing?.notes) ||
+      getLocalBpclReport(payload.dateStr, normName);
 
-    if (payload.agentId) {
-      query = query.or(`agent_id.eq.${payload.agentId},agent_name.ilike.${normName}`);
-    } else {
-      query = query.ilike('agent_name', normName);
-    }
+    // `undefined` = caller does not care; true/false = explicit operator action.
+    const archived =
+      payload.archived !== undefined ? payload.archived : previous?.archived;
+    const noSupply =
+      payload.no_supply !== undefined ? payload.no_supply : previous?.no_supply;
 
-    const { data: existing } = await query.maybeSingle();
+    const reportData: BpclReportData = {
+      agent_name: normName,
+      agent_id: payload.agentId,
+      report_date: payload.dateStr,
+      checked_done: payload.checked_done,
+      checked_at: payload.checked_done ? nowIso : undefined,
+      checked_by: payload.checked_by || localStorage.getItem('bgcls_agent_name') || 'Staff',
+      archived,
+      no_supply: noSupply,
+      pending_bills: payload.pending_bills,
+      online_bills: payload.online_bills,
+      raw_text: payload.raw_text,
+      updated_at: nowIso,
+    };
 
+    // 1. Cache locally with the final flag values.
+    setLocalBpclReport(payload.dateStr, normName, reportData);
+
+    // If the database write fails, the local cache must not keep claiming a
+    // status the database never received.
+    rollbackLocal = () => {
+      try {
+        if (previous) {
+          setLocalBpclReport(payload.dateStr, normName, previous);
+        } else {
+          localStorage.removeItem(getStorageKey(payload.dateStr, normName));
+        }
+      } catch (_) {}
+    };
+
+    // 2. Update the existing settlement row.
     if (existing) {
-      const updatedNotes = mergeBpclIntoNotes(existing.notes, reportData);
-      await staffDb
-        .from('staff_cylinder_settlements')
-        .update({
-          notes: updatedNotes,
-          updated_at: nowIso,
-        })
-        .eq('id', existing.id);
-    } else {
-      // Create new settlement record with this BPCL report
-      const newNotes = mergeBpclIntoNotes('', reportData);
-      await staffDb.from('staff_cylinder_settlements').insert({
-        settlement_date: payload.dateStr,
-        agent_id: payload.agentId || null,
-        agent_name: normName,
-        cylinder_price: 994,
-        supplied_cylinders: 0,
-        cash_cylinders: 0,
-        online_cylinders: payload.online_bills.length,
-        upi_cylinders: 0,
-        due_cylinders: 0,
-        returned_full_cylinders: 0,
-        empty_cylinders: 0,
-        expected_cash: 0,
-        actual_cash: 0,
-        cash_difference: 0,
-        online_amount: 0,
-        upi_amount: 0,
-        total_amount: 0,
-        status: 'PENDING',
-        notes: newNotes,
-        updated_at: nowIso,
-      });
+      let current = existing;
+      let rowWasDeleted = false;
+
+      // Optimistic-concurrency retry: if the day-end scanner wrote new notes
+      // between our read and write, re-read and merge instead of overwriting
+      // the fresher scanned bills / flags.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const attemptIso = new Date().toISOString();
+        reportData.updated_at = attemptIso;
+        const updatedNotes = mergeBpclIntoNotes(current.notes, reportData);
+
+        let updateQuery = staffDb
+          .from('staff_cylinder_settlements')
+          .update({
+            notes: updatedNotes,
+            updated_at: attemptIso,
+          })
+          .eq('id', current.id);
+
+        if (current.updated_at) {
+          updateQuery = updateQuery.eq('updated_at', current.updated_at);
+        }
+
+        const { data, error } = await updateQuery;
+
+        if (error) {
+          console.error('Failed to save BPCL report (update):', error.message);
+          rollbackLocal?.();
+          return false;
+        }
+
+        const updatedRowCount = Array.isArray(data) ? data.length : 1;
+        if (updatedRowCount > 0) {
+          setLocalBpclReport(payload.dateStr, normName, reportData);
+          await finishBpclSave(payload.dateStr, normName, reportData);
+          return true;
+        }
+
+        // 0 rows: either a concurrent write changed updated_at, or the row was
+        // deleted / the timestamp filter did not match due to serialization
+        // precision. Re-read before deciding.
+        const fresh = await findSettlementRowForAgent(
+          payload.dateStr,
+          payload.agentName,
+          payload.agentId
+        );
+        if (!fresh) {
+          rowWasDeleted = true;
+          break;
+        }
+
+        if (fresh.updated_at === current.updated_at) {
+          // The row is exactly as we read it, so the timestamp condition was
+          // the blocker. Retry without it (still safe: nothing changed).
+          const fallbackIso = new Date().toISOString();
+          const fallbackNotes = mergeBpclIntoNotes(fresh.notes, reportData);
+          const { data: fallbackData, error: fallbackError } = await staffDb
+            .from('staff_cylinder_settlements')
+            .update({ notes: fallbackNotes, updated_at: fallbackIso })
+            .eq('id', fresh.id);
+
+          if (
+            !fallbackError &&
+            (!Array.isArray(fallbackData) || fallbackData.length > 0)
+          ) {
+            reportData.updated_at = fallbackIso;
+            setLocalBpclReport(payload.dateStr, normName, reportData);
+            await finishBpclSave(payload.dateStr, normName, reportData);
+            return true;
+          }
+
+          console.error(
+            'Failed to save BPCL report (fallback update):',
+            fallbackError?.message || 'no row updated'
+          );
+          rollbackLocal?.();
+          return false;
+        }
+
+        current = fresh;
+      }
+
+      if (!rowWasDeleted) {
+        console.error('Failed to save BPCL report: the row kept changing, please retry');
+        rollbackLocal?.();
+        return false;
+      }
+      // Row disappeared â†’ fall through and insert a fresh one.
     }
 
-    // Broadcast realtime update
-    try {
-      const channel = supabase.channel('bgcls_bpcl_channel');
-      await channel.send({
-        type: 'broadcast',
-        event: 'bpcl_report_updated',
-        payload: {
-          dateStr: payload.dateStr,
-          agentName: normName,
-          reportData,
-        },
-      });
-    } catch (_) {}
+    // 3. No row yet: create one so the flag/report has somewhere to live.
+    const insertNotes = mergeBpclIntoNotes(existing?.notes, reportData);
+    const insertPayload = {
+      settlement_date: payload.dateStr,
+      agent_id: payload.agentId || null,
+      agent_name: normName,
+      cylinder_price: 994,
+      supplied_cylinders: 0,
+      cash_cylinders: 0,
+      online_cylinders: payload.online_bills.length,
+      upi_cylinders: 0,
+      due_cylinders: 0,
+      returned_full_cylinders: 0,
+      empty_cylinders: 0,
+      expected_cash: 0,
+      actual_cash: 0,
+      cash_difference: 0,
+      online_amount: 0,
+      upi_amount: 0,
+      total_amount: 0,
+      status: 'PENDING',
+      notes: insertNotes,
+      updated_at: reportData.updated_at || nowIso,
+    };
 
-    // Dispatch local DOM event for immediate UI update on current device
-    try {
-      window.dispatchEvent(
-        new CustomEvent('bgcls-bpcl-updated', {
-          detail: {
-            dateStr: payload.dateStr,
-            agentName: normName,
-            reportData,
-          },
-        })
+    const { error: insertError } = await staffDb
+      .from('staff_cylinder_settlements')
+      .insert(insertPayload);
+
+    if (!insertError) {
+      await finishBpclSave(payload.dateStr, normName, reportData);
+      return true;
+    }
+
+    // Concurrent insert by another device: unique(settlement_date, agent_id).
+    // Re-read and update that row instead of losing the change.
+    const isUniqueViolation =
+      insertError.code === '23505' ||
+      /duplicate key|unique constraint/i.test(insertError.message || '');
+    if (isUniqueViolation) {
+      const retry = await findSettlementRowForAgent(
+        payload.dateStr,
+        payload.agentName,
+        payload.agentId
       );
-    } catch (_) {}
+      if (retry) {
+        const retryIso = new Date().toISOString();
+        reportData.updated_at = retryIso;
+        const { data: retryData, error: retryError } = await staffDb
+          .from('staff_cylinder_settlements')
+          .update({
+            notes: mergeBpclIntoNotes(retry.notes, reportData),
+            updated_at: retryIso,
+          })
+          .eq('id', retry.id);
 
-    return true;
+        if (!retryError && (!Array.isArray(retryData) || retryData.length > 0)) {
+          setLocalBpclReport(payload.dateStr, normName, reportData);
+          await finishBpclSave(payload.dateStr, normName, reportData);
+          return true;
+        }
+        console.error(
+          'Failed to save BPCL report (retry update):',
+          retryError?.message || 'row disappeared'
+        );
+        rollbackLocal?.();
+        return false;
+      }
+    }
+
+    console.error('Failed to save BPCL report (insert):', insertError.message);
+    rollbackLocal?.();
+    return false;
   } catch (err) {
     console.warn('Failed to save BPCL report to cloud:', err);
+    rollbackLocal?.();
     return false;
+  }
+}
+
+/**
+ * Persist a BPCL report and throw when the database write fails. Used by the
+ * bill-level actions so their UI try/catch shows a real error instead of
+ * pretending the bill was saved.
+ */
+async function saveBpclOrThrow(
+  payload: Parameters<typeof saveBpclReportToCloud>[0]
+): Promise<void> {
+  const saved = await saveBpclReportToCloud(payload);
+  if (!saved) {
+    throw new Error('Could not save the BPCL bill to the database. Please retry.');
   }
 }
 
@@ -823,7 +1066,7 @@ export async function addBpclBillManually(
     updated_at: new Date().toISOString(),
   };
 
-  await saveBpclReportToCloud({
+  await saveBpclOrThrow({
     dateStr,
     agentName: normName,
     agentId,
@@ -908,7 +1151,7 @@ export async function updateBpclBill(
     updated_at: new Date().toISOString(),
   };
 
-  await saveBpclReportToCloud({
+  await saveBpclOrThrow({
     dateStr,
     agentName: normName,
     agentId,
@@ -973,7 +1216,7 @@ export async function deleteBpclBill(
     updated_at: new Date().toISOString(),
   };
 
-  await saveBpclReportToCloud({
+  await saveBpclOrThrow({
     dateStr,
     agentName: normName,
     agentId,
@@ -1071,7 +1314,7 @@ export async function clearPendingBillAndMarkDelivered(
     updated_at: new Date().toISOString(),
   };
 
-  await saveBpclReportToCloud({
+  await saveBpclOrThrow({
     dateStr,
     agentName: normName,
     agentId,
@@ -1206,6 +1449,7 @@ export async function toggleBillsCheckedDone(
     agentId,
     checked_done: nextStatus,
     archived: current.archived,
+    no_supply: current.no_supply,
     pending_bills: current.pending_bills,
     online_bills: current.online_bills,
     raw_text: current.raw_text,

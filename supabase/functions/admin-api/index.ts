@@ -68,6 +68,16 @@ const WRITE_TABLES = new Set([
   'dispatch_items',
 ])
 
+/**
+ * Tables a non-staff delivery boy may use for their own day-end work.
+ * Reads are allowed (they need cross-agent duplicate detection); writes are
+ * restricted to rows where agent_id = caller.userId.
+ */
+const SELF_SERVICE_TABLES = new Set([
+  'day_end_reports',
+  'staff_cylinder_settlements',
+])
+
 /** Columns a staff member is allowed to change on the agents table. */
 const AGENT_WRITABLE_COLUMNS = new Set(['name', 'phone', 'status'])
 
@@ -246,7 +256,7 @@ async function handleSelect(admin: SupabaseClient, caller: Caller, body: any) {
   if (!READ_TABLES.has(table) && !STAFF_READ_TABLES.has(table)) {
     return fail(`Table not allowed: ${table}`, 'TABLE_NOT_ALLOWED')
   }
-  if (STAFF_READ_TABLES.has(table) && !caller.isStaff) {
+  if (STAFF_READ_TABLES.has(table) && !caller.isStaff && !SELF_SERVICE_TABLES.has(table)) {
     return fail('Staff access required', 'FORBIDDEN')
   }
 
@@ -269,11 +279,30 @@ async function handleWrite(admin: SupabaseClient, caller: Caller, action: string
   if (!WRITE_TABLES.has(table)) {
     return fail(`Table not writable: ${table}`, 'TABLE_NOT_ALLOWED')
   }
-  if (!caller.isStaff) {
+  const isSelfService = SELF_SERVICE_TABLES.has(table)
+  if (!caller.isStaff && !isSelfService) {
     return fail('Staff access required', 'FORBIDDEN')
   }
   if (action !== 'insert' && (!Array.isArray(body.filters) || body.filters.length === 0)) {
     return fail('update/delete requires at least one filter', 'BAD_REQUEST')
+  }
+
+  // Non-staff delivery boys may only touch their own day-end rows.
+  if (!caller.isStaff && isSelfService) {
+    if (action === 'insert') {
+      const values = body.values
+      if (!values || typeof values !== 'object' || Array.isArray(values)) {
+        return fail('values are required', 'BAD_REQUEST')
+      }
+      if ((values as Record<string, unknown>).agent_id !== caller.userId) {
+        return fail('You can only save your own day-end data', 'FORBIDDEN')
+      }
+    } else {
+      body.filters = [
+        ...(body.filters as unknown[]),
+        { op: 'eq', column: 'agent_id', value: caller.userId },
+      ]
+    }
   }
 
   try {

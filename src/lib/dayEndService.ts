@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { staffDb } from './staffDb';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import { numberKey } from './scanUtils';
+import { findSettlementRowForAgent } from './bpclReportService';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
@@ -596,18 +597,14 @@ export async function saveDayEndReportToDatabase(payload: {
   };
 
   const fetchSettlementRow = async () => {
-    let query = staffDb
-      .from('staff_cylinder_settlements')
-      .select('id, notes, supplied_cylinders, empty_cylinders, updated_at')
-      .eq('settlement_date', payload.report_date);
-    if (payload.agent_id) {
-      query = query.or(`agent_id.eq.${payload.agent_id},agent_name.ilike.${payload.agent_name.trim()}`);
-    } else {
-      query = query.ilike('agent_name', payload.agent_name.trim());
-    }
-    const { data, error } = await query.maybeSingle();
-    if (error) return null;
-    return data;
+    // Share the robust (date + id-or-name, newest row) lookup with the BPCL
+    // service. The old PostgREST `or(...)` + maybeSingle filter could miss a
+    // row or pick an arbitrary duplicate.
+    return findSettlementRowForAgent(
+      payload.report_date,
+      payload.agent_name,
+      payload.agent_id
+    );
   };
 
   let existingReport: any = null;
@@ -747,7 +744,9 @@ export async function saveDayEndReportToDatabase(payload: {
   if (payload.agent_id || payload.agent_name) {
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        const current = attempt === 0 ? existingSettlement : await fetchSettlementRow();
+        // Always re-read: a concurrent archive / no-supply toggle may have
+        // rewritten the BPCL section of the notes since this save started.
+        const current = await fetchSettlementRow();
         const currentBillsRaw = mode === 'merge' ? extractScannedBillsFromNotes(current?.notes) : [];
         const currentBills = mode === 'merge'
           ? await filterEntriesCrossDateDuplicates(

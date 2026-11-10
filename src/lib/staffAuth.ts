@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { staffAction, staffDb } from './staffDb';
+import { broadcastPermissionsEvent } from './realtimeBus';
 
 const STAFF_PERMISSIONS_STORAGE_KEY = 'bgcls_staff_permissions_list';
 const DEFAULT_STAFF = ['john', 'ganesh'];
@@ -149,8 +150,9 @@ export async function refreshCurrentStaffPermission(): Promise<boolean> {
 /**
  * Owner/Manager grants Staff Dashboard permission to an agent (e.g., Ganesh)
  */
-export async function grantStaffPermission(agentId: string, username: string): Promise<void> {
+export async function grantStaffPermission(agentId: string, username: string): Promise<boolean> {
   const current = getStaffPermissions();
+  const previousList = [...current];
   const cleanUsername = username.toLowerCase().replace('@', '').trim();
   const updated = Array.from(new Set([...current, agentId.toLowerCase(), cleanUsername]));
   localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
@@ -167,24 +169,27 @@ export async function grantStaffPermission(agentId: string, username: string): P
     }
   } catch (err) {
     console.warn('Staff permission update notice:', err);
+    // Do not keep a local-only grant: the database is authoritative and a
+    // reload would silently revert it.
+    localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
+    return false;
   }
 
   // Broadcast realtime notification across devices
-  try {
-    const channel = supabase.channel('bgcls_staff_permissions_channel');
-    await channel.send({
-      type: 'broadcast',
-      event: 'staff_permission_changed',
-      payload: { agentId, username: cleanUsername, is_staff: true },
-    });
-  } catch (_) {}
+  await broadcastPermissionsEvent('staff_permission_changed', {
+    agentId,
+    username: cleanUsername,
+    is_staff: true,
+  });
+  return true;
 }
 
 /**
  * Owner/Manager revokes Staff Dashboard permission from an agent
  */
-export async function revokeStaffPermission(agentId: string, username: string): Promise<void> {
+export async function revokeStaffPermission(agentId: string, username: string): Promise<boolean> {
   const current = getStaffPermissions();
+  const previousList = [...current];
   const cleanUsername = username.toLowerCase().replace('@', '').trim();
   const updated = current.filter(
     (item) => item.toLowerCase() !== agentId.toLowerCase() && item.toLowerCase() !== cleanUsername && item.toLowerCase() !== 'john'
@@ -202,15 +207,15 @@ export async function revokeStaffPermission(agentId: string, username: string): 
     }
   } catch (err) {
     console.warn('Staff permission update notice:', err);
+    localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
+    return false;
   }
 
   // Broadcast realtime notification across devices
-  try {
-    const channel = supabase.channel('bgcls_staff_permissions_channel');
-    await channel.send({
-      type: 'broadcast',
-      event: 'staff_permission_changed',
-      payload: { agentId, username: cleanUsername, is_staff: false },
-    });
-  } catch (_) {}
+  await broadcastPermissionsEvent('staff_permission_changed', {
+    agentId,
+    username: cleanUsername,
+    is_staff: false,
+  });
+  return true;
 }

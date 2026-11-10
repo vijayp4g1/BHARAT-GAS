@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { staffAction, staffDb } from './staffDb';
+import { broadcastPermissionsEvent } from './realtimeBus';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from './staffAuth';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
@@ -118,11 +119,18 @@ export async function assignDeliveryBoyToAgent(
   username: string,
   deliveryBoyName: string | null
 ): Promise<boolean> {
+  if (!agentId) {
+    console.warn('assignDeliveryBoyToAgent called without an agentId');
+    return false;
+  }
+
   const normBoy = deliveryBoyName ? deliveryBoyName.trim().toUpperCase() : '';
   const cleanUsername = username.toLowerCase().replace('@', '').trim();
 
-  // 1. Update local cache immediately
-  const local = getLocalAssignments();
+  // 1. Update local cache immediately (remember the previous value so a failed
+  // database write can be rolled back instead of silently diverging).
+  const previous = getLocalAssignments();
+  const local = { ...previous };
   if (normBoy) {
     local[agentId] = normBoy;
     if (cleanUsername) local[cleanUsername] = normBoy;
@@ -134,30 +142,24 @@ export async function assignDeliveryBoyToAgent(
 
   // 2 + 3. Persist auth metadata and the audit trail through the server,
   // which checks that the caller is staff before writing.
-  if (agentId) {
-    const { error } = await staffAction('assign_delivery_boy', {
-      agentId,
-      deliveryBoyName: normBoy,
-      username: cleanUsername,
-    });
-    if (error) {
-      console.warn('Failed to persist delivery boy assignment:', error.message);
-    }
+  const { error } = await staffAction('assign_delivery_boy', {
+    agentId,
+    deliveryBoyName: normBoy,
+    username: cleanUsername,
+  });
+
+  if (error) {
+    console.warn('Failed to persist delivery boy assignment:', error.message);
+    setLocalAssignments(previous);
+    return false;
   }
 
-  // 4. Broadcast realtime notification to active devices
-  try {
-    const channel = supabase.channel('bgcls_staff_permissions_channel');
-    await channel.send({
-      type: 'broadcast',
-      event: 'delivery_boy_assignment_changed',
-      payload: {
-        agentId,
-        username: cleanUsername,
-        assigned_delivery_boy: normBoy,
-      },
-    });
-  } catch (_) {}
+  // 4. Broadcast realtime notification to active devices (only after the write)
+  await broadcastPermissionsEvent('delivery_boy_assignment_changed', {
+    agentId,
+    username: cleanUsername,
+    assigned_delivery_boy: normBoy,
+  });
 
   return true;
 }

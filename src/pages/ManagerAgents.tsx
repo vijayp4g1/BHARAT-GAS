@@ -83,6 +83,7 @@ export const ManagerAgents = () => {
     setIsAssigningId(agent.id);
     const cleanBoy = boyName ? boyName.trim().toUpperCase() : '';
     const cleanUsername = agent.username?.toLowerCase()?.trim() || '';
+    const before = assignments;
 
     // Optimistic UI update
     setAssignments(prev => {
@@ -98,7 +99,12 @@ export const ManagerAgents = () => {
     });
 
     try {
-      await assignDeliveryBoyToAgent(agent.id, agent.username, cleanBoy || null);
+      const saved = await assignDeliveryBoyToAgent(agent.id, agent.username, cleanBoy || null);
+      if (!saved) {
+        setAssignments(before);
+        toast.error(`Could not save ${agent.name}'s route to the database. Please retry.`);
+        return;
+      }
       if (cleanBoy) {
         toast.success(`Assigned ${cleanBoy} route to ${agent.name}!`);
       } else {
@@ -106,6 +112,7 @@ export const ManagerAgents = () => {
       }
     } catch (err) {
       console.error('Error assigning delivery boy:', err);
+      setAssignments(before);
       toast.error('Failed to update delivery boy assignment');
     } finally {
       setIsAssigningId(null);
@@ -146,12 +153,18 @@ export const ManagerAgents = () => {
 
       // If delivery boy route was selected for this agent, persist it
       if (role === 'AGENT' && formAssignedBoy && data?.id) {
-        await assignDeliveryBoyToAgent(data.id, safeUsername, formAssignedBoy);
-        setAssignments(prev => ({
-          ...prev,
-          [data.id]: formAssignedBoy,
-          [safeUsername]: formAssignedBoy
-        }));
+        const assigned = await assignDeliveryBoyToAgent(data.id, safeUsername, formAssignedBoy);
+        if (assigned) {
+          setAssignments(prev => ({
+            ...prev,
+            [data.id]: formAssignedBoy,
+            [safeUsername]: formAssignedBoy
+          }));
+        } else {
+          toast.error('Agent created, but the route assignment could not be saved. Assign it again.', {
+            id: 'route-assign-error',
+          });
+        }
       }
 
       toast.success('Agent account created! They can now log in.');
@@ -193,19 +206,25 @@ export const ManagerAgents = () => {
 
       // Update delivery boy route if changed
       if (role === 'AGENT') {
-        await assignDeliveryBoyToAgent(editingAgent.id, editingAgent.username, formAssignedBoy || null);
-        setAssignments(prev => {
-          const next = { ...prev };
-          const u = editingAgent.username?.toLowerCase()?.trim();
-          if (formAssignedBoy) {
-            next[editingAgent.id] = formAssignedBoy;
-            if (u) next[u] = formAssignedBoy;
-          } else {
-            delete next[editingAgent.id];
-            if (u) delete next[u];
-          }
-          return next;
-        });
+        const assigned = await assignDeliveryBoyToAgent(editingAgent.id, editingAgent.username, formAssignedBoy || null);
+        if (assigned) {
+          setAssignments(prev => {
+            const next = { ...prev };
+            const u = editingAgent.username?.toLowerCase()?.trim();
+            if (formAssignedBoy) {
+              next[editingAgent.id] = formAssignedBoy;
+              if (u) next[u] = formAssignedBoy;
+            } else {
+              delete next[editingAgent.id];
+              if (u) delete next[u];
+            }
+            return next;
+          });
+        } else {
+          toast.error('Agent updated, but the route assignment could not be saved. Reassign it.', {
+            id: 'route-assign-error',
+          });
+        }
       }
 
       toast.success('Agent updated successfully');
@@ -281,15 +300,24 @@ export const ManagerAgents = () => {
   const handleToggleStaffAccess = async (agent: any) => {
     const isCurrentlyStaff = hasStaffPermission(agent.id, agent.username, agent.is_staff, agent.name);
     const nextVal = !isCurrentlyStaff;
+    const before = agents;
 
     // Optimistic UI update so the badge updates immediately
     setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_staff: nextVal } : a));
 
+    const saved = isCurrentlyStaff
+      ? await revokeStaffPermission(agent.id, agent.username)
+      : await grantStaffPermission(agent.id, agent.username);
+
+    if (!saved) {
+      setAgents(before);
+      toast.error('Could not save staff access to the database. Please retry.');
+      return;
+    }
+
     if (isCurrentlyStaff) {
-      await revokeStaffPermission(agent.id, agent.username);
       toast.success(`Revoked staff access from ${agent.name}`);
     } else {
-      await grantStaffPermission(agent.id, agent.username);
       toast.success(`⭐ Granted Staff Access to ${agent.name}! They can now record cylinder settlements.`);
     }
   };

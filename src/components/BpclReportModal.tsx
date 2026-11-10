@@ -97,8 +97,9 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
         agentName,
         agentId,
         checked_done: markCheckedDone,
-        archived: existingReport?.archived,
-        no_supply: existingReport?.no_supply,
+        // archived / no_supply are intentionally omitted: the service preserves
+        // whatever the database currently has, so a stale modal can never
+        // clear an archive / no-supply set on another device.
         pending_bills: parsed.pendingBills,
         online_bills: parsed.onlineBills,
         raw_text: rawText,
