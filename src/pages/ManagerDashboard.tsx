@@ -8,6 +8,7 @@ import { ConsumerModal } from '../components/ConsumerModal';
 import { BulkImportModal } from '../components/BulkImportModal';
 import { ManagerBottomNav } from '../components/ManagerBottomNav';
 import { performLogout } from '../lib/auth';
+import { AppRefreshButton } from '../components/AppRefreshButton';
 import { autoSyncMasterConsumers } from '../lib/sync';
 
 const CountUp = ({ end, duration = 1500 }: { end: number, duration?: number }) => {
@@ -230,6 +231,10 @@ export const ManagerDashboard = () => {
             <Plus size={18} /> <span className="hidden sm:inline">Add Consumer</span>
           </button>
           
+          <AppRefreshButton
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 transition-colors border border-white/10 shrink-0"
+            title="Refresh app / clear cache"
+          />
           <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 hover:bg-red-500/80 transition-colors border border-white/10 shrink-0" aria-label="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           </button>

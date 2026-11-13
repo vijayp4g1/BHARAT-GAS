@@ -39,6 +39,7 @@ import {
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { performLogout } from '../lib/auth';
+import { AppRefreshButton } from '../components/AppRefreshButton';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
 import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
 import { findSettlementRowForAgent } from '../lib/bpclReportService';
@@ -1051,6 +1052,12 @@ export const StaffCylinderSettlement: React.FC = () => {
                   <UserPlus size={15} className="text-emerald-400" />
                   <span>+ Add New Delivery Boy</span>
                 </button>
+
+                <AppRefreshButton
+                  variant="menu"
+                  onOpen={() => setIsMenuOpen(false)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-slate-200 hover:text-white hover:bg-slate-800 rounded-xl transition-colors text-left"
+                />
 
                 <div className="my-1 border-t border-slate-800"></div>
 

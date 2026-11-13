@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
 import { setupSyncListeners, syncOfflineData, pullLatestCloudData, autoSyncMasterConsumers } from './lib/sync';
+import { stripCacheBustParam } from './lib/appCache';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
@@ -23,6 +24,9 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
   useEffect(() => {
+    // Remove the temporary ?appv=<timestamp> used to bypass a stale app shell.
+    stripCacheBustParam();
+
     setupSyncListeners();
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);

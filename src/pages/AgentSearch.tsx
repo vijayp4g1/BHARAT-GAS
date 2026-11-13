@@ -11,6 +11,7 @@ import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 import { AgentBottomNav } from '../components/AgentBottomNav';
 import { pullLatestCloudData, autoSyncMasterConsumers, MASTER_DATA_VERSION } from '../lib/sync';
 import { performLogout } from '../lib/auth';
+import { AppRefreshButton } from '../components/AppRefreshButton';
 
 export const AgentSearch = () => {
   useAgentLocationTracking();
@@ -295,6 +296,10 @@ export const AgentSearch = () => {
                 <><span className="w-1.5 h-1.5 rounded-full bg-red-400"></span> <span className="hidden sm:inline text-red-200">Offline</span></>
               )}
             </span>
+            <AppRefreshButton
+              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all active:scale-95 border border-white/20 shadow-sm"
+              title="Refresh app / clear cache"
+            />
             <button onClick={handleLogout} className="p-2 bg-white/5 hover:bg-red-500/80 rounded-xl transition-all border border-white/10 shadow-sm text-white cursor-pointer active:scale-95">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </button>

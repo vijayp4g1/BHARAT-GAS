@@ -7,6 +7,7 @@ import { Loader2, User, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFastAuthSession } from '../lib/auth';
 import { hasStaffPermission, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { AppRefreshButton } from '../components/AppRefreshButton';
 
 export const Login = () => {
   const [role, setRole] = useState<'AGENT' | 'MANAGER'>('AGENT');
@@ -315,6 +316,14 @@ export const Login = () => {
         </div>
       </div>
       
+      {/* App cache repair — useful when Chrome is serving an old app version */}
+      <AppRefreshButton
+        variant="link"
+        className="absolute bottom-16 z-10 flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
+        label="App not updating? Clear cache"
+        title="Refresh app / clear cache"
+      />
+
       {/* Version Label */}
       <div className="absolute bottom-6 text-white/50 text-xs font-medium font-mono tracking-wider z-10 backdrop-blur-sm bg-black/10 px-3 py-1 rounded-full border border-white/10">
         v2.0.0
