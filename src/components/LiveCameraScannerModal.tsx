@@ -1293,7 +1293,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[2000] h-[100dvh] w-full bg-slate-950 flex flex-col overflow-hidden font-sans select-none overscroll-none">
+    <div
+      className="fixed inset-0 z-[2000] h-[100dvh] w-full bg-slate-950 flex flex-col overflow-hidden font-sans select-none overscroll-none"
+      data-bgcls-editing="true"
+    >
       {/* 2. FLOATING TOP HEADER OVERLAY */}
       <div
         className="relative z-30 shrink-0 bg-gradient-to-b from-slate-950 via-slate-950/70 to-transparent p-3 pt-3.5 text-white"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   FileText, 
@@ -31,6 +31,59 @@ interface BpclReportModalProps {
   onSaved: (report: BpclReportData) => void;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Paste draft (survives an automatic update reload)                         */
+/* -------------------------------------------------------------------------- */
+
+const PASTE_DRAFT_PREFIX = 'bgcls_bpcl_paste_draft_';
+
+function pasteDraftKey(reportDate: string, agentName: string): string {
+  const norm = (agentName || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+  return `${PASTE_DRAFT_PREFIX}${reportDate}_${norm}`;
+}
+
+interface PasteDraft {
+  rawText: string;
+  markCheckedDone: boolean;
+  at: number;
+}
+
+function readPasteDraft(reportDate: string, agentName: string): PasteDraft | null {
+  try {
+    const raw = localStorage.getItem(pasteDraftKey(reportDate, agentName));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.rawText !== 'string') return null;
+    return {
+      rawText: parsed.rawText,
+      markCheckedDone: parsed.markCheckedDone !== false,
+      at: Number(parsed.at) || 0,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function writePasteDraft(
+  reportDate: string,
+  agentName: string,
+  rawText: string,
+  markCheckedDone: boolean
+): void {
+  try {
+    localStorage.setItem(
+      pasteDraftKey(reportDate, agentName),
+      JSON.stringify({ rawText, markCheckedDone, at: Date.now() })
+    );
+  } catch (_) {}
+}
+
+function clearPasteDraft(reportDate: string, agentName: string): void {
+  try {
+    localStorage.removeItem(pasteDraftKey(reportDate, agentName));
+  } catch (_) {}
+}
+
 export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   isOpen,
   onClose,
@@ -52,7 +105,34 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   );
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
+  // Hydrate the editor ONLY when the modal opens.
+  //
+  // The parent refreshes activeBpclReport every ~1.5s from realtime/day-end
+  // events, and each refresh creates new pending_bills/online_bills arrays.
+  // The previous effect depended on those arrays, so it ran on every refresh
+  // and overwrote whatever the operator had pasted — the textarea appeared to
+  // "refresh automatically" and the Save button stayed disabled.
+  const wasOpenRef = useRef<boolean>(false);
+
   useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
+    // An automatic update reload or an accidental refresh must not lose a
+    // pasted report. Restore the per-boy/date draft before falling back to the
+    // stored cloud report.
+    const draft = readPasteDraft(reportDate, agentName);
+    if (draft && draft.rawText.trim()) {
+      setRawText(draft.rawText);
+      setMarkCheckedDone(draft.markCheckedDone);
+      toast('Restored your unsaved paste', { icon: '📋', id: 'bpcl-paste-restored' });
+      return;
+    }
+
     setRawText(
       sanitizeRawTextWithActiveBills(
         existingReport?.raw_text,
@@ -60,7 +140,11 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
         existingReport?.online_bills
       )
     );
-  }, [existingReport?.raw_text, existingReport?.pending_bills, existingReport?.online_bills]);
+    setMarkCheckedDone(existingReport?.checked_done ?? true);
+    // Intentionally NOT depending on existingReport: prop updates while the
+    // operator is pasting must never reset the textarea.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -75,6 +159,7 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
       const text = await navigator.clipboard.readText();
       if (text) {
         setRawText(text);
+        writePasteDraft(reportDate, agentName, text, markCheckedDone);
         toast.success('Pasted from clipboard!');
       } else {
         toast.error('Clipboard is empty');
@@ -84,9 +169,31 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
     }
   };
 
+  const handleRawTextChange = (value: string) => {
+    setRawText(value);
+    writePasteDraft(reportDate, agentName, value, markCheckedDone);
+  };
+
+  const handleToggleCheckedDone = () => {
+    const next = !markCheckedDone;
+    setMarkCheckedDone(next);
+    writePasteDraft(reportDate, agentName, rawText, next);
+  };
+
+  const handleClearPaste = () => {
+    setRawText('');
+    clearPasteDraft(reportDate, agentName);
+  };
+
   const handleSave = async () => {
-    if (!rawText.trim() && totalCount === 0) {
+    if (!rawText.trim()) {
       toast.error('Please paste the BPCL Status Report text first');
+      return;
+    }
+    if (totalCount === 0) {
+      toast.error(
+        'No bills were recognized. Keep the BPCL report headings and "Consumer No" lines, then try again.'
+      );
       return;
     }
 
@@ -106,6 +213,7 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
       });
 
       if (success) {
+        clearPasteDraft(reportDate, agentName);
         toast.success(
           `Imported ${pendingCount} Pending & ${onlineCount} Online bills for ${agentName}!`
         );
@@ -134,7 +242,10 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200"
+      data-bgcls-editing="true"
+    >
       <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] my-auto">
         {/* Modal Header */}
         <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/90 gap-2 shrink-0">
@@ -197,7 +308,7 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
               {rawText && (
                 <button
                   type="button"
-                  onClick={() => setRawText('')}
+                  onClick={handleClearPaste}
                   className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 text-[11px] font-bold transition-all"
                   title="Clear text"
                 >
@@ -212,11 +323,19 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
             <textarea
               rows={8}
               value={rawText}
-              onChange={(e) => setRawText(e.target.value)}
+              onChange={(e) => handleRawTextChange(e.target.value)}
               placeholder={`*BPCL Status Report: Delivery Pending*\n*Consumer No:* 173\n*Customer Name:* B LALITHA\nCash Memo: 115694\n\n*BPCL Status Report: Online Bills (PayNBook)*\n*Consumer No:* 12384\n*Customer Name:* B VENKATA RAMANA\nCash Memo: 116116...`}
               className="w-full bg-slate-950/80 border border-slate-700 rounded-2xl p-3 text-xs font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all leading-relaxed resize-none"
             />
           </div>
+
+          {rawText.trim() && totalCount === 0 && (
+            <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-2.5 text-[11px] text-amber-200 font-semibold leading-snug">
+              No bills recognized in this text. Keep the BPCL report headings
+              ("BPCL Status Report: Delivery Pending" / "Online Bills") and the
+              Consumer No lines, then paste again.
+            </div>
+          )}
 
           {/* Live Extraction Metric Badges */}
           <div className="grid grid-cols-2 gap-2">
@@ -261,7 +380,7 @@ export const BpclReportModal: React.FC<BpclReportModalProps> = ({
 
           {/* Checked Done Toggle Option */}
           <div 
-            onClick={() => setMarkCheckedDone(!markCheckedDone)}
+            onClick={handleToggleCheckedDone}
             className="cursor-pointer bg-slate-950/60 border border-slate-800 hover:border-emerald-500/40 rounded-2xl p-3 flex items-center justify-between transition-all"
           >
             <div className="flex items-center gap-2.5">
