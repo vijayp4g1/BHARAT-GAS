@@ -27,8 +27,8 @@ export const AgentSearch = () => {
   const [hydrationProgress, setHydrationProgress] = useState(0);
 
   const handleLogout = async () => {
-    toast.loading('Logging out...', { id: 'logout' });
-    await performLogout();
+    const loggedOut = await performLogout();
+    if (!loggedOut) return;
     toast.success('Logged out successfully', { id: 'logout' });
     navigate('/', { replace: true });
   };

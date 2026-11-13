@@ -22,9 +22,11 @@
 
 const CACHE_PREFIXES = [
   'bgcls_bpcl_report_',
+  'bgcls_day_end_cloud_cache_',
   'bgcls_past_7days_bills_',
   'bgcls_archived_boys_',
   'bgcls_no_supply_boys_',
+  'bgcls_recent_interactions_',
   'bgcls_last_pull_timestamp',
 ];
 
@@ -58,6 +60,23 @@ function approxBytes(value: string | null): number {
   return value ? value.length * 2 : 0; // UTF-16 code units
 }
 
+/** Local (not UTC) YYYY-MM-DD, matching the app's report date strings. */
+function localDateString(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() - offsetDays);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Date-stamped caches for today and yesterday are always kept: they may still
+ * contain work done offline that has not reached the server yet.
+ */
+function isRecentDatedCache(key: string, todayIso: string, yesterdayIso: string): boolean {
+  return key.includes(todayIso) || key.includes(yesterdayIso);
+}
+
 /**
  * Frees localStorage space. Safe to call at login or from a "free space" UI.
  */
@@ -82,6 +101,9 @@ export function freeLocalStorageSpace(
     trimmedAudit: false,
   };
 
+  const todayIso = localDateString(0);
+  const yesterdayIso = localDateString(1);
+
   let keys: string[] = [];
   try {
     keys = Object.keys(localStorage);
@@ -98,8 +120,10 @@ export function freeLocalStorageSpace(
     }
     if (value === null) continue;
 
-    // 1. Re-fetchable display caches.
+    // 1. Re-fetchable display caches (today/yesterday are kept).
     if (removeCaches && CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      if (isRecentDatedCache(key, todayIso, yesterdayIso)) continue;
+
       try {
         localStorage.removeItem(key);
         report.removedKeys++;
@@ -140,6 +164,48 @@ export function freeLocalStorageSpace(
   }
 
   return report;
+}
+
+/**
+ * Last-resort: remove the oldest abandoned draft when the auth session cannot
+ * be persisted. Keeps the two newest drafts (the ones most likely still in use).
+ * Returns false when there is nothing safe left to remove.
+ */
+export function evictOldestDraft(): boolean {
+  try {
+    const drafts: Array<{ key: string; timestamp: number }> = [];
+
+    for (const key of Object.keys(localStorage)) {
+      if (
+        !key.startsWith(DAY_END_DRAFT_PREFIX) &&
+        !key.startsWith(PASTE_DRAFT_PREFIX)
+      ) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+        drafts.push({
+          key,
+          timestamp: Number(parsed?.timestamp || parsed?.at || 0),
+        });
+      } catch (_) {
+        drafts.push({ key, timestamp: 0 });
+      }
+    }
+
+    // Keep the two newest drafts untouched.
+    if (drafts.length <= 2) return false;
+
+    drafts.sort((a, b) => a.timestamp - b.timestamp);
+    const victim = drafts[0];
+    if (!victim) return false;
+
+    localStorage.removeItem(victim.key);
+    console.warn('[Storage] Removed oldest draft to preserve the login session:', victim.key);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 /** True when an error is the browser's localStorage quota error. */

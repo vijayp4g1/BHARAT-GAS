@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, readPersistedAuthSession } from './supabase';
 import { staffAction, staffDb } from './staffDb';
 import { broadcastPermissionsEvent } from './realtimeBus';
 
@@ -194,8 +194,19 @@ export async function refreshCurrentStaffPermission(): Promise<boolean> {
   };
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    // Auth-js may still be restoring/refreshing the stored session; retry once
+    // before treating the user as signed out.
+    let session = (await supabase.auth.getSession()).data.session;
+    if (!session) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      session = (await supabase.auth.getSession()).data.session;
+    }
     if (!session?.user) {
+      // A transient refresh failure keeps the token in localStorage. Keep the
+      // cached permission in that case instead of downgrading the user.
+      if (readPersistedAuthSession()) {
+        return localStorage.getItem('bgcls_is_staff') === 'true';
+      }
       localStorage.setItem('bgcls_is_staff', 'false');
       return false;
     }

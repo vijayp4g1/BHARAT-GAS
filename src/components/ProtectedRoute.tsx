@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, readPersistedAuthSession } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
@@ -13,12 +13,27 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
 
   useEffect(() => {
     const checkAuth = async () => {
-      // 1. Check if user is logged into Supabase
-      const { data: { session } } = await supabase.auth.getSession();
-      
+      // 1. Check if user is logged into Supabase. Auth-js may still be
+      //    restoring/refreshing the stored session on a fresh load, so retry
+      //    once before treating it as a logout.
+      let session = (await supabase.auth.getSession()).data.session;
       if (!session) {
-        setIsAuthenticated(false);
-        return;
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        session = (await supabase.auth.getSession()).data.session;
+      }
+
+      let sessionEmail = session?.user?.email;
+
+      // A transient refresh failure keeps the token in localStorage; auth-js
+      // only removes it on a real sign-out. Don't bounce the user to Login on
+      // a network blip — the app keeps working offline.
+      if (!session) {
+        const persisted = readPersistedAuthSession();
+        if (!persisted) {
+          setIsAuthenticated(false);
+          return;
+        }
+        sessionEmail = persisted.email;
       }
 
       // 2. Check Role if required
@@ -33,7 +48,7 @@ export const ProtectedRoute = ({ children, allowedRole }: { children: React.Reac
           }
         }
 
-        const fallbackRole = session.user.email?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
+        const fallbackRole = sessionEmail?.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
         const cachedRole = localStorage.getItem('bgcls_user_role') || fallbackRole;
         setUserRole(cachedRole);
         setIsAuthenticated(true);

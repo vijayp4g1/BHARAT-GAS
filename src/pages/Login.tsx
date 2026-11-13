@@ -17,6 +17,7 @@ export const Login = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   
   const navigate = useNavigate();
 
@@ -45,6 +46,23 @@ export const Login = () => {
           navigate('/agent/search', { replace: true });
         }
       } else {
+        // Explain a recent automatic sign-out (expired / rejected session) so
+        // it does not look like a random bug. An explicit logout sets
+        // `explicit: true` and shows no notice.
+        try {
+          const raw = localStorage.getItem('bgcls_last_auth_signout');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const age = Date.now() - Number(parsed?.at || 0);
+            if (parsed?.explicit !== true && age > 0 && age < 12 * 60 * 60 * 1000) {
+              setSessionNotice(
+                'Your login session expired, so you were signed out. Please sign in again — saved bills, drafts and offline data are safe.'
+              );
+            }
+            localStorage.removeItem('bgcls_last_auth_signout');
+          }
+        } catch (_) {}
+
         // Not logged in (or just logged out) -> reveal clean login form
         setIsCheckingSession(false);
       }
@@ -97,6 +115,12 @@ export const Login = () => {
       });
 
       if (error) throw error;
+
+      // Signed in again: clear the previous sign-out diagnostic/banner.
+      try {
+        localStorage.removeItem('bgcls_last_auth_signout');
+      } catch (_) {}
+      setSessionNotice(null);
       
       // Auto-detect actual user role and staff permissions from database
       let actualRole: 'AGENT' | 'MANAGER' = role;
@@ -229,7 +253,7 @@ export const Login = () => {
     const kb = Math.round(report.freedBytes / 1024);
     if (report.removedKeys > 0 || report.trimmedAudit) {
       toast.success(
-        `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills and recent drafts are kept.`,
+        `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills, today's data and recent drafts are kept.`,
         { id: 'storage-free', duration: 5000 }
       );
     } else {
@@ -284,6 +308,12 @@ export const Login = () => {
         </div>
         
         <div className="px-10 pb-10">
+          {sessionNotice && (
+            <div className="mb-5 rounded-2xl border border-amber-300/70 bg-amber-50/90 px-4 py-3 text-[12px] font-semibold leading-relaxed text-amber-900">
+              {sessionNotice}
+            </div>
+          )}
+
           {/* Role Selection Tabs */}
           <div className="flex p-1.5 mb-8 bg-slate-100/50 rounded-2xl border border-slate-200/50 backdrop-blur-md">
             <button

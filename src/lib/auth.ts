@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, readPersistedAuthSession } from './supabase';
 
 export interface AuthSessionInfo {
   userId: string;
@@ -7,9 +7,24 @@ export interface AuthSessionInfo {
 }
 
 /**
- * Robustly log out the user, clearing local session storage and Supabase auth keys
+ * Robustly log out the user, clearing local session storage and Supabase auth keys.
+ *
+ * A confirmation is shown by default so a stray tap on the header logout icon
+ * (or on a phone) cannot silently end the session. Pass `{ confirm: false }`
+ * when the caller has already confirmed.
+ *
+ * Returns false when the user cancels.
  */
-export async function performLogout(): Promise<void> {
+export async function performLogout(
+  options: { confirm?: boolean } = {}
+): Promise<boolean> {
+  if (options.confirm !== false) {
+    const confirmed = window.confirm(
+      'Log out of Siddhartha Bharat Gas?\n\nSaved bills, drafts and offline data stay on this device.'
+    );
+    if (!confirmed) return false;
+  }
+
   // Mark that user explicitly initiated logout so Login page doesn't auto-redirect
   try {
     sessionStorage.setItem('bgcls_just_logged_out', 'true');
@@ -44,6 +59,8 @@ export async function performLogout(): Promise<void> {
       }
     });
   } catch (_) {}
+
+  return true;
 }
 
 /**
@@ -56,29 +73,47 @@ export async function getFastAuthSession(): Promise<AuthSessionInfo | null> {
     return null;
   }
 
-  try {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error || !session || !session.user) {
-      return null;
+  const resolveSession = async (): Promise<{ userId: string; email: string } | null> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        return { userId: session.user.id, email: session.user.email || '' };
+      }
+    } catch (err) {
+      console.warn('getSession failed (will retry):', err);
     }
-
-    const userId = session.user.id;
-    const email = session.user.email || '';
-
-    // 1. Check locally cached role (instant 0ms)
-    const cachedRole = localStorage.getItem('bgcls_user_role') as 'AGENT' | 'MANAGER' | null;
-    if (cachedRole === 'AGENT' || cachedRole === 'MANAGER') {
-      return { userId, email, role: cachedRole };
-    }
-
-    // 2. Infer from email convention
-    const inferredRole: 'AGENT' | 'MANAGER' = email.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
-
-    // 3. Cache and return immediately without blocking UI
-    localStorage.setItem('bgcls_user_role', inferredRole);
-    return { userId, email, role: inferredRole };
-  } catch (err) {
-    console.error('Error in getFastAuthSession:', err);
     return null;
+  };
+
+  let resolved = await resolveSession();
+
+  // Auth-js may still be restoring/refreshing the session right after a reload,
+  // a PWA update, or when the device comes back online.
+  if (!resolved) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    resolved = await resolveSession();
   }
+
+  if (!resolved) {
+    // A transient refresh failure keeps the token in localStorage; auth-js only
+    // deletes it on a real sign-out. Staying signed in is safer (and matches
+    // this app's offline mode) than bouncing to the login screen on a blip.
+    resolved = readPersistedAuthSession();
+    if (!resolved) return null;
+  }
+
+  // 1. Check locally cached role (instant 0ms)
+  const cachedRole = localStorage.getItem('bgcls_user_role') as 'AGENT' | 'MANAGER' | null;
+  if (cachedRole === 'AGENT' || cachedRole === 'MANAGER') {
+    return { userId: resolved.userId, email: resolved.email, role: cachedRole };
+  }
+
+  // 2. Infer from email convention
+  const inferredRole: 'AGENT' | 'MANAGER' = resolved.email.includes('@bgcls.local') ? 'AGENT' : 'MANAGER';
+
+  // 3. Cache and return immediately without blocking UI
+  try {
+    localStorage.setItem('bgcls_user_role', inferredRole);
+  } catch (_) {}
+  return { userId: resolved.userId, email: resolved.email, role: inferredRole };
 }

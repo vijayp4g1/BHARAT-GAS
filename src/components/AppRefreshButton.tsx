@@ -119,7 +119,8 @@ export const AppRefreshModal: React.FC<AppRefreshModalProps> = ({ isOpen, onClos
             </p>
             <p className="text-[11px] text-slate-400 mt-1.5">
               Getting a &quot;storage quota exceeded&quot; error on login? Free cached reports and
-              abandoned drafts here. Saved bills and recent drafts are kept.
+              abandoned drafts here. Saved bills, today&apos;s/yesterday&apos;s data and recent
+              drafts are kept.
             </p>
             <button
               type="button"

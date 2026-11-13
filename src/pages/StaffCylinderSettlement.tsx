@@ -896,7 +896,8 @@ export const StaffCylinderSettlement: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await performLogout();
+    const loggedOut = await performLogout();
+    if (!loggedOut) return;
     navigate('/', { replace: true });
   };
 
