@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { staffDb } from '../lib/staffDb';
 import db from '../lib/db';
-import { Loader2, User, ShieldCheck } from 'lucide-react';
+import { Loader2, User, ShieldCheck, Database } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFastAuthSession } from '../lib/auth';
 import { hasStaffPermission, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { freeLocalStorageSpace, isStorageQuotaError, safeSetItem } from '../lib/storageCleanup';
 import { AppRefreshButton } from '../components/AppRefreshButton';
 
 export const Login = () => {
@@ -68,11 +69,19 @@ export const Login = () => {
       // Clear any prior logout flag
       sessionStorage.removeItem('bgcls_just_logged_out');
 
+      // Login and Supabase auth both need to write to localStorage. A full
+      // quota would abort sign-in (the screenshot's "exceeded the quota"
+      // error), so free re-fetchable caches first. Saved bills, offline data
+      // and recent drafts are kept.
+      freeLocalStorageSpace({ aggressive: false });
+
       // Handle Remember Me
       if (rememberMe) {
-        localStorage.setItem('bgcls_remember_username', username);
+        safeSetItem('bgcls_remember_username', username);
       } else {
-        localStorage.removeItem('bgcls_remember_username');
+        try {
+          localStorage.removeItem('bgcls_remember_username');
+        } catch (_) {}
       }
 
       // If the user enters a full email (like the owner), use it directly.
@@ -122,17 +131,17 @@ export const Login = () => {
         );
 
         if (isStaffMember) {
-          localStorage.setItem('bgcls_is_staff', 'true');
+          safeSetItem('bgcls_is_staff', 'true');
         } else {
           localStorage.removeItem('bgcls_is_staff');
-          localStorage.setItem('bgcls_is_staff', 'false');
+          safeSetItem('bgcls_is_staff', 'false');
         }
 
-        localStorage.setItem('bgcls_agent_id', data.user.id);
-        localStorage.setItem('bgcls_user_role', actualRole);
-        localStorage.setItem('bgcls_logged_username', username.toLowerCase().trim());
+        safeSetItem('bgcls_agent_id', data.user.id);
+        safeSetItem('bgcls_user_role', actualRole);
+        safeSetItem('bgcls_logged_username', username.toLowerCase().trim());
         if (agentData?.name) {
-          localStorage.setItem('bgcls_agent_name', agentData.name);
+          safeSetItem('bgcls_agent_name', agentData.name);
         }
 
         let assignedBoy = data.user?.user_metadata?.assigned_delivery_boy;
@@ -154,7 +163,7 @@ export const Login = () => {
         }
 
         if (assignedBoy) {
-          localStorage.setItem('bgcls_assigned_delivery_boy', assignedBoy.trim().toUpperCase());
+          safeSetItem('bgcls_assigned_delivery_boy', assignedBoy.trim().toUpperCase());
         } else {
           localStorage.removeItem('bgcls_assigned_delivery_boy');
         }
@@ -179,15 +188,29 @@ export const Login = () => {
       }
       
     } catch (error: any) {
+      // The browser's localStorage is full (the login screenshot error). Free
+      // safe caches/old drafts and ask for one retry; Supabase auth cannot
+      // persist a session without storage.
+      if (isStorageQuotaError(error)) {
+        const report = freeLocalStorageSpace({ aggressive: true });
+        toast.error(
+          report.removedKeys > 0 || report.trimmedAudit
+            ? 'Device storage was full. Space has been freed — please tap Login again.'
+            : 'Device storage is full. Close other browser tabs/apps and try again.',
+          { id: 'storage-full', duration: 8000 }
+        );
+        return;
+      }
+
       if (!navigator.onLine || error.message?.toLowerCase().includes('fetch')) {
         try {
           const localCount = await db.consumers.count();
           if (localCount > 0) {
             toast.success('Offline Mode Active: Logged in locally!');
             if (!localStorage.getItem('bgcls_agent_id')) {
-              localStorage.setItem('bgcls_agent_id', 'offline_agent');
+              safeSetItem('bgcls_agent_id', 'offline_agent');
             }
-            localStorage.setItem('bgcls_user_role', 'AGENT');
+            safeSetItem('bgcls_user_role', 'AGENT');
             navigate('/agent/search', { replace: true });
             return;
           }
@@ -198,6 +221,22 @@ export const Login = () => {
       toast.error(error.message || 'Invalid login credentials');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleFreeSpace = () => {
+    const report = freeLocalStorageSpace({ aggressive: false });
+    const kb = Math.round(report.freedBytes / 1024);
+    if (report.removedKeys > 0 || report.trimmedAudit) {
+      toast.success(
+        `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills and recent drafts are kept.`,
+        { id: 'storage-free', duration: 5000 }
+      );
+    } else {
+      toast(
+        'No re-fetchable cache to remove. Your saved data is already minimal.',
+        { icon: 'ℹ️', id: 'storage-free' }
+      );
     }
   };
 
@@ -316,6 +355,17 @@ export const Login = () => {
         </div>
       </div>
       
+      {/* Local storage/quota repair */}
+      <button
+        type="button"
+        onClick={handleFreeSpace}
+        className="absolute bottom-24 z-10 flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
+        title="Free re-fetchable caches and old drafts"
+      >
+        <Database size={12} />
+        <span>Storage full? Free space</span>
+      </button>
+
       {/* App cache repair — useful when Chrome is serving an old app version */}
       <AppRefreshButton
         variant="link"

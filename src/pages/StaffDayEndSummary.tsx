@@ -808,7 +808,7 @@ export const StaffDayEndSummary: React.FC = () => {
         return;
       }
       try {
-        await saveDayEndReportToDatabase({
+        const result = await saveDayEndReportToDatabase({
           report_date: dateStr,
           agent_id: boy.id,
           agent_name: boy.name,
@@ -816,8 +816,16 @@ export const StaffDayEndSummary: React.FC = () => {
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
         });
+        if (!result.success) {
+          console.warn('Auto-save failed:', result.error);
+          return;
+        }
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
+        // The cloud now has this list; the draft is a redundant duplicate.
+        try {
+          localStorage.removeItem(getWorkingDraftKey(dateStr, normName));
+        } catch (_) {}
       } catch (err) {
         console.warn('Auto-save error:', err);
       }
@@ -1276,7 +1284,7 @@ export const StaffDayEndSummary: React.FC = () => {
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
       try {
-        await saveDayEndReportToDatabase({
+        const result = await saveDayEndReportToDatabase({
           report_date: reportDate,
           agent_id: selectedBoy.id,
           agent_name: selectedBoy.name,
@@ -1284,8 +1292,17 @@ export const StaffDayEndSummary: React.FC = () => {
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
         });
+        if (!result.success) {
+          console.warn('Auto-save failed:', result.error);
+          return;
+        }
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
+        // The cloud now has this list; remove the redundant draft so localStorage
+        // does not fill up over weeks and block login.
+        try {
+          localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+        } catch (_) {}
       } catch (err) {
         console.warn('Auto-save error:', err);
       }
@@ -1458,7 +1475,7 @@ export const StaffDayEndSummary: React.FC = () => {
       const userMeta = await supabase.auth.getUser();
       const staffName = userMeta?.data?.user?.user_metadata?.name || userMeta?.data?.user?.email?.split('@')[0] || 'Staff';
 
-      await saveDayEndReportToDatabase({
+      const result = await saveDayEndReportToDatabase({
         report_date: reportDate,
         agent_id: selectedBoy.id,
         agent_name: selectedBoy.name,
@@ -1468,12 +1485,26 @@ export const StaffDayEndSummary: React.FC = () => {
         sender_session_id: sessionClientIdRef.current,
       });
 
+      if (!result.success) {
+        toast.error(
+          result.error || 'Failed to save to database. Preserved in local storage.',
+          { id: toastId }
+        );
+        return;
+      }
+
       const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastSavedTime(nowFormatted);
       setHasUnsavedChanges(false);
 
       // Instantly update local roster state so scam alerts and bills refresh immediately!
       const normName = selectedBoy.name.trim().toUpperCase();
+
+      // The cloud has the list; keep localStorage from growing forever.
+      try {
+        localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+      } catch (_) {}
+
       setRosterSummaries((prev) => ({
         ...prev,
         [normName]: {

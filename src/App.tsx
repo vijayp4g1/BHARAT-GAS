@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
 import { setupSyncListeners, syncOfflineData, pullLatestCloudData, autoSyncMasterConsumers } from './lib/sync';
 import { stripCacheBustParam } from './lib/appCache';
+import { runDailyStorageMaintenance } from './lib/storageCleanup';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
@@ -26,6 +27,10 @@ function App() {
   useEffect(() => {
     // Remove the temporary ?appv=<timestamp> used to bypass a stale app shell.
     stripCacheBustParam();
+
+    // Once per day, clear re-fetchable display caches and abandoned drafts so
+    // localStorage cannot fill up and block login again.
+    runDailyStorageMaintenance();
 
     setupSyncListeners();
     syncOfflineData().catch(console.error);

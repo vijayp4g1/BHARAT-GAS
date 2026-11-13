@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, Settings, X, Loader2, AlertTriangle, WifiOff, ShieldCheck } from 'lucide-react';
+import { RefreshCw, Settings, X, Loader2, AlertTriangle, WifiOff, ShieldCheck, Database } from 'lucide-react';
 import { clearAppCacheAndReload } from '../lib/appCache';
+import { freeLocalStorageSpace } from '../lib/storageCleanup';
 
 /* -------------------------------------------------------------------------- */
 /*  Modal                                                                     */
@@ -15,6 +16,7 @@ interface AppRefreshModalProps {
 export const AppRefreshModal: React.FC<AppRefreshModalProps> = ({ isOpen, onClose }) => {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState('');
+  const [storageMessage, setStorageMessage] = useState('');
   const [online, setOnline] = useState<boolean>(() => navigator.onLine);
 
   useEffect(() => {
@@ -32,10 +34,21 @@ export const AppRefreshModal: React.FC<AppRefreshModalProps> = ({ isOpen, onClos
     if (!isOpen) return;
     setIsBusy(false);
     setError('');
+    setStorageMessage('');
     setOnline(navigator.onLine);
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleFreeUpSpace = () => {
+    const report = freeLocalStorageSpace({ aggressive: false });
+    const kb = Math.round(report.freedBytes / 1024);
+    setStorageMessage(
+      report.removedKeys > 0 || report.trimmedAudit
+        ? `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills and recent drafts are kept.`
+        : 'No re-fetchable cache to free.'
+    );
+  };
 
   const handleRefresh = async () => {
     setError('');
@@ -104,6 +117,23 @@ export const AppRefreshModal: React.FC<AppRefreshModalProps> = ({ isOpen, onClos
               Only the downloaded app files (JavaScript/CSS/images) and the old service worker.
               They are re-downloaded immediately. No saved data or drafts are deleted.
             </p>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Getting a &quot;storage quota exceeded&quot; error on login? Free cached reports and
+              abandoned drafts here. Saved bills and recent drafts are kept.
+            </p>
+            <button
+              type="button"
+              onClick={handleFreeUpSpace}
+              className="mt-2 w-full bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold py-2 rounded-xl text-[11px] flex items-center justify-center gap-1.5"
+            >
+              <Database className="w-3.5 h-3.5" />
+              Free up local storage
+            </button>
+            {storageMessage && (
+              <p className="mt-1.5 text-[10px] font-semibold text-emerald-300">
+                {storageMessage}
+              </p>
+            )}
           </div>
 
           <div className="rounded-xl bg-amber-950/30 border border-amber-500/30 p-2.5">

@@ -843,7 +843,7 @@ export const OldAgentDayEnd: React.FC = () => {
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
       try {
-        await saveDayEndReportToDatabase({
+        const result = await saveDayEndReportToDatabase({
           report_date: reportDate,
           agent_id: agentId !== 'agent_default' ? agentId : undefined,
           agent_name: agentName,
@@ -851,8 +851,15 @@ export const OldAgentDayEnd: React.FC = () => {
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
         });
+        if (!result.success) {
+          console.warn('Auto-save failed:', result.error);
+          return;
+        }
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
+        try {
+          localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+        } catch (_) {}
       } catch (err) {
         console.warn('Auto-save error:', err);
       }
@@ -1047,6 +1054,9 @@ export const OldAgentDayEnd: React.FC = () => {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSavedTime(timeStr);
         setHasUnsavedChanges(false);
+        try {
+          localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
+        } catch (_) {}
         toast.success(`Saved ${entries.length} bills to database!`);
       } else {
         toast.error(res.error || 'Failed to save to database');
