@@ -43,6 +43,18 @@ interface ScannedSessionItem {
   timestamp: number;
   /** Number verified, but the printed name does not resemble the DB name. */
   name_mismatch?: boolean;
+  /**
+   * Full payload for this bill. Re-sent to the parent right before the scanner
+   * closes if a background list reload dropped it, so the final list can never
+   * contain fewer bills than the "N Added" counter.
+   */
+  payload?: {
+    consumer_id?: string;
+    address?: string;
+    mobile?: string;
+    duplicate_of_agent?: string;
+    duplicate_claimed_date?: string;
+  };
 }
 
 interface FailedScanItem {
@@ -251,7 +263,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const pushSessionAdded = (
     consumerNumber: string,
     consumerName: string,
-    nameMismatch: boolean = false
+    nameMismatch: boolean = false,
+    payload?: ScannedSessionItem['payload']
   ) => {
     const key = numberKey(consumerNumber);
     setScannedSessionList((prev) =>
@@ -263,6 +276,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
               consumer_name: consumerName,
               timestamp: Date.now(),
               name_mismatch: nameMismatch,
+              payload,
             },
             ...prev,
           ]
@@ -488,7 +502,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
     setNameMismatchNotice(null);
     setLastScanned(`${cleanNum} - ${finalName}`);
-    pushSessionAdded(cleanNum, finalName);
+    pushSessionAdded(cleanNum, finalName, false, {
+      address: 'Directly Verified / Physical Bill',
+      mobile: '',
+      duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+      duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
+    });
 
     // Add to audit log
     try {
@@ -847,7 +866,13 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setTimeout(() => setIsSuccessFlash(false), 400);
 
     setLastScanned(`${resolvedNum} - ${finalName}`);
-    pushSessionAdded(resolvedNum, finalName, nameMismatch);
+    pushSessionAdded(resolvedNum, finalName, nameMismatch, {
+      consumer_id: match.consumer_id,
+      address: finalAddress,
+      mobile: finalMobile,
+      duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+      duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
+    });
 
     // Persistent Write-Ahead Audit Log (Survives app switching, browser refresh & RAM clearing)
     try {
@@ -1220,6 +1245,46 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   );
   const unresolvedCount = pendingBills.length + unreadBills.length;
 
+  /**
+   * The session counter is the record of what the operator actually scanned.
+   * A background roster/realtime refresh can replace the parent list while the
+   * camera is open, which used to leave "40 added" in the scanner but only 37
+   * bills in the list. Before closing, re-send every counted bill that is not
+   * in the parent list so the final list always matches the counter.
+   */
+  const closeScanner = (excludeNumberKeys?: Set<string>) => {
+    const present = new Set(existingNumbers.map((n) => numberKey(n)));
+    const missing = scannedSessionList.filter((item) => {
+      const key = numberKey(item.consumer_number);
+      return !present.has(key) && !excludeNumberKeys?.has(key);
+    });
+
+    missing.forEach((item) => {
+      onConsumerScanned({
+        consumer_id: item.payload?.consumer_id,
+        consumer_number: item.consumer_number,
+        consumer_name: item.consumer_name,
+        address: item.payload?.address || 'Directly Verified / Physical Bill',
+        mobile: item.payload?.mobile || '',
+        found: true,
+        duplicate_of_agent: item.payload?.duplicate_of_agent,
+        duplicate_claimed_date: item.payload?.duplicate_claimed_date,
+      });
+    });
+
+    if (missing.length > 0) {
+      console.warn(
+        `[Scanner] Restored ${missing.length} bill(s) that were missing from the delivery list.`
+      );
+      toast.success(
+        `Restored ${missing.length} bill${missing.length === 1 ? '' : 's'} to the list`,
+        { id: 'scan-restore', duration: 4000 }
+      );
+    }
+
+    onClose();
+  };
+
   const handleForceAddAllPending = () => {
     const items = [...pendingBills];
     if (items.length === 0) return;
@@ -1239,7 +1304,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       const finalName = `Customer #${cleanNum}`;
 
       scannedSetRef.current.add(numberKey(cleanNum));
-      pushSessionAdded(cleanNum, finalName);
+      pushSessionAdded(cleanNum, finalName, false, {
+        address: 'Directly Verified / Physical Bill',
+        mobile: '',
+        duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
+        duplicate_claimed_date: otherClaimant ? otherClaimant.date : undefined,
+      });
       onConsumerScanned({
         consumer_number: cleanNum,
         consumer_name: finalName,
@@ -1279,7 +1349,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       toast('Those bills were already in the delivery list', { id: 'scan-snap', icon: '⚠️' });
       setStatusText('No new bills needed — already in the list');
     }
-    onClose();
+
+    // These were just sent above; do not re-send them. Any earlier scanned bill
+    // that a background reload dropped is still restored.
+    closeScanner(new Set(batch.map(({ cleanNum }) => numberKey(cleanNum))));
   };
 
   const handleDone = () => {
@@ -1287,7 +1360,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       setShowDoneWarning(true);
       return;
     }
-    onClose();
+    closeScanner();
   };
 
   if (!isOpen) return null;
@@ -1984,7 +2057,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                 type="button"
                 onClick={() => {
                   setShowDoneWarning(false);
-                  onClose();
+                  closeScanner();
                 }}
                 className="flex-1 bg-slate-800 hover:bg-slate-700 border border-white/20 text-slate-300 font-semibold py-2.5 px-2 rounded-xl text-xs active:scale-95 transition-all"
               >

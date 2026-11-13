@@ -47,6 +47,7 @@ import {
   dayEndEntrySignature,
   getWorkingDraftKey,
   filterEntriesCrossDateDuplicates,
+  mergeDayEndEntries,
   type DayEndEntry,
   type DayEndReportSummary
 } from '../lib/dayEndService';
@@ -229,6 +230,10 @@ export const OldAgentDayEnd: React.FC = () => {
   const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
   hasUnsavedChangesRef.current = hasUnsavedChanges;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last content successfully written to the cloud for this (date, agent).
+  // Skips redundant autosaves for identical arrays and prevents a merge-mode
+  // autosave from re-adding a bill removed by an explicit replace-mode delete.
+  const lastSavedSignatureRef = useRef<{ date: string; agent: string; signature: string } | null>(null);
   // Which (date, agent) the in-memory entries belong to. Draft/cloud writes
   // must match it so switching dates can never copy yesterday's bills forward.
   const entriesContextRef = useRef<{ date: string; agent: string } | null>(null);
@@ -710,6 +715,16 @@ export const OldAgentDayEnd: React.FC = () => {
         );
         if (!isMounted) return;
 
+        // Never let a background reload drop bills that exist only in memory.
+        // The scanner appends bills faster than the debounced save; a refresh
+        // must union them, never replace them with an older cloud copy.
+        const ownerNow = entriesContextRef.current;
+        const inMemoryEntries =
+          ownerNow && ownerNow.date === reportDate && ownerNow.agent === normName
+            ? entriesRef.current
+            : [];
+        const localUnsaved = hasUnsavedChangesRef.current ? inMemoryEntries : [];
+
         // 3. Intelligent merge: never wipe out locally scanned bills if cloud is empty or older!
         if (cloudEntries.length > 0) {
           const cloudUpdatedMs = cloudReport?.updated_at ? new Date(cloudReport.updated_at).getTime() : 0;
@@ -725,15 +740,17 @@ export const OldAgentDayEnd: React.FC = () => {
             const mergedMap = new Map<string, ItemEntry>();
             cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
             draftEntries.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
+            localUnsaved.forEach((e) => mergedMap.set(e.consumer_number.toLowerCase(), e));
             claimEntries(Array.from(mergedMap.values()));
             setHasUnsavedChanges(true);
           } else {
-            claimEntries(cloudEntries);
-            setHasUnsavedChanges(false);
+            const mergedEntries = mergeDayEndEntries(cloudEntries, localUnsaved);
+            claimEntries(mergedEntries);
+            setHasUnsavedChanges(mergedEntries.length > cloudEntries.length);
             try {
               localStorage.setItem(draftKey, JSON.stringify({
-                entries: cloudEntries,
-                timestamp: cloudUpdatedMs || Date.now(),
+                entries: mergedEntries,
+                timestamp: mergedEntries.length > cloudEntries.length ? Date.now() : (cloudUpdatedMs || Date.now()),
                 date: reportDate,
                 agent: normName,
               }));
@@ -756,7 +773,10 @@ export const OldAgentDayEnd: React.FC = () => {
 
           if (draftIsNewer) {
             // Genuinely unsaved local scans: never throw them away
-            claimEntries(draftEntries);
+            claimEntries(mergeDayEndEntries(draftEntries, localUnsaved));
+            setHasUnsavedChanges(true);
+          } else if (localUnsaved.length > 0) {
+            claimEntries(localUnsaved);
             setHasUnsavedChanges(true);
           } else {
             claimEntries([]);
@@ -771,7 +791,7 @@ export const OldAgentDayEnd: React.FC = () => {
         }
 
         if (draftEntries.length > 0) {
-          claimEntries(draftEntries);
+          claimEntries(mergeDayEndEntries(draftEntries, localUnsaved));
           setHasUnsavedChanges(true);
           setIsLoaded(true);
           return;
@@ -780,7 +800,12 @@ export const OldAgentDayEnd: React.FC = () => {
         // Fallback to local device cache
         const localItems = loadEntriesForDate(agentId, reportDate);
         if (!isMounted) return;
-        claimEntries(localItems);
+        if (localUnsaved.length > 0) {
+          claimEntries(mergeDayEndEntries(localItems, localUnsaved));
+          setHasUnsavedChanges(true);
+        } else {
+          claimEntries(localItems);
+        }
         setIsLoaded(true);
       } catch (err) {
         console.warn('Error loading bills:', err);
@@ -827,9 +852,11 @@ export const OldAgentDayEnd: React.FC = () => {
     } catch (_) {}
   }, [entries, agentName, reportDate, isLoaded]);
 
-  // 4. Debounced background auto-save to cloud database whenever entries change with unsaved edits
+  // 4. Debounced background auto-save to cloud database whenever entries change.
+  // Not gated on `hasUnsavedChanges` (an in-flight older save flipping it false
+  // used to cancel the timer for the newest bills and silently lose them).
   useEffect(() => {
-    if (!agentName || !hasUnsavedChanges || entries.length === 0) return;
+    if (!agentName || entries.length === 0) return;
     const normName = agentName.trim().toUpperCase();
     const owner = entriesContextRef.current;
     if (!owner || owner.date !== reportDate || owner.agent !== normName) return;
@@ -842,12 +869,28 @@ export const OldAgentDayEnd: React.FC = () => {
       // Re-check ownership at fire time (the user may have switched date/boy).
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
+
+      // Save the CURRENT list, not the render that scheduled this timer.
+      const snapshot = entriesRef.current;
+      if (snapshot.length === 0) return;
+
+      const pendingSignature = dayEndEntrySignature(snapshot);
+      const lastSaved = lastSavedSignatureRef.current;
+      if (
+        lastSaved &&
+        lastSaved.date === reportDate &&
+        lastSaved.agent === normName &&
+        lastSaved.signature === pendingSignature
+      ) {
+        return;
+      }
+
       try {
         const result = await saveDayEndReportToDatabase({
           report_date: reportDate,
           agent_id: agentId !== 'agent_default' ? agentId : undefined,
           agent_name: agentName,
-          entries: entries as any,
+          entries: snapshot as any,
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
         });
@@ -855,10 +898,34 @@ export const OldAgentDayEnd: React.FC = () => {
           console.warn('Auto-save failed:', result.error);
           return;
         }
+
+        lastSavedSignatureRef.current = {
+          date: reportDate,
+          agent: normName,
+          signature: pendingSignature,
+        };
+
+        // Only mark saved (and drop the draft) when nothing newer arrived while
+        // this save was in flight.
+        const latest = entriesRef.current;
+        if (dayEndEntrySignature(snapshot) !== dayEndEntrySignature(latest)) {
+          return;
+        }
+
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
         try {
-          localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+          const draftKey = getWorkingDraftKey(reportDate, normName);
+          const raw = localStorage.getItem(draftKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (
+              Array.isArray(parsed.entries) &&
+              dayEndEntrySignature(parsed.entries) === dayEndEntrySignature(snapshot)
+            ) {
+              localStorage.removeItem(draftKey);
+            }
+          }
         } catch (_) {}
       } catch (err) {
         console.warn('Auto-save error:', err);
@@ -868,9 +935,10 @@ export const OldAgentDayEnd: React.FC = () => {
     return () => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
       }
     };
-  }, [entries, hasUnsavedChanges, agentName, agentId, reportDate, supervisorPhone]);
+  }, [entries, agentName, agentId, reportDate, supervisorPhone]);
 
   // 5. App Switch / Background / Pagehide Emergency Flush:
   // Persists ONLY genuinely unsaved work. This prevents a stale tab from silently
@@ -1054,6 +1122,11 @@ export const OldAgentDayEnd: React.FC = () => {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastSavedTime(timeStr);
         setHasUnsavedChanges(false);
+        lastSavedSignatureRef.current = {
+          date: reportDate,
+          agent: agentName.trim().toUpperCase(),
+          signature: dayEndEntrySignature(entries),
+        };
         try {
           localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
         } catch (_) {}
@@ -1414,6 +1487,13 @@ export const OldAgentDayEnd: React.FC = () => {
           localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
         } catch (_) {}
       }
+      // Deletion is a deliberate replace: record it so the debounced merge
+      // autosave cannot re-add the removed bill.
+      lastSavedSignatureRef.current = {
+        date: reportDate,
+        agent: agentName.trim().toUpperCase(),
+        signature: dayEndEntrySignature(updated),
+      };
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       toast.success('Bill deleted & database updated');
     } catch (_) {}

@@ -54,6 +54,7 @@ import {
   formatDuplicateClaimNotice,
   getWorkingDraftKey,
   filterEntriesCrossDateDuplicates,
+  mergeDayEndEntries,
   type DayEndEntry, 
   type DayEndReportSummary,
   type PastClaimantInfo
@@ -482,6 +483,11 @@ export const StaffDayEndSummary: React.FC = () => {
   const reportDateRef = useRef<string>(reportDate);
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last list content successfully written to the cloud for this (date, boy).
+  // Used to skip redundant autosaves for content-identical arrays (realtime
+  // merges) and, importantly, to stop a merge-mode autosave from resurrecting a
+  // bill that was just deleted with a replace-mode save.
+  const lastSavedSignatureRef = useRef<{ date: string; agent: string; signature: string } | null>(null);
   const activeBoyIdentityRef = useRef<string | null>(selectedBoy ? selectedBoy.name.trim().toUpperCase() : null);
   // Which (date, delivery boy) the in-memory entries actually belong to.
   // Every draft/cloud write must match this context; otherwise switching the
@@ -552,6 +558,12 @@ export const StaffDayEndSummary: React.FC = () => {
 
     return map;
   }, [rosterSummaries, past7DaysBillsMap, selectedBoy]);
+
+  // Stable refs so the bill loader is not recreated whenever the anti-fraud map
+  // or roster refreshes. Recreating it used to re-run the load effect and replace
+  // the in-memory list mid-scan, which silently dropped the newest bills.
+  const crossAgentClaimedMapRef = useRef(crossAgentClaimedMap);
+  crossAgentClaimedMapRef.current = crossAgentClaimedMap;
 
   // Count how many bills in the current list are double-bills from other delivery boys
   const duplicateScamCount = useMemo(() => {
@@ -686,6 +698,10 @@ export const StaffDayEndSummary: React.FC = () => {
   const [singleInput, setSingleInput] = useState<string>('');
   const [inputMode, setInputMode] = useState<'single' | 'bulk'>('single');
   const [isLiveScannerOpen, setIsLiveScannerOpen] = useState<boolean>(false);
+  // Read by background sync/load effects so they never replace the bill list
+  // while the camera scanner is open.
+  const isLiveScannerOpenRef = useRef(isLiveScannerOpen);
+  isLiveScannerOpenRef.current = isLiveScannerOpen;
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   // In-List Search & Filter
@@ -883,30 +899,47 @@ export const StaffDayEndSummary: React.FC = () => {
       cloudEntries = await filterEntriesCrossDateDuplicates(cloudEntries, dateStr, boy.name, boy.id);
       draftEntries = await filterEntriesCrossDateDuplicates(draftEntries, dateStr, boy.name, boy.id);
 
+      // 2c. Never let a background reload drop bills that exist only in memory.
+      // The scanner appends bills faster than the debounced cloud save, so a
+      // roster/realtime refresh used to replace this list with an older cloud
+      // copy (the "40 added in the camera but only 37 in the list" bug).
+      const ownerNow = entriesContextRef.current;
+      const inMemoryEntries =
+        ownerNow && ownerNow.date === dateStr && ownerNow.agent === normName
+          ? entriesRef.current
+          : [];
+      const localUnsaved = hasUnsavedChangesRef.current ? inMemoryEntries : [];
+
       // A draft only wins if it was written AFTER the cloud row was last updated.
       // This preserves unsaved local work without resurrecting bills that staff deleted.
       const cloudUpdatedMs = summary?.updated_at ? new Date(summary.updated_at).getTime() : 0;
       const draftIsNewer = draftEntries.length > 0 && draftTimestamp > cloudUpdatedMs &&
         dayEndEntrySignature(draftEntries) !== dayEndEntrySignature(cloudEntries);
 
-      // 3. Resolution:
+      // 3. Resolution (every branch is a union, never a shrink):
       if (cloudEntries.length > 0) {
         if (draftIsNewer) {
-          // Never drop unsaved local bills: union cloud + draft, draft wins on conflicts
-          const mergedMap = new Map<string, ItemEntry>();
-          cloudEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
-          draftEntries.forEach((e) => mergedMap.set(e.consumer_number.trim().toLowerCase(), e));
-          const mergedEntries = Array.from(mergedMap.values());
+          // Never drop unsaved local bills: union cloud + draft + in-memory, local wins.
+          const mergedEntries = mergeDayEndEntries(
+            mergeDayEndEntries(cloudEntries, draftEntries),
+            localUnsaved
+          );
           claimEntries(mergedEntries);
           setHasUnsavedChanges(true);
           try {
             localStorage.setItem(draftKey, JSON.stringify({ entries: mergedEntries, timestamp: draftTimestamp, date: dateStr, agent: normName }));
           } catch (_) {}
         } else {
-          claimEntries(cloudEntries);
-          setHasUnsavedChanges(false);
+          const mergedEntries = mergeDayEndEntries(cloudEntries, localUnsaved);
+          claimEntries(mergedEntries);
+          setHasUnsavedChanges(mergedEntries.length > cloudEntries.length);
           try {
-            localStorage.setItem(draftKey, JSON.stringify({ entries: cloudEntries, timestamp: cloudUpdatedMs || Date.now(), date: dateStr, agent: normName }));
+            localStorage.setItem(draftKey, JSON.stringify({
+              entries: mergedEntries,
+              timestamp: mergedEntries.length > cloudEntries.length ? Date.now() : (cloudUpdatedMs || Date.now()),
+              date: dateStr,
+              agent: normName,
+            }));
           } catch (_) {}
         }
         if (summary?.updated_at) {
@@ -917,7 +950,10 @@ export const StaffDayEndSummary: React.FC = () => {
         // Never wipe a NEWER local draft (unsaved scanned bills) just because the
         // cloud row is empty or stale.
         if (draftIsNewer) {
-          claimEntries(draftEntries);
+          claimEntries(mergeDayEndEntries(draftEntries, localUnsaved));
+          setHasUnsavedChanges(true);
+        } else if (localUnsaved.length > 0) {
+          claimEntries(localUnsaved);
           setHasUnsavedChanges(true);
         } else {
           claimEntries([]);
@@ -930,7 +966,7 @@ export const StaffDayEndSummary: React.FC = () => {
       } else if (draftEntries.length > 0) {
         // Cross-contamination safeguard: if every entry in draft belongs to another delivery boy, purge it!
         const allClaimedByOther = draftEntries.every(
-          (e) => crossAgentClaimedMap[numberKey(e.consumer_number)]
+          (e) => crossAgentClaimedMapRef.current[numberKey(e.consumer_number)]
         );
         if (allClaimedByOther && draftEntries.length > 3) {
           claimEntries([]);
@@ -939,20 +975,20 @@ export const StaffDayEndSummary: React.FC = () => {
             localStorage.removeItem(draftKey);
           } catch (_) {}
         } else {
-          claimEntries(draftEntries);
+          claimEntries(mergeDayEndEntries(draftEntries, localUnsaved));
           setHasUnsavedChanges(true);
         }
       } else {
-        claimEntries([]);
+        claimEntries(localUnsaved);
         setLastSavedTime(null);
-        setHasUnsavedChanges(false);
+        setHasUnsavedChanges(localUnsaved.length > 0);
       }
 
       activeBoyIdentityRef.current = normName;
     } catch (err) {
       console.warn('Failed to load bills for boy:', err);
     }
-  }, [crossAgentClaimedMap]);
+  }, []);
 
   // 3b. Switch or Select Active Delivery Boy cleanly with ZERO cross-contamination
   const handleSelectBoy = useCallback(async (targetBoy: DeliveryBoy) => {
@@ -1222,6 +1258,7 @@ export const StaffDayEndSummary: React.FC = () => {
     const handleVisible = () => {
       if (document.visibilityState !== 'visible') return;
       loadRosterData(reportDateRef.current, true);
+      if (isLiveScannerOpenRef.current) return;
       const boy = selectedBoyRef.current;
       if (boy && !hasUnsavedChangesRef.current) {
         loadBillsForSelectedBoy(boy, reportDateRef.current);
@@ -1265,9 +1302,15 @@ export const StaffDayEndSummary: React.FC = () => {
     } catch (_) {}
   }, [entries, selectedBoy, reportDate]);
 
-  // Debounced background auto-save to cloud database whenever entries change with unsaved edits
+  // Debounced background auto-save to cloud database whenever entries change.
+  //
+  // Deliberately NOT gated on `hasUnsavedChanges` and not in its dependency
+  // list: an older save completing used to flip that flag to false, which
+  // cancelled the timer scheduled for the newest bills (the autosave race that
+  // silently lost the last few scans). The list is always saved as it is when
+  // the timer fires.
   useEffect(() => {
-    if (!selectedBoy || !hasUnsavedChanges || entries.length === 0) return;
+    if (!selectedBoy || entries.length === 0) return;
     const normName = selectedBoy.name.trim().toUpperCase();
     // SAFETY GUARD: Do not auto-save if entries belong to another boy!
     if (activeBoyIdentityRef.current !== normName) return;
@@ -1283,12 +1326,30 @@ export const StaffDayEndSummary: React.FC = () => {
       // Re-check ownership at fire time (the user may have switched date/boy).
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
+
+      // Save the CURRENT list, not the render that scheduled this timer.
+      const snapshot = entriesRef.current;
+      if (snapshot.length === 0) return;
+
+      // Nothing new since the last successful cloud write: skip (avoids a
+      // save/realtime/save loop and protects an explicit delete).
+      const pendingSignature = dayEndEntrySignature(snapshot);
+      const lastSaved = lastSavedSignatureRef.current;
+      if (
+        lastSaved &&
+        lastSaved.date === reportDate &&
+        lastSaved.agent === normName &&
+        lastSaved.signature === pendingSignature
+      ) {
+        return;
+      }
+
       try {
         const result = await saveDayEndReportToDatabase({
           report_date: reportDate,
           agent_id: selectedBoy.id,
           agent_name: selectedBoy.name,
-          entries: entries as any,
+          entries: snapshot as any,
           supervisor_phone: supervisorPhone,
           sender_session_id: sessionClientIdRef.current,
         });
@@ -1296,12 +1357,37 @@ export const StaffDayEndSummary: React.FC = () => {
           console.warn('Auto-save failed:', result.error);
           return;
         }
+
+        lastSavedSignatureRef.current = {
+          date: reportDate,
+          agent: normName,
+          signature: pendingSignature,
+        };
+
+        // Only mark the list saved — and only drop the draft — when no newer
+        // bill arrived while this save was in flight. Otherwise the next
+        // `entries` change keeps the draft and schedules another save.
+        const latest = entriesRef.current;
+        if (dayEndEntrySignature(snapshot) !== dayEndEntrySignature(latest)) {
+          return;
+        }
+
         setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setHasUnsavedChanges(false);
         // The cloud now has this list; remove the redundant draft so localStorage
         // does not fill up over weeks and block login.
         try {
-          localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+          const draftKey = getWorkingDraftKey(reportDate, normName);
+          const raw = localStorage.getItem(draftKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (
+              Array.isArray(parsed.entries) &&
+              dayEndEntrySignature(parsed.entries) === dayEndEntrySignature(snapshot)
+            ) {
+              localStorage.removeItem(draftKey);
+            }
+          }
         } catch (_) {}
       } catch (err) {
         console.warn('Auto-save error:', err);
@@ -1311,14 +1397,17 @@ export const StaffDayEndSummary: React.FC = () => {
     return () => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
       }
     };
-  }, [entries, hasUnsavedChanges, selectedBoy, reportDate, supervisorPhone]);
+  }, [entries, selectedBoy, reportDate, supervisorPhone]);
 
   useEffect(() => {
-    if (selectedBoy) {
-      loadBillsForSelectedBoy(selectedBoy, reportDate);
-    }
+    if (!selectedBoy) return;
+    // Never replace the list while the camera scanner is open: bills are added
+    // there continuously and the cloud copy lags behind the in-memory list.
+    if (isLiveScannerOpenRef.current) return;
+    loadBillsForSelectedBoy(selectedBoy, reportDate);
   }, [reportDate, loadBillsForSelectedBoy]);
 
   // 4. Real-time Multi-Staff Sync Listener (Silent & Debounced - No Screen Flickers, No Disruptive Toasts)
@@ -1351,6 +1440,7 @@ export const StaffDayEndSummary: React.FC = () => {
           // If current user is in SCAN view for this delivery boy, sync bills silently without clobbering unsaved edits
           if (
             activeTabRef.current === 'SCAN' &&
+            !isLiveScannerOpenRef.current &&
             selectedBoyRef.current &&
             data.agent_name?.trim().toUpperCase() === selectedBoyRef.current.name.trim().toUpperCase()
           ) {
@@ -1499,6 +1589,11 @@ export const StaffDayEndSummary: React.FC = () => {
 
       // Instantly update local roster state so scam alerts and bills refresh immediately!
       const normName = selectedBoy.name.trim().toUpperCase();
+      lastSavedSignatureRef.current = {
+        date: reportDate,
+        agent: normName,
+        signature: dayEndEntrySignature(entries),
+      };
 
       // The cloud has the list; keep localStorage from growing forever.
       try {
@@ -1999,6 +2094,14 @@ export const StaffDayEndSummary: React.FC = () => {
 
         // Update roster summaries immediately in React state
         const normName = selectedBoy.name.trim().toUpperCase();
+
+        // The deletion was written with mode 'replace'. Record the resulting
+        // content so the debounced merge autosave cannot re-add the removed bill.
+        lastSavedSignatureRef.current = {
+          date: reportDate,
+          agent: normName,
+          signature: dayEndEntrySignature(updated),
+        };
         setRosterSummaries((prev) => ({
           ...prev,
           [normName]: {
