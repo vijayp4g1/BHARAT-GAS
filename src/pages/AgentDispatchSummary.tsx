@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { supabase } from '../lib/supabase';
+import { PERMISSIONS_TOPIC } from '../lib/realtimeBus';
 import { StaffDayEndSummary } from './StaffDayEndSummary';
 import { OldAgentDayEnd } from './OldAgentDayEnd';
 import { Loader2 } from 'lucide-react';
@@ -33,6 +35,48 @@ export const AgentDispatchSummary: React.FC = () => {
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  // A manager can grant/revoke Staff access while this device is open. Listen
+  // for that change and switch this page immediately instead of waiting for a
+  // manual reload.
+  useEffect(() => {
+    let isMounted = true;
+
+    const channel = supabase
+      .channel(PERMISSIONS_TOPIC)
+      .on(
+        'broadcast',
+        { event: 'staff_permission_changed' },
+        (payload: any) => {
+          const data = payload?.payload;
+          if (!data) return;
+
+          const myId = localStorage.getItem('bgcls_agent_id') || '';
+          const myUsername = (
+            localStorage.getItem('bgcls_logged_username') || ''
+          )
+            .toLowerCase()
+            .trim();
+
+          const matches =
+            (data.agentId && data.agentId === myId) ||
+            (data.username &&
+              String(data.username).toLowerCase().trim() === myUsername);
+
+          if (!matches) return;
+
+          refreshCurrentStaffPermission().then((liveStaff) => {
+            if (isMounted) setIsStaff(liveStaff);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 

@@ -120,11 +120,40 @@ const isUuid = (value: unknown): value is string =>
 // ---------------------------------------------------------------------------
 
 async function loadCaller(admin: SupabaseClient, user: Record<string, any>): Promise<Caller> {
-  const { data: agent } = await admin
+  const agentColumns = 'id, name, username, role, is_staff, status'
+
+  // Primary lookup: agents.id === auth user id (the normal create-agent flow).
+  const { data: byId } = await admin
     .from('agents')
-    .select('id, name, username, role, is_staff, status')
+    .select(agentColumns)
     .eq('id', user.id)
     .maybeSingle()
+
+  let agent = byId ?? null
+
+  // Legacy/imported accounts can have an agents.id that differs from the auth
+  // user id. Fall back to the username so a manager-granted `is_staff` flag is
+  // still recognized. Username is unique, so this cannot pick another account.
+  if (!agent) {
+    const emailLocal =
+      typeof user.email === 'string' ? user.email.split('@')[0] : ''
+    const metadataUsername =
+      typeof user.user_metadata?.username === 'string'
+        ? user.user_metadata.username
+        : ''
+    const candidate = String(metadataUsername || emailLocal || '')
+      .toLowerCase()
+      .trim()
+
+    if (candidate) {
+      const { data: byUsername } = await admin
+        .from('agents')
+        .select(agentColumns)
+        .ilike('username', candidate)
+        .maybeSingle()
+      agent = byUsername ?? null
+    }
+  }
 
   const activeAgent = agent && agent.status !== 'DELETED' ? agent : null
   const appRole = user.app_metadata?.role

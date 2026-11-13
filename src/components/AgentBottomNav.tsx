@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Search, Compass, Map, ClipboardCheck, Flame } from 'lucide-react';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { supabase } from '../lib/supabase';
+import { PERMISSIONS_TOPIC } from '../lib/realtimeBus';
 
 
 export const AgentBottomNav = () => {
@@ -11,6 +13,43 @@ export const AgentBottomNav = () => {
     refreshCurrentStaffPermission().then((liveStaff) => {
       setIsStaff(liveStaff);
     });
+  }, []);
+
+  // Live staff grant/revoke from the manager dashboard.
+  useEffect(() => {
+    const channel = supabase
+      .channel(PERMISSIONS_TOPIC)
+      .on(
+        'broadcast',
+        { event: 'staff_permission_changed' },
+        (payload: any) => {
+          const data = payload?.payload;
+          if (!data) return;
+
+          const myId = localStorage.getItem('bgcls_agent_id') || '';
+          const myUsername = (
+            localStorage.getItem('bgcls_logged_username') || ''
+          )
+            .toLowerCase()
+            .trim();
+
+          const matches =
+            (data.agentId && data.agentId === myId) ||
+            (data.username &&
+              String(data.username).toLowerCase().trim() === myUsername);
+
+          if (!matches) return;
+
+          refreshCurrentStaffPermission().then((liveStaff) => {
+            setIsStaff(liveStaff);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (

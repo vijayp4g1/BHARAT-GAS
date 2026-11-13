@@ -305,15 +305,19 @@ export const ManagerAgents = () => {
     // Optimistic UI update so the badge updates immediately
     setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_staff: nextVal } : a));
 
-    const saved = isCurrentlyStaff
+    const result = isCurrentlyStaff
       ? await revokeStaffPermission(agent.id, agent.username)
       : await grantStaffPermission(agent.id, agent.username);
 
-    if (!saved) {
+    if (!result.ok) {
       setAgents(before);
-      toast.error('Could not save staff access to the database. Please retry.');
+      toast.error(result.error || 'Could not save staff access to the database. Please retry.');
       return;
     }
+
+    // Reconcile with the database (the clicked row and the login row can differ
+    // for legacy accounts).
+    await fetchAgents();
 
     if (isCurrentlyStaff) {
       toast.success(`Revoked staff access from ${agent.name}`);
