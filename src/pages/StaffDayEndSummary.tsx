@@ -269,22 +269,26 @@ export const StaffDayEndSummary: React.FC = () => {
       // entries are leftovers copied from another date by the old bug.
       const cloudMapLoaded =
         bpclMapDateRef.current === reportDate &&
-        Object.keys(bpclReportsMap).length > 0;
+        (Object.keys(bpclReportsMap).length > 0 || navigator.onLine);
 
       if (cloudMapLoaded) {
-        const namesWithReport = new Set(
-          Object.entries(bpclReportsMap)
-            .filter(([, rep]) => rep && String(rep.report_date || '') === reportDate)
-            .map(([name]) => name)
-        );
-
+        // The current date's reports are authoritative. A name is archived /
+        // no-supply ONLY when that date's report explicitly says so — every
+        // successful toggle writes the flag into the report. Anything else is a
+        // stale local flag (typically copied from another date by the old bug).
         Array.from(baseArchived).forEach((name) => {
-          if (!namesWithReport.has(name) && !pendingStatusRef.current.has(name)) {
+          if (pendingStatusRef.current.has(name)) return;
+          const rep = bpclReportsMap[name];
+          const belongsToDate = rep && String(rep.report_date || '') === reportDate;
+          if (!belongsToDate || rep.archived !== true) {
             baseArchived.delete(name);
           }
         });
         Array.from(baseNoSupply).forEach((name) => {
-          if (!namesWithReport.has(name) && !pendingStatusRef.current.has(name)) {
+          if (pendingStatusRef.current.has(name)) return;
+          const rep = bpclReportsMap[name];
+          const belongsToDate = rep && String(rep.report_date || '') === reportDate;
+          if (!belongsToDate || rep.no_supply !== true) {
             baseNoSupply.delete(name);
           }
         });
