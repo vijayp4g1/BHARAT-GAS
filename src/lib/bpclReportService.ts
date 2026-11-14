@@ -736,6 +736,14 @@ export async function fetchAllBpclReportsForDate(
     }
   } catch (_) {}
 
+  // Every entry in this map was fetched for `dateStr`. Stamp the date so
+  // callers can safely ignore maps that belong to a different day (the
+  // archive/no-supply reconciliation depends on this to not copy one day's
+  // flags onto another day).
+  Object.values(result).forEach((rep) => {
+    if (rep) rep.report_date = dateStr;
+  });
+
   return result;
 }
 

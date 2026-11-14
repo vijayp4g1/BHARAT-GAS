@@ -202,6 +202,16 @@ export const StaffDayEndSummary: React.FC = () => {
 
   const [isArchivedCollapsed, setIsArchivedCollapsed] = useState<boolean>(false);
 
+  // Names whose archive / no-supply status the user is currently saving. The
+  // cloud reconciliation below must not override an in-flight optimistic change
+  // with the previous cloud value.
+  const pendingStatusRef = useRef<Set<string>>(new Set());
+
+  // Date for which the BPCL map has actually finished loading. Used to safely
+  // treat the cloud map as authoritative and drop local flags that have no
+  // backing report (e.g. copied from another date by the old date-change bug).
+  const bpclMapDateRef = useRef<string | null>(null);
+
   // Sync archivedBoyNames and noSupplyBoyNames when reportDate changes or bpclReportsMap is fetched
   useEffect(() => {
     try {
@@ -213,6 +223,16 @@ export const StaffDayEndSummary: React.FC = () => {
 
       Object.entries(bpclReportsMap).forEach(([normName, rep]) => {
         if (!rep) return;
+
+        // CRITICAL: only apply reports belonging to the visible date. On a date
+        // switch this map still holds the previous day's reports until the new
+        // roster finishes loading; applying them copied yesterday's archive /
+        // no-supply flags into the new date's local storage (a local-only
+        // change, because no database write was made).
+        if (String(rep.report_date || '') !== reportDate) return;
+
+        // Never override a status that is being saved right now.
+        if (pendingStatusRef.current.has(normName)) return;
 
         // The cloud report is authoritative once it carries an explicit flag.
         // Previously only `true` was applied, so unarchiving on another device
@@ -232,12 +252,43 @@ export const StaffDayEndSummary: React.FC = () => {
         }
       });
 
-      // Any delivery boy who has bills recorded cannot be "no supply"
+      // Any delivery boy who has bills recorded cannot be "no supply".
+      // Only consider summaries for the visible date.
       Object.entries(rosterSummaries).forEach(([normName, sum]) => {
-        if (sum && sum.total_deliveries > 0) {
+        if (!sum) return;
+        if (sum.report_date && sum.report_date !== reportDate) return;
+        if (pendingStatusRef.current.has(normName)) return;
+        if (sum.total_deliveries > 0) {
           baseNoSupply.delete(normName);
         }
       });
+
+      // Self-heal stale local flags: once this date's cloud map has loaded, a
+      // name with no report for this date cannot legitimately be archived or
+      // "no supply" (every successful toggle creates that date's report). Such
+      // entries are leftovers copied from another date by the old bug.
+      const cloudMapLoaded =
+        bpclMapDateRef.current === reportDate &&
+        Object.keys(bpclReportsMap).length > 0;
+
+      if (cloudMapLoaded) {
+        const namesWithReport = new Set(
+          Object.entries(bpclReportsMap)
+            .filter(([, rep]) => rep && String(rep.report_date || '') === reportDate)
+            .map(([name]) => name)
+        );
+
+        Array.from(baseArchived).forEach((name) => {
+          if (!namesWithReport.has(name) && !pendingStatusRef.current.has(name)) {
+            baseArchived.delete(name);
+          }
+        });
+        Array.from(baseNoSupply).forEach((name) => {
+          if (!namesWithReport.has(name) && !pendingStatusRef.current.has(name)) {
+            baseNoSupply.delete(name);
+          }
+        });
+      }
 
       // Persist the reconciled sets so a reload does not briefly show a stale
       // downside status before the cloud map is applied.
@@ -259,19 +310,29 @@ export const StaffDayEndSummary: React.FC = () => {
 
   // Persist both downside status sets atomically. Used for optimistic updates
   // and to roll back the UI when the database write fails.
-  const persistBoyStatusSets = (archived: Set<string>, noSupply: Set<string>) => {
-    setArchivedBoyNames(new Set(archived));
-    setNoSupplyBoyNames(new Set(noSupply));
+  //
+  // `dateStr` binds the write to the date the toggle was made on: if the user
+  // switched dates while the database call was in flight, the rollback must
+  // update that old date's key and must NOT touch the date now on screen.
+  const persistBoyStatusSets = (
+    archived: Set<string>,
+    noSupply: Set<string>,
+    dateStr: string = reportDate
+  ) => {
     try {
       localStorage.setItem(
-        `bgcls_archived_boys_${reportDate}`,
+        `bgcls_archived_boys_${dateStr}`,
         JSON.stringify(Array.from(archived))
       );
       localStorage.setItem(
-        `bgcls_no_supply_boys_${reportDate}`,
+        `bgcls_no_supply_boys_${dateStr}`,
         JSON.stringify(Array.from(noSupply))
       );
     } catch (_) {}
+
+    if (reportDateRef.current !== dateStr) return;
+    setArchivedBoyNames(new Set(archived));
+    setNoSupplyBoyNames(new Set(noSupply));
   };
 
   // 1-Click Toggle for Delivery Boy Archive
@@ -320,7 +381,7 @@ export const StaffDayEndSummary: React.FC = () => {
     if (!saved) {
       // Undo the optimistic UI so this device cannot show a status the
       // database (and therefore other devices) never received.
-      persistBoyStatusSets(prevArchived, prevNoSupply);
+      persistBoyStatusSets(prevArchived, prevNoSupply, reportDate);
       toast.error(`Could not save archive status for ${boyName} to the database. Please retry.`, {
         id: `archive-${norm}`,
       });
@@ -334,12 +395,18 @@ export const StaffDayEndSummary: React.FC = () => {
     // 3. Reconcile with the database (also after a failed write).
     try {
       const updated = await fetchAllBpclReportsForDate(reportDate);
-      setBpclReportsMap(updated);
-      if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
-        setActiveBpclReport(updated[norm] || null);
+      // The user may have switched dates while the save was in flight. Never
+      // put this date's map on screen for another date.
+      if (reportDateRef.current === reportDate) {
+        setBpclReportsMap(updated);
+        if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
+          setActiveBpclReport(updated[norm] || null);
+        }
       }
     } catch (err) {
       console.warn('Could not refresh BPCL status after archive toggle:', err);
+    } finally {
+      pendingStatusRef.current.delete(norm);
     }
   };
 
@@ -385,6 +452,7 @@ export const StaffDayEndSummary: React.FC = () => {
     }
 
     // 2. Persist to cloud. Only announce success if the DB write really worked.
+    pendingStatusRef.current.add(norm);
     let saved = false;
     try {
       saved = await toggleBoyNoSupply(reportDate, boyName, boyId, nextStatus);
@@ -393,7 +461,7 @@ export const StaffDayEndSummary: React.FC = () => {
     }
 
     if (!saved) {
-      persistBoyStatusSets(prevArchived, prevNoSupply);
+      persistBoyStatusSets(prevArchived, prevNoSupply, reportDate);
       toast.error(`Could not save No Supply status for ${boyName} to the database. Please retry.`, {
         id: `nosupply-${norm}`,
       });
@@ -407,12 +475,16 @@ export const StaffDayEndSummary: React.FC = () => {
     // 3. Reconcile with the database (also after a failed write).
     try {
       const updated = await fetchAllBpclReportsForDate(reportDate);
-      setBpclReportsMap(updated);
-      if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
-        setActiveBpclReport(updated[norm] || null);
+      if (reportDateRef.current === reportDate) {
+        setBpclReportsMap(updated);
+        if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
+          setActiveBpclReport(updated[norm] || null);
+        }
       }
     } catch (err) {
       console.warn('Could not refresh BPCL status after no-supply toggle:', err);
+    } finally {
+      pendingStatusRef.current.delete(norm);
     }
   };
 
@@ -771,6 +843,11 @@ export const StaffDayEndSummary: React.FC = () => {
         fetchAllBpclReportsForDate(dateStr),
         fetchPast7DaysBills(dateStr),
       ]);
+      // A slower request for the previous date must never overwrite the maps of
+      // the date the user is now viewing (that could restore old archive /
+      // no-supply flags and old bills).
+      if (reportDateRef.current !== dateStr) return;
+      bpclMapDateRef.current = dateStr;
       setRosterSummaries(summaries);
       setBpclReportsMap(bpclMap);
       setPast7DaysBillsMap(past7DaysMap);
@@ -1736,6 +1813,22 @@ export const StaffDayEndSummary: React.FC = () => {
 
     activeDateRef.current = newDate;
     setReportDate(newDate);
+
+    // Load the new date's downside flags immediately. Otherwise the previous
+    // date's sets stay in state for a render and the reconciliation effect can
+    // write them into the new date's local key (a local-only "status change").
+    pendingStatusRef.current.clear();
+    bpclMapDateRef.current = null;
+    try {
+      const storedArchived = localStorage.getItem(`bgcls_archived_boys_${newDate}`);
+      setArchivedBoyNames(storedArchived ? new Set(JSON.parse(storedArchived)) : new Set());
+      const storedNoSupply = localStorage.getItem(`bgcls_no_supply_boys_${newDate}`);
+      setNoSupplyBoyNames(storedNoSupply ? new Set(JSON.parse(storedNoSupply)) : new Set());
+    } catch (_) {
+      setArchivedBoyNames(new Set());
+      setNoSupplyBoyNames(new Set());
+    }
+
     setListSearchQuery('');
     toast(`Viewing Date: ${newDate}`, { icon: '📅' });
   };
