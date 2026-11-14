@@ -488,6 +488,10 @@ export const StaffDayEndSummary: React.FC = () => {
   // merges) and, importantly, to stop a merge-mode autosave from resurrecting a
   // bill that was just deleted with a replace-mode save.
   const lastSavedSignatureRef = useRef<{ date: string; agent: string; signature: string } | null>(null);
+  // Set while an explicit replace-mode write (delete / clear) is in flight.
+  // The debounced merge autosave waits for it so it cannot re-add a bill from
+  // the stale cloud copy while the delete is still saving.
+  const explicitWritePromiseRef = useRef<Promise<unknown> | null>(null);
   const activeBoyIdentityRef = useRef<string | null>(selectedBoy ? selectedBoy.name.trim().toUpperCase() : null);
   // Which (date, delivery boy) the in-memory entries actually belong to.
   // Every draft/cloud write must match this context; otherwise switching the
@@ -850,6 +854,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
   // 3. Load Bills for Selected Delivery Boy (with resilient Local Working Draft protection)
   const loadBillsForSelectedBoy = useCallback(async (boy: DeliveryBoy, dateStr: string) => {
+    // An explicit replace (delete / clear) is writing right now: do not read or
+    // claim a list until it finishes, or the stale cloud copy would be restored.
+    if (explicitWritePromiseRef.current) return;
     try {
       const normName = boy.name.trim().toUpperCase();
       // Claim ownership of the list at the exact moment we hand it to React.
@@ -1087,25 +1094,30 @@ export const StaffDayEndSummary: React.FC = () => {
   }, [activeBpclReport]);
 
   // 1-click Add a Pending BPCL Bill into Completed Deliveries
-  const handleAddPendingBillToScanned = async (bill: BpclBillItem) => {
-    if (entries.some((e) => e.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase())) {
+  const handleAddPendingBillToScanned = (bill: BpclBillItem) => {
+    const rawNumber = (bill.consumer_number || '').trim();
+    if (!rawNumber) return;
+    const billKey = numberKey(rawNumber);
+
+    if (entriesRef.current.some((e) => numberKey(e.consumer_number) === billKey)) {
       toast('This consumer is already in Completed Deliveries', { icon: 'ℹ️' });
       return;
     }
 
-    const match = await matchConsumerWithDatabase(bill.consumer_number, bill.consumer_name);
     const isOnline =
-      isBpclOnlineBill(bill.consumer_number) ||
+      isBpclOnlineBill(rawNumber) ||
       /PayNBook|Online/i.test(bill.refill_type || '') ||
       /Online Paid/i.test(bill.status || '');
 
+    // Add instantly from the BPCL report data. The DB lookup that used to run
+    // first (up to several seconds when the consumer is not in the device
+    // cache) now happens in the background and only enriches the row.
     const newEntry: ItemEntry = {
-      consumer_id: match.consumer_id,
-      consumer_number: match.consumer_number || bill.consumer_number,
-      consumer_name: match.consumer_name || bill.consumer_name || 'Consumer',
-      address: match.address || '',
-      mobile: match.mobile || '',
-      found: match.found,
+      consumer_number: rawNumber,
+      consumer_name: bill.consumer_name || 'Consumer',
+      address: '',
+      mobile: '',
+      found: true,
       source: 'manual',
       cylinder_type: '14.2KG_STD',
       payment_mode: isOnline ? 'UPI' : 'CASH',
@@ -1113,13 +1125,35 @@ export const StaffDayEndSummary: React.FC = () => {
       scanned_at: new Date().toISOString(),
     };
 
-    const next = [newEntry, ...entries];
-    setEntries(next);
+    setEntries((prev) =>
+      prev.some((e) => numberKey(e.consumer_number) === billKey)
+        ? prev
+        : [newEntry, ...prev]
+    );
     setHasUnsavedChanges(true);
-    if (selectedBoy) {
-      triggerAutoSave(next, selectedBoy, reportDate);
-    }
-    toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
+
+    toast.success(`Added #${rawNumber} (${bill.consumer_name || 'Consumer'}) to Completed Deliveries!`);
+
+    void matchConsumerWithDatabase(rawNumber, bill.consumer_name)
+      .then((match) => {
+        if (!match?.found) return;
+        setEntries((prev) =>
+          prev.map((entry) =>
+            numberKey(entry.consumer_number) === billKey
+              ? {
+                  ...entry,
+                  consumer_id: match.consumer_id || entry.consumer_id,
+                  consumer_number: match.consumer_number || entry.consumer_number,
+                  consumer_name: match.consumer_name || entry.consumer_name,
+                  address: match.address || entry.address,
+                  mobile: match.mobile || entry.mobile,
+                  found: true,
+                }
+              : entry
+          )
+        );
+      })
+      .catch(() => {});
   };
 
   // Auto-convert any scanned bills that are confirmed as BPCL Online (PayNBook) from CASH to UPI
@@ -1151,7 +1185,9 @@ export const StaffDayEndSummary: React.FC = () => {
     return { updatedEntries, convertedCount };
   }, []);
 
-  // Handler to manually or automatically convert a single bill to Online (UPI)
+  // Handler to manually or automatically convert a single bill to Online (UPI).
+  // The entries change is what schedules the save; no side effects inside the
+  // state updater (React may run updaters more than once).
   const handleConvertBillToOnline = useCallback((consumerNo: string) => {
     const norm = consumerNo.trim().toLowerCase();
     setEntries((prev) => {
@@ -1159,14 +1195,11 @@ export const StaffDayEndSummary: React.FC = () => {
       if (idx === -1) return prev;
       const updated = [...prev];
       updated[idx] = { ...updated[idx], payment_mode: 'UPI' };
-      if (selectedBoy) {
-        triggerAutoSave(updated, selectedBoy, reportDate);
-      }
       return updated;
     });
     setHasUnsavedChanges(true);
     toast.success(`⚡ Converted #${consumerNo} to Online!`);
-  }, [selectedBoy, reportDate, triggerAutoSave]);
+  }, []);
 
   // Handler to convert ALL online conflicts to Online
   const handleConvertAllOnlineConflicts = useCallback(() => {
@@ -1259,6 +1292,7 @@ export const StaffDayEndSummary: React.FC = () => {
       if (document.visibilityState !== 'visible') return;
       loadRosterData(reportDateRef.current, true);
       if (isLiveScannerOpenRef.current) return;
+      if (explicitWritePromiseRef.current) return;
       const boy = selectedBoyRef.current;
       if (boy && !hasUnsavedChangesRef.current) {
         loadBillsForSelectedBoy(boy, reportDateRef.current);
@@ -1326,6 +1360,25 @@ export const StaffDayEndSummary: React.FC = () => {
       // Re-check ownership at fire time (the user may have switched date/boy).
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
+
+      // Wait for any explicit replace-mode write (delete / clear) before
+      // deciding to save: running a merge while that write is in flight would
+      // re-add the deleted bill from the stale cloud copy.
+      const pendingExplicit = explicitWritePromiseRef.current;
+      if (pendingExplicit) {
+        try {
+          await pendingExplicit;
+        } catch (_) {}
+        const afterExplicit = lastSavedSignatureRef.current;
+        if (
+          afterExplicit &&
+          afterExplicit.date === reportDate &&
+          afterExplicit.agent === normName &&
+          afterExplicit.signature === dayEndEntrySignature(entriesRef.current)
+        ) {
+          return;
+        }
+      }
 
       // Save the CURRENT list, not the render that scheduled this timer.
       const snapshot = entriesRef.current;
@@ -1441,6 +1494,7 @@ export const StaffDayEndSummary: React.FC = () => {
           if (
             activeTabRef.current === 'SCAN' &&
             !isLiveScannerOpenRef.current &&
+            !explicitWritePromiseRef.current &&
             selectedBoyRef.current &&
             data.agent_name?.trim().toUpperCase() === selectedBoyRef.current.name.trim().toUpperCase()
           ) {
@@ -2061,74 +2115,251 @@ export const StaffDayEndSummary: React.FC = () => {
     setHasUnsavedChanges(true);
   };
 
-  const handleRemoveEntry = async (index: number) => {
-    const itemToRemove = entries[index];
-    const updated = entries.filter((_, i) => i !== index);
-    setEntries(updated);
-    setHasUnsavedChanges(true);
+  const handleRemoveEntry = async (consumerNumber: string) => {
+    const removeKey = numberKey(consumerNumber);
+    const current = entriesRef.current;
+    const itemToRemove = current.find(
+      (e) => numberKey(e.consumer_number) === removeKey
+    );
+    if (!itemToRemove) return;
 
-    // Auto-save deletion to database immediately so user never has stuck unsaved changes
-    if (selectedBoy) {
+    const updated = current.filter(
+      (e) => numberKey(e.consumer_number) !== removeKey
+    );
+    setEntries(updated);
+    // Optimistic UI only. hasUnsavedChanges stays false: this write is an
+    // explicit replace, not a merge.
+    setHasUnsavedChanges(false);
+
+    if (!selectedBoy) {
+      toast.success(`Removed #${itemToRemove.consumer_number}`);
+      return;
+    }
+
+    const normName = selectedBoy.name.trim().toUpperCase();
+
+    // Cancel the pending debounce before the replace, otherwise a merge save
+    // can run concurrently and re-add the bill from the old cloud copy.
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    const payload = {
+      report_date: reportDate,
+      agent_id: selectedBoy.id,
+      agent_name: selectedBoy.name,
+      entries: updated as any,
+      scanned_by_staff: localStorage.getItem('bgcls_agent_name') || 'Staff',
+      supervisor_phone: supervisorPhone,
+      sender_session_id: sessionClientIdRef.current,
+      mode: 'replace' as const,
+    };
+
+    const deletePromise = (async () => {
+      const result = await saveDayEndReportToDatabase(payload);
+      if (!result.success) return result;
+
+      // Verify against the authoritative row: a partial write (report failed,
+      // settlement succeeded) used to look successful and the bill reappeared
+      // on the next reload.
+      const verify = await fetchDayEndReportForAgent(
+        reportDate,
+        selectedBoy.name,
+        selectedBoy.id
+      );
+      const stillThere = (verify?.entries || []).some(
+        (e: any) => numberKey(e.consumer_number) === removeKey
+      );
+      if (stillThere) {
+        // One retry, then report the truth instead of silently "deleting".
+        const retry = await saveDayEndReportToDatabase(payload);
+        if (!retry.success) return retry;
+        const verifyAgain = await fetchDayEndReportForAgent(
+          reportDate,
+          selectedBoy.name,
+          selectedBoy.id
+        );
+        if (
+          (verifyAgain?.entries || []).some(
+            (e: any) => numberKey(e.consumer_number) === removeKey
+          )
+        ) {
+          return {
+            success: false,
+            error: 'The database did not remove this bill. Please try again.',
+          };
+        }
+      }
+      return result;
+    })();
+
+    explicitWritePromiseRef.current = deletePromise;
+
+    try {
+      const result = await deletePromise;
+      if (!result.success) {
+        // Put the bill back so the screen always matches the database.
+        setEntries((prev) =>
+          prev.some((e) => numberKey(e.consumer_number) === removeKey)
+            ? prev
+            : [itemToRemove, ...prev]
+        );
+        setHasUnsavedChanges(true);
+        toast.error(
+          result.error ||
+            `Could not delete #${itemToRemove.consumer_number}. It was restored so nothing is lost.`
+        );
+        return;
+      }
+
+      lastSavedSignatureRef.current = {
+        date: reportDate,
+        agent: normName,
+        signature: dayEndEntrySignature(updated),
+      };
+
+      // Keep the local draft in sync with the deletion.
       try {
-        const userMeta = await supabase.auth.getUser();
-        const staffName = userMeta?.data?.user?.user_metadata?.name || 'Staff';
-        await saveDayEndReportToDatabase({
+        const draftKey = getWorkingDraftKey(reportDate, normName);
+        if (updated.length === 0) {
+          localStorage.removeItem(draftKey);
+        } else {
+          localStorage.setItem(draftKey, JSON.stringify({
+            entries: updated,
+            timestamp: Date.now(),
+            date: reportDate,
+            agent: normName,
+          }));
+        }
+      } catch (_) {}
+
+      const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSavedTime(nowFormatted);
+
+      // Update roster summaries immediately in React state
+      setRosterSummaries((prev) => ({
+        ...prev,
+        [normName]: {
+          ...prev[normName],
           report_date: reportDate,
           agent_id: selectedBoy.id,
           agent_name: selectedBoy.name,
-          entries: updated,
-          scanned_by_staff: staffName,
-          supervisor_phone: supervisorPhone,
-          sender_session_id: sessionClientIdRef.current,
-          mode: 'replace',
-        });
-        // Last bill removed: drop the local draft so it cannot resurrect
-        if (updated.length === 0) {
-          try {
-            localStorage.removeItem(getWorkingDraftKey(reportDate, selectedBoy.name.trim().toUpperCase()));
-          } catch (_) {}
-        }
-        const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSavedTime(nowFormatted);
-        setHasUnsavedChanges(false);
+          total_deliveries: updated.length,
+          domestic_14kg: updated.filter((e) => e.cylinder_type === '14.2KG_STD').length,
+          composite_10kg: updated.filter((e) => e.cylinder_type === '10KG_LITE').length,
+          commercial_19kg: updated.filter((e) => e.cylinder_type === '19KG_COMM').length,
+          empties_collected: updated.filter((e) => e.empty_collected).length,
+          cash_count: updated.filter((e) => e.payment_mode === 'CASH').length,
+          upi_count: updated.filter((e) => e.payment_mode === 'UPI').length,
+          due_count: updated.filter((e) => e.payment_mode === 'DUE').length,
+          entries: [...updated],
+          updated_at: new Date().toISOString(),
+        },
+      }));
 
-        // Update roster summaries immediately in React state
-        const normName = selectedBoy.name.trim().toUpperCase();
+      // Background refresh only: the deletion is already saved and verified.
+      void loadRosterData(reportDate, true);
 
-        // The deletion was written with mode 'replace'. Record the resulting
-        // content so the debounced merge autosave cannot re-add the removed bill.
-        lastSavedSignatureRef.current = {
-          date: reportDate,
-          agent: normName,
-          signature: dayEndEntrySignature(updated),
-        };
-        setRosterSummaries((prev) => ({
-          ...prev,
-          [normName]: {
-            ...prev[normName],
-            report_date: reportDate,
-            agent_id: selectedBoy.id,
-            agent_name: selectedBoy.name,
-            total_deliveries: updated.length,
-            domestic_14kg: updated.filter((e) => e.cylinder_type === '14.2KG_STD').length,
-            composite_10kg: updated.filter((e) => e.cylinder_type === '10KG_LITE').length,
-            commercial_19kg: updated.filter((e) => e.cylinder_type === '19KG_COMM').length,
-            empties_collected: updated.filter((e) => e.empty_collected).length,
-            cash_count: updated.filter((e) => e.payment_mode === 'CASH').length,
-            upi_count: updated.filter((e) => e.payment_mode === 'UPI').length,
-            due_count: updated.filter((e) => e.payment_mode === 'DUE').length,
-            entries: [...updated],
-            updated_at: new Date().toISOString(),
-          },
-        }));
-
-        await loadRosterData(reportDate);
-      } catch (err) {
-        console.warn('Auto-save removal notice:', err);
+      toast.success(`Removed #${itemToRemove.consumer_number} & synced to database!`);
+    } catch (err: any) {
+      setEntries((prev) =>
+        prev.some((e) => numberKey(e.consumer_number) === removeKey)
+          ? prev
+          : [itemToRemove, ...prev]
+      );
+      setHasUnsavedChanges(true);
+      toast.error(
+        `Could not delete #${itemToRemove.consumer_number}: ${err?.message || 'network error'}. It was restored.`
+      );
+    } finally {
+      if (explicitWritePromiseRef.current === deletePromise) {
+        explicitWritePromiseRef.current = null;
       }
     }
+  };
 
-    toast.success(`Removed #${itemToRemove.consumer_number} & synced to database!`);
+  // Clear every bill for the active delivery boy (replace-mode, verified).
+  const handleClearAllEntries = async () => {
+    if (!selectedBoy || entriesRef.current.length === 0) return;
+    if (!window.confirm(`Clear all bills for ${selectedBoy.name}?`)) return;
+
+    const previousEntries = entriesRef.current;
+    const normName = selectedBoy.name.trim().toUpperCase();
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    setEntries([]);
+    setHasUnsavedChanges(false);
+
+    const clearPromise = saveDayEndReportToDatabase({
+      report_date: reportDate,
+      agent_id: selectedBoy.id,
+      agent_name: selectedBoy.name,
+      entries: [],
+      scanned_by_staff: localStorage.getItem('bgcls_agent_name') || 'Staff',
+      supervisor_phone: supervisorPhone,
+      sender_session_id: sessionClientIdRef.current,
+      mode: 'replace',
+    });
+    explicitWritePromiseRef.current = clearPromise;
+
+    try {
+      const result = await clearPromise;
+      if (!result.success) {
+        setEntries(previousEntries);
+        setHasUnsavedChanges(true);
+        toast.error(result.error || 'Could not clear the bills. Nothing was removed.');
+        return;
+      }
+
+      lastSavedSignatureRef.current = {
+        date: reportDate,
+        agent: normName,
+        signature: dayEndEntrySignature([]),
+      };
+
+      try {
+        localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
+      } catch (_) {}
+
+      setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setHasUnsavedChanges(false);
+
+      setRosterSummaries((prev) => ({
+        ...prev,
+        [normName]: {
+          ...prev[normName],
+          report_date: reportDate,
+          agent_id: selectedBoy.id,
+          agent_name: selectedBoy.name,
+          total_deliveries: 0,
+          domestic_14kg: 0,
+          composite_10kg: 0,
+          commercial_19kg: 0,
+          empties_collected: 0,
+          cash_count: 0,
+          upi_count: 0,
+          due_count: 0,
+          entries: [],
+          updated_at: new Date().toISOString(),
+        },
+      }));
+
+      void loadRosterData(reportDate, true);
+      toast.success(`Cleared all bills for ${selectedBoy.name} & updated database!`);
+    } catch (err: any) {
+      setEntries(previousEntries);
+      setHasUnsavedChanges(true);
+      toast.error(`Could not clear the bills: ${err?.message || 'network error'}`);
+    } finally {
+      if (explicitWritePromiseRef.current === clearPromise) {
+        explicitWritePromiseRef.current = null;
+      }
+    }
   };
 
   // 14. Optional WhatsApp Sharing (Secondary)
@@ -3327,62 +3558,7 @@ export const StaffDayEndSummary: React.FC = () => {
                     {copiedCsv ? 'Copied CSV' : 'Copy CSV'}
                   </button>
                   <button
-                    onClick={async () => {
-                      if (confirm(`Clear all bills for ${selectedBoy.name}?`)) {
-                        setEntries([]);
-                        setHasUnsavedChanges(true);
-
-                        if (selectedBoy) {
-                          try {
-                            const userMeta = await supabase.auth.getUser();
-                            const staffName = userMeta?.data?.user?.user_metadata?.name || 'Staff';
-                            await saveDayEndReportToDatabase({
-                              report_date: reportDate,
-                              agent_id: selectedBoy.id,
-                              agent_name: selectedBoy.name,
-                              entries: [],
-                              scanned_by_staff: staffName,
-                              supervisor_phone: supervisorPhone,
-                              sender_session_id: sessionClientIdRef.current,
-                              mode: 'replace',
-                            });
-                            // Explicit clear: remove the local draft so it cannot resurrect bills
-                            try {
-                              localStorage.removeItem(getWorkingDraftKey(reportDate, selectedBoy.name.trim().toUpperCase()));
-                            } catch (_) {}
-                            const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            setLastSavedTime(nowFormatted);
-                            setHasUnsavedChanges(false);
-
-                            const normName = selectedBoy.name.trim().toUpperCase();
-                            setRosterSummaries((prev) => ({
-                              ...prev,
-                              [normName]: {
-                                ...prev[normName],
-                                report_date: reportDate,
-                                agent_id: selectedBoy.id,
-                                agent_name: selectedBoy.name,
-                                total_deliveries: 0,
-                                domestic_14kg: 0,
-                                composite_10kg: 0,
-                                commercial_19kg: 0,
-                                empties_collected: 0,
-                                cash_count: 0,
-                                upi_count: 0,
-                                due_count: 0,
-                                entries: [],
-                                updated_at: new Date().toISOString(),
-                              },
-                            }));
-
-                            await loadRosterData(reportDate);
-                            toast.success(`Cleared all bills for ${selectedBoy.name} & updated database!`);
-                          } catch (err) {
-                            console.warn('Clear auto-sync notice:', err);
-                          }
-                        }
-                      }
-                    }}
+                    onClick={handleClearAllEntries}
                     className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1 hover:bg-rose-50 px-2 py-1 rounded-lg transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Clear
@@ -3588,7 +3764,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
                         {/* Delete Button */}
                         <button
-                          onClick={() => handleRemoveEntry(originalIndex)}
+                          onClick={() => handleRemoveEntry(item.consumer_number)}
                           className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors shrink-0"
                           title="Remove"
                         >

@@ -104,8 +104,19 @@ export const ManagerConsumerProfile = () => {
         supabase.from('delivery_notes').delete().eq('consumer_id', id)
       ]);
 
-      await supabase.from('consumers').delete().eq('id', id);
-      
+      // `delete()` resolves even when RLS/permission blocks it; verify a row was
+      // actually removed instead of showing a false success.
+      const { data: deletedRows, error: deleteError } = await supabase
+        .from('consumers')
+        .delete()
+        .eq('id', id)
+        .select('id');
+
+      if (deleteError) throw new Error(deleteError.message);
+      if (!deletedRows || deletedRows.length === 0) {
+        throw new Error('The consumer was not deleted (permission denied or already removed).');
+      }
+
       toast.success('Consumer completely deleted!', { id: 'delete' });
       navigate(-1);
     } catch (error) {

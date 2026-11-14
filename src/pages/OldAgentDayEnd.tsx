@@ -234,6 +234,9 @@ export const OldAgentDayEnd: React.FC = () => {
   // Skips redundant autosaves for identical arrays and prevents a merge-mode
   // autosave from re-adding a bill removed by an explicit replace-mode delete.
   const lastSavedSignatureRef = useRef<{ date: string; agent: string; signature: string } | null>(null);
+  // Set while an explicit replace-mode write (delete / clear) is in flight. The
+  // debounced merge autosave waits for it so it cannot re-add a deleted bill.
+  const explicitWritePromiseRef = useRef<Promise<unknown> | null>(null);
   // Which (date, agent) the in-memory entries belong to. Draft/cloud writes
   // must match it so switching dates can never copy yesterday's bills forward.
   const entriesContextRef = useRef<{ date: string; agent: string } | null>(null);
@@ -486,20 +489,24 @@ export const OldAgentDayEnd: React.FC = () => {
   };
 
   // 1-click Add a Pending BPCL Bill into Completed Deliveries
-  const handleAddPendingBillToScanned = async (bill: BpclBillItem) => {
-    if (entries.some((e) => e.consumer_number.toLowerCase() === bill.consumer_number.toLowerCase())) {
+  const handleAddPendingBillToScanned = (bill: BpclBillItem) => {
+    const rawNumber = (bill.consumer_number || '').trim();
+    if (!rawNumber) return;
+    const billKey = numberKey(rawNumber);
+
+    if (entriesRef.current.some((e) => numberKey(e.consumer_number) === billKey)) {
       toast('This consumer is already in Completed Deliveries', { icon: 'ℹ️' });
       return;
     }
 
-    const match = await matchConsumerWithDatabase(bill.consumer_number, bill.consumer_name);
+    // Add instantly from the BPCL report data; enrich in the background so the
+    // button never waits for a database lookup.
     const newEntry: ItemEntry = {
-      consumer_id: match.consumer_id,
-      consumer_number: match.consumer_number || bill.consumer_number,
-      consumer_name: match.consumer_name || bill.consumer_name || 'Consumer',
-      address: match.address || '',
-      mobile: match.mobile || '',
-      found: match.found,
+      consumer_number: rawNumber,
+      consumer_name: bill.consumer_name || 'Consumer',
+      address: '',
+      mobile: '',
+      found: true,
       source: 'manual',
       cylinder_type: '14.2KG_STD',
       payment_mode: 'CASH',
@@ -507,10 +514,34 @@ export const OldAgentDayEnd: React.FC = () => {
       scanned_at: new Date().toISOString(),
     };
 
-    const next = [newEntry, ...entries];
-    setEntries(next);
+    setEntries((prev) =>
+      prev.some((e) => numberKey(e.consumer_number) === billKey)
+        ? prev
+        : [newEntry, ...prev]
+    );
     setHasUnsavedChanges(true);
-    toast.success(`Added #${bill.consumer_number} (${bill.consumer_name}) to Completed Deliveries!`);
+    toast.success(`Added #${rawNumber} (${bill.consumer_name || 'Consumer'}) to Completed Deliveries!`);
+
+    void matchConsumerWithDatabase(rawNumber, bill.consumer_name)
+      .then((match) => {
+        if (!match?.found) return;
+        setEntries((prev) =>
+          prev.map((entry) =>
+            numberKey(entry.consumer_number) === billKey
+              ? {
+                  ...entry,
+                  consumer_id: match.consumer_id || entry.consumer_id,
+                  consumer_number: match.consumer_number || entry.consumer_number,
+                  consumer_name: match.consumer_name || entry.consumer_name,
+                  address: match.address || entry.address,
+                  mobile: match.mobile || entry.mobile,
+                  found: true,
+                }
+              : entry
+          )
+        );
+      })
+      .catch(() => {});
   };
 
   // Handler to manually convert a single bill to Online (UPI)
@@ -870,6 +901,24 @@ export const OldAgentDayEnd: React.FC = () => {
       const firedOwner = entriesContextRef.current;
       if (!firedOwner || firedOwner.date !== reportDate || firedOwner.agent !== normName) return;
 
+      // Wait for any explicit replace-mode write (delete / clear) before
+      // deciding to save: a merge running concurrently would re-add the bill.
+      const pendingExplicit = explicitWritePromiseRef.current;
+      if (pendingExplicit) {
+        try {
+          await pendingExplicit;
+        } catch (_) {}
+        const afterExplicit = lastSavedSignatureRef.current;
+        if (
+          afterExplicit &&
+          afterExplicit.date === reportDate &&
+          afterExplicit.agent === normName &&
+          afterExplicit.signature === dayEndEntrySignature(entriesRef.current)
+        ) {
+          return;
+        }
+      }
+
       // Save the CURRENT list, not the render that scheduled this timer.
       const snapshot = entriesRef.current;
       if (snapshot.length === 0) return;
@@ -1000,6 +1049,10 @@ export const OldAgentDayEnd: React.FC = () => {
     let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     const pullCloudBills = async () => {
+      // Never pull a list while an explicit replace (delete / clear) is being
+      // written: the old cloud copy still contains the removed bill and would
+      // put it back on screen.
+      if (explicitWritePromiseRef.current) return;
       try {
         const targetDate = reportDateRef.current;
         const targetName = (agentNameRef.current || '').trim();
@@ -1468,35 +1521,123 @@ export const OldAgentDayEnd: React.FC = () => {
   };
 
   // 11. Delete Entry (with immediate database update)
-  const handleDeleteEntry = async (index: number) => {
-    const updated = entries.filter((_, idx) => idx !== index);
+  const handleDeleteEntry = async (consumerNumber: string) => {
+    const removeKey = numberKey(consumerNumber);
+    const current = entriesRef.current;
+    const itemToRemove = current.find(
+      (e) => numberKey(e.consumer_number) === removeKey
+    );
+    if (!itemToRemove) return;
+
+    const updated = current.filter(
+      (e) => numberKey(e.consumer_number) !== removeKey
+    );
     setEntries(updated);
     setHasUnsavedChanges(false);
 
-    try {
-      await saveDayEndReportToDatabase({
-        report_date: reportDate,
-        agent_id: agentId !== 'agent_default' ? agentId : undefined,
-        agent_name: agentName,
-        entries: updated as any,
-        supervisor_phone: supervisorPhone,
-        mode: 'replace',
-      });
-      if (updated.length === 0) {
-        try {
-          localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
-        } catch (_) {}
+    const normName = agentName.trim().toUpperCase();
+    const effectiveId = agentId !== 'agent_default' ? agentId : undefined;
+
+    // Cancel the pending debounce so a merge save cannot race the replace and
+    // re-add the bill from the old cloud copy.
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    const payload = {
+      report_date: reportDate,
+      agent_id: effectiveId,
+      agent_name: agentName,
+      entries: updated as any,
+      supervisor_phone: supervisorPhone,
+      sender_session_id: sessionClientIdRef.current,
+      mode: 'replace' as const,
+    };
+
+    const deletePromise = (async () => {
+      const result = await saveDayEndReportToDatabase(payload);
+      if (!result.success) return result;
+
+      const verify = await fetchDayEndReportForAgent(reportDate, agentName, effectiveId);
+      const stillThere = (verify?.entries || []).some(
+        (e: any) => numberKey(e.consumer_number) === removeKey
+      );
+      if (stillThere) {
+        const retry = await saveDayEndReportToDatabase(payload);
+        if (!retry.success) return retry;
+        const verifyAgain = await fetchDayEndReportForAgent(reportDate, agentName, effectiveId);
+        if (
+          (verifyAgain?.entries || []).some(
+            (e: any) => numberKey(e.consumer_number) === removeKey
+          )
+        ) {
+          return {
+            success: false,
+            error: 'The database did not remove this bill. Please try again.',
+          };
+        }
       }
+      return result;
+    })();
+
+    explicitWritePromiseRef.current = deletePromise;
+
+    try {
+      const result = await deletePromise;
+      if (!result.success) {
+        setEntries((prev) =>
+          prev.some((e) => numberKey(e.consumer_number) === removeKey)
+            ? prev
+            : [itemToRemove, ...prev]
+        );
+        setHasUnsavedChanges(true);
+        toast.error(
+          result.error ||
+            `Could not delete #${itemToRemove.consumer_number}. It was restored so nothing is lost.`
+        );
+        return;
+      }
+
       // Deletion is a deliberate replace: record it so the debounced merge
       // autosave cannot re-add the removed bill.
       lastSavedSignatureRef.current = {
         date: reportDate,
-        agent: agentName.trim().toUpperCase(),
+        agent: normName,
         signature: dayEndEntrySignature(updated),
       };
+
+      try {
+        const draftKey = getWorkingDraftKey(reportDate, normName);
+        if (updated.length === 0) {
+          localStorage.removeItem(draftKey);
+        } else {
+          localStorage.setItem(draftKey, JSON.stringify({
+            entries: updated,
+            timestamp: Date.now(),
+            date: reportDate,
+            agent: normName,
+          }));
+        }
+      } catch (_) {}
+
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       toast.success('Bill deleted & database updated');
-    } catch (_) {}
+    } catch (err: any) {
+      setEntries((prev) =>
+        prev.some((e) => numberKey(e.consumer_number) === removeKey)
+          ? prev
+          : [itemToRemove, ...prev]
+      );
+      setHasUnsavedChanges(true);
+      toast.error(
+        `Could not delete #${itemToRemove.consumer_number}: ${err?.message || 'network error'}. It was restored.`
+      );
+    } finally {
+      if (explicitWritePromiseRef.current === deletePromise) {
+        explicitWritePromiseRef.current = null;
+      }
+    }
   };
 
   // 12. Clear All Entries
@@ -1504,24 +1645,55 @@ export const OldAgentDayEnd: React.FC = () => {
     if (entries.length === 0) return;
     if (!window.confirm(`Are you sure you want to clear all ${entries.length} deliveries for ${reportDate}?`)) return;
 
+    const previousEntries = entriesRef.current;
+    const normName = agentName.trim().toUpperCase();
+    const effectiveId = agentId !== 'agent_default' ? agentId : undefined;
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
     setEntries([]);
     setHasUnsavedChanges(false);
 
+    const clearPromise = saveDayEndReportToDatabase({
+      report_date: reportDate,
+      agent_id: effectiveId,
+      agent_name: agentName,
+      entries: [],
+      supervisor_phone: supervisorPhone,
+      mode: 'replace',
+    });
+    explicitWritePromiseRef.current = clearPromise;
+
     try {
-      await saveDayEndReportToDatabase({
-        report_date: reportDate,
-        agent_id: agentId !== 'agent_default' ? agentId : undefined,
-        agent_name: agentName,
-        entries: [],
-        supervisor_phone: supervisorPhone,
-        mode: 'replace',
-      });
+      const result = await clearPromise;
+      if (!result.success) {
+        setEntries(previousEntries);
+        setHasUnsavedChanges(true);
+        toast.error(result.error || 'Could not clear the bills. Nothing was removed.');
+        return;
+      }
+      lastSavedSignatureRef.current = {
+        date: reportDate,
+        agent: normName,
+        signature: dayEndEntrySignature([]),
+      };
       try {
-        localStorage.removeItem(getWorkingDraftKey(reportDate, agentName.trim().toUpperCase()));
+        localStorage.removeItem(getWorkingDraftKey(reportDate, normName));
       } catch (_) {}
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       toast.success('All bills cleared and database updated');
-    } catch (_) {}
+    } catch (err: any) {
+      setEntries(previousEntries);
+      setHasUnsavedChanges(true);
+      toast.error(`Could not clear the bills: ${err?.message || 'network error'}`);
+    } finally {
+      if (explicitWritePromiseRef.current === clearPromise) {
+        explicitWritePromiseRef.current = null;
+      }
+    }
   };
 
   // 13. Copy CSV Numbers
@@ -2153,7 +2325,7 @@ export const OldAgentDayEnd: React.FC = () => {
                     </div>
 
                     <button
-                      onClick={() => handleDeleteEntry(origIndex >= 0 ? origIndex : index)}
+                      onClick={() => handleDeleteEntry(item.consumer_number)}
                       className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
                       title="Delete Entry"
                     >
