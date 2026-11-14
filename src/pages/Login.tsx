@@ -36,13 +36,14 @@ export const Login = () => {
       if (!isMounted) return;
 
       if (authSession) {
-        // Live verify staff permission against database so newly granted staff members get instant access
-        const isStaff = await refreshCurrentStaffPermission();
+        // Live verify staff permission against database so newly granted staff
+        // members get instant access (persists role/staff flags).
+        await refreshCurrentStaffPermission();
         if (authSession.role === 'MANAGER') {
           navigate('/manager/dashboard', { replace: true });
-        } else if (isStaff) {
-          navigate('/staff/settlement', { replace: true });
         } else {
+          // Staff and agents both land on the normal agent home. The staff book
+          // is opened from the navigation only when the user chooses it.
           navigate('/agent/search', { replace: true });
         }
       } else {
@@ -205,7 +206,9 @@ export const Login = () => {
         navigate('/manager/dashboard', { replace: true });
       } else if (isStaffMember) {
         toast.success('Staff Member logged in successfully!');
-        navigate('/staff/settlement', { replace: true });
+        // Do not auto-open the staff book; staff start on the agent home and
+        // open the staff book from the navigation.
+        navigate('/agent/search', { replace: true });
       } else {
         toast.success('Agent logged in successfully!');
         navigate('/agent/search', { replace: true });
