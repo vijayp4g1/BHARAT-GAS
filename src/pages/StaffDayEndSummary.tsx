@@ -610,6 +610,9 @@ export const StaffDayEndSummary: React.FC = () => {
     // 2. Check bills already submitted TODAY by OTHER delivery boys
     if (rosterSummaries) {
       Object.values(rosterSummaries).forEach((report) => {
+        // Never let a stale roster from the previous date mark bills on this
+        // date as scams during a date switch.
+        if (report.report_date && report.report_date !== reportDate) return;
         const reportAgentName = (report.agent_name || '').trim().toUpperCase();
         const reportAgentId = report.agent_id || '';
 
@@ -637,7 +640,7 @@ export const StaffDayEndSummary: React.FC = () => {
     }
 
     return map;
-  }, [rosterSummaries, past7DaysBillsMap, selectedBoy]);
+  }, [rosterSummaries, past7DaysBillsMap, selectedBoy, reportDate]);
 
   // Stable refs so the bill loader is not recreated whenever the anti-fraud map
   // or roster refreshes. Recreating it used to re-run the load effect and replace
@@ -664,6 +667,7 @@ export const StaffDayEndSummary: React.FC = () => {
     > = {};
 
     Object.values(rosterSummaries).forEach((report) => {
+      if (report.report_date && report.report_date !== reportDate) return;
       const agentName = report.agent_name || '';
       if (Array.isArray(report.entries)) {
         report.entries.forEach((entry) => {
@@ -688,7 +692,7 @@ export const StaffDayEndSummary: React.FC = () => {
     });
 
     return billOccurrences;
-  }, [rosterSummaries]);
+  }, [rosterSummaries, reportDate]);
 
   // Compute duplicate scam statistics per delivery boy for the roster view
   // Correctly attributes scam count ONLY to the secondary / duplicate submitters (not the original legitimate boy)
@@ -698,6 +702,8 @@ export const StaffDayEndSummary: React.FC = () => {
     deliveryBoys.forEach((boy) => {
       const normName = boy.name.trim().toUpperCase();
       const summary = rosterSummaries[normName];
+      // Ignore a summary from another date (stale state during a date switch).
+      if (!summary || (summary.report_date && summary.report_date !== reportDate)) return;
       let count = 0;
       const dupWithSet = new Set<string>();
 
@@ -766,7 +772,7 @@ export const StaffDayEndSummary: React.FC = () => {
     });
 
     return stats;
-  }, [deliveryBoys, rosterSummaries, past7DaysBillsMap, globalDuplicateBillsMap]);
+  }, [deliveryBoys, rosterSummaries, past7DaysBillsMap, globalDuplicateBillsMap, reportDate]);
 
   // Total scam bills detected across all delivery boys on this date
   const totalRosterScamsCount = useMemo(() => {
@@ -1811,9 +1817,20 @@ export const StaffDayEndSummary: React.FC = () => {
     // Until the new date's bills finish loading, neither the draft writer nor
     // the autosave is allowed to persist anything for the new date.
     entriesContextRef.current = null;
+    activeBoyIdentityRef.current = null;
     setEntries([]);
     setHasUnsavedChanges(false);
     setLastSavedTime(null);
+
+    // 3. Clear every date-scoped cache immediately. Leaving the previous date's
+    // roster/BPCL/7-day maps in state is what made the new date look like it
+    // already had bills and produced false "scam" badges until the async reload
+    // finished. They are repopulated for `newDate` by loadRosterData.
+    setRosterSummaries({});
+    setPast7DaysBillsMap({});
+    setBpclReportsMap({});
+    setActiveBpclReport(null);
+    lastSavedSignatureRef.current = null;
 
     activeDateRef.current = newDate;
     setReportDate(newDate);

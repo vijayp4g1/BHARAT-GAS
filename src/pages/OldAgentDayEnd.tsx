@@ -251,6 +251,10 @@ export const OldAgentDayEnd: React.FC = () => {
     const currentAgentId = selectedBoy?.id || agentId || '';
 
     Object.values(rosterSummaries).forEach((report) => {
+      // Ignore a report from another date: during a date switch the previous
+      // day's roster is still in memory and must not mark today's bills as
+      // duplicates/scams.
+      if (report.report_date && report.report_date !== reportDate) return;
       const reportAgentName = (report.agent_name || '').trim().toUpperCase();
       const reportAgentId = report.agent_id || '';
 
@@ -272,7 +276,7 @@ export const OldAgentDayEnd: React.FC = () => {
     });
 
     return map;
-  }, [rosterSummaries, selectedBoy, agentName, agentId]);
+  }, [rosterSummaries, selectedBoy, agentName, agentId, reportDate]);
 
   // Count how many bills in the current list are double-bills from other delivery boys
   const duplicateScamCount = useMemo(() => {
@@ -1225,6 +1229,11 @@ export const OldAgentDayEnd: React.FC = () => {
     // Invalidate ownership and clear the list before the new date loads.
     entriesContextRef.current = null;
     setEntries([]);
+    // Drop previous-date data immediately so it cannot be mistaken for this
+    // date's bills or trigger false scam flags while the new roster loads.
+    setRosterSummaries({});
+    setBpclReport(null);
+    lastSavedSignatureRef.current = null;
     activeDateRef.current = newDate;
     setReportDate(newDate);
     setHasUnsavedChanges(false);

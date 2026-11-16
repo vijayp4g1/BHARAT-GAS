@@ -267,6 +267,41 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
     }
   } catch (_) {}
 
+  // 4. Final safety: every bill shown in the roster must belong to this date.
+  // Stale cross-date copies written by older builds must not appear as this
+  // day's bills or be counted as scam duplicates. (When all entries are from
+  // this date this is a no-op and performs no extra queries.)
+  try {
+    await Promise.all(
+      Object.entries(result).map(async ([normName, summary]) => {
+        if (!summary || !Array.isArray(summary.entries) || summary.entries.length === 0) {
+          return;
+        }
+        const filtered = await filterEntriesCrossDateDuplicates(
+          summary.entries as DayEndEntry[],
+          dateStr,
+          summary.agent_name || normName,
+          summary.agent_id
+        );
+        if (filtered.length === summary.entries.length) return;
+
+        const s = summarizeDayEndEntries(filtered);
+        result[normName] = {
+          ...summary,
+          total_deliveries: s.total,
+          domestic_14kg: s.domestic14kg,
+          composite_10kg: s.composite10kg,
+          commercial_19kg: s.commercial19kg,
+          empties_collected: s.emptiesCollected,
+          cash_count: s.cashCount,
+          upi_count: s.upiCount,
+          due_count: s.dueCount,
+          entries: filtered,
+        };
+      })
+    );
+  } catch (_) {}
+
   return result;
 }
 
