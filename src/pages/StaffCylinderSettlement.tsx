@@ -136,11 +136,35 @@ type DisplaySettlement = SettlementRecord & {
   cash_pending: boolean;
 };
 
+/**
+ * The godown operates on IST dates. `toISOString()` is UTC, so between
+ * 00:00 and 05:30 IST the Staff Book used to open on yesterday's date.
+ */
+const getIstDateString = (date: Date = new Date()): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+};
+
+const shiftDateString = (dateStr: string, days: number): string => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
 export const StaffCylinderSettlement: React.FC = () => {
   const navigate = useNavigate();
 
-  // Date selection (default today)
-  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  // Date selection (default today in IST)
+  const todayIso = useMemo(() => getIstDateString(), []);
   const [selectedDate, setSelectedDate] = useState<string>(todayIso);
 
   // Cylinder Rate (default 994)
@@ -172,7 +196,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'BALANCED' | 'SHORTAGE'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'BALANCED' | 'SHORTAGE' | 'EXCESS'>('ALL');
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
 
   // Speed Entry Modal / Form state
@@ -281,8 +305,17 @@ export const StaffCylinderSettlement: React.FC = () => {
             }
 
             if (remoteData.length > 0) {
-              await db.staff_cylinder_settlements.bulkPut(
-                remoteData.map((r: any) => ({
+              // Self-heal the stored money columns. Older rows (created or
+              // updated by the day-end scanner) can have quantities with stale
+              // amounts; rewrite only the derived money/status fields so every
+              // report, export and other client sees the same correct numbers.
+              const localUnsyncedIds = new Set(
+                localRecords.filter((r) => r.synced === false).map((r) => r.id)
+              );
+              const repairs: Array<{ id: string; fields: Record<string, any> }> = [];
+
+              const localRows = remoteData.map((r: any) => {
+                const base: SettlementRecord = {
                   id: r.id,
                   settlement_date: r.settlement_date,
                   agent_id: r.agent_id,
@@ -301,12 +334,58 @@ export const StaffCylinderSettlement: React.FC = () => {
                   online_amount: Number(r.online_amount || 0),
                   upi_amount: Number(r.upi_amount || 0),
                   total_amount: Number(r.total_amount || 0),
-                  status: r.status,
+                  status: r.status || 'BALANCED',
                   notes: r.notes || '',
                   created_at: r.created_at,
                   synced: true,
-                }))
-              );
+                };
+
+                const derived = deriveSettlementMoney(base, cylinderRate);
+                const needsRepair =
+                  !localUnsyncedIds.has(r.id) &&
+                  (Math.abs(base.expected_cash - derived.expected_cash) > 0.5 ||
+                    Math.abs(base.cash_difference - derived.cash_difference) > 0.5 ||
+                    Math.abs(base.online_amount - derived.online_amount) > 0.5 ||
+                    Math.abs(base.upi_amount - derived.upi_amount) > 0.5 ||
+                    Math.abs(base.total_amount - derived.total_amount) > 0.5 ||
+                    base.status !== derived.status);
+
+                if (!needsRepair) return base;
+
+                const fields = {
+                  expected_cash: derived.expected_cash,
+                  cash_difference: derived.cash_difference,
+                  online_amount: derived.online_amount,
+                  upi_amount: derived.upi_amount,
+                  total_amount: derived.total_amount,
+                  status: derived.status,
+                };
+                repairs.push({ id: r.id, fields });
+                return { ...base, ...fields };
+              });
+
+              await db.staff_cylinder_settlements.bulkPut(localRows);
+
+              if (repairs.length > 0) {
+                console.info(`[StaffBook] Repairing money fields on ${repairs.length} settlement row(s)`);
+                // Background only: the page already shows the corrected values,
+                // and the next load retries if a repair write fails.
+                void Promise.all(
+                  repairs.map(async ({ id, fields }) => {
+                    try {
+                      const { error } = await supabase
+                        .from('staff_cylinder_settlements')
+                        .update(fields)
+                        .eq('id', id);
+                      if (error) {
+                        console.warn('Settlement amount repair failed:', error.message);
+                      }
+                    } catch (err) {
+                      console.warn('Settlement amount repair error:', err);
+                    }
+                  })
+                );
+              }
             }
 
             // Always refresh the in-memory list, even when the cloud has no
@@ -336,6 +415,10 @@ export const StaffCylinderSettlement: React.FC = () => {
       config: { broadcast: { self: false } },
     });
 
+    // The money self-heal can update several rows at once; debounce the
+    // postgres_changes refresh so one repair burst does not fire many fetches.
+    let pgRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
     channel
       .on('broadcast', { event: 'settlement_changed' }, async ({ payload }) => {
         if (!payload) return;
@@ -359,7 +442,10 @@ export const StaffCylinderSettlement: React.FC = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
         () => {
-          fetchSettlements(selectedDate);
+          if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
+          pgRefreshTimer = setTimeout(() => {
+            void fetchSettlements(selectedDate);
+          }, 600);
         }
       )
       .subscribe();
@@ -377,6 +463,7 @@ export const StaffCylinderSettlement: React.FC = () => {
     window.addEventListener('focus', handleVisibilityOrFocus);
 
     return () => {
+      if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
       window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       supabase.removeChannel(channel);
@@ -517,9 +604,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Date Navigation
   const changeDateBy = (days: number) => {
-    const cur = new Date(selectedDate);
-    cur.setDate(cur.getDate() + days);
-    setSelectedDate(cur.toISOString().split('T')[0]);
+    setSelectedDate((current) => shiftDateString(current, days));
   };
 
   // Formatted Date String for display
@@ -550,6 +635,9 @@ export const StaffCylinderSettlement: React.FC = () => {
       }
       if (statusFilter === 'SHORTAGE') {
         return item.cash_difference < 0 || item.status === 'SHORTAGE';
+      }
+      if (statusFilter === 'EXCESS') {
+        return item.status === 'EXCESS';
       }
       return true;
     });
@@ -713,6 +801,22 @@ export const StaffCylinderSettlement: React.FC = () => {
           freshNotes = freshRow.notes;
         }
       } catch (_) {}
+    }
+
+    // Concurrent-edit guard: if another device changed this row after this
+    // screen loaded it, ask before overwriting their newer quantities.
+    if (editingId && freshRow && existing) {
+      const cloudUpdated = Date.parse(freshRow.updated_at || '') || 0;
+      const localUpdated = Date.parse(existing.updated_at || '') || 0;
+      if (cloudUpdated > localUpdated + 2000) {
+        const proceed = window.confirm(
+          'This settlement was updated by another device after you opened it. Saving will overwrite those newer values. Continue?'
+        );
+        if (!proceed) {
+          setIsSaving(false);
+          return;
+        }
+      }
     }
 
     const recordId =
@@ -1470,10 +1574,10 @@ export const StaffCylinderSettlement: React.FC = () => {
             {/* Filter Chips & Desktop Add Button */}
             <div className="flex items-center justify-between w-full md:w-auto gap-2">
               {/* Filter Chips */}
-              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold overflow-x-auto max-w-full">
                 <button
                   onClick={() => setStatusFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`shrink-0 px-3 py-1.5 rounded-lg transition-all ${
                     statusFilter === 'ALL'
                       ? 'bg-slate-800 text-white shadow-sm'
                       : 'text-slate-400 hover:text-slate-200'
@@ -1483,7 +1587,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setStatusFilter('BALANCED')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`shrink-0 px-3 py-1.5 rounded-lg transition-all ${
                     statusFilter === 'BALANCED'
                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       : 'text-slate-400 hover:text-emerald-400'
@@ -1493,13 +1597,23 @@ export const StaffCylinderSettlement: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setStatusFilter('SHORTAGE')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`shrink-0 px-3 py-1.5 rounded-lg transition-all ${
                     statusFilter === 'SHORTAGE'
                       ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                       : 'text-slate-400 hover:text-rose-400'
                   }`}
                 >
                   Shortage
+                </button>
+                <button
+                  onClick={() => setStatusFilter('EXCESS')}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg transition-all ${
+                    statusFilter === 'EXCESS'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-slate-400 hover:text-amber-400'
+                  }`}
+                >
+                  Excess
                 </button>
               </div>
 
