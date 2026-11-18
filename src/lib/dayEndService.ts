@@ -8,6 +8,20 @@ import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
 
 /**
+ * Current godown cylinder rate saved by the Staff Book. Used when the day-end
+ * scanner creates a settlement row so it does not hardcode ₹994.
+ */
+function getStoredCylinderRate(): number {
+  try {
+    if (typeof localStorage === 'undefined') return 994;
+    const saved = Number(localStorage.getItem('bgcls_cylinder_rate'));
+    return saved > 0 ? saved : 994;
+  } catch {
+    return 994;
+  }
+}
+
+/**
  * A single, long-lived broadcast channel owned by this module.
  *
  * Realtime `send()` is only delivered on a channel that has finished joining.
@@ -796,6 +810,44 @@ export async function saveDayEndReportToDatabase(payload: {
           : payloadEntriesForDate;
         const s = summarizeDayEndEntries(merged);
 
+        // Recompute the money columns from the fresh cylinder counts. The
+        // day-end path updates quantities but used to leave the old amounts in
+        // place, which made the Staff Book show e.g. 196 cash cylinders but only
+        // ₹71,568 of expected cash. Existing actual physical cash is preserved.
+        const currentPrice = Number(current?.cylinder_price) || 0;
+        const rowPrice =
+          currentPrice > 0 ? currentPrice : getStoredCylinderRate();
+        const onlineCyl = Number(current?.online_cylinders) || 0;
+        const returnedFull = Number(current?.returned_full_cylinders) || 0;
+        const actualCash = Number(current?.actual_cash) || 0;
+        const expectedCash = s.cashCount * rowPrice;
+        const onlineAmount = onlineCyl * rowPrice;
+        const upiAmount = s.upiCount * rowPrice;
+        const totalAmount =
+          (s.cashCount + onlineCyl + s.upiCount + s.dueCount) * rowPrice;
+        const cashDifference = actualCash - expectedCash;
+        const cylinderDifference =
+          s.total -
+          (s.cashCount + onlineCyl + s.upiCount + s.dueCount + returnedFull);
+        const expectedEmpties = Math.max(0, s.total - returnedFull);
+        const emptyDifference = s.emptiesCollected - expectedEmpties;
+        let settlementStatus: 'BALANCED' | 'SHORTAGE' | 'EXCESS';
+        if (
+          cylinderDifference === 0 &&
+          cashDifference === 0 &&
+          emptyDifference >= 0
+        ) {
+          settlementStatus = 'BALANCED';
+        } else if (
+          cylinderDifference > 0 ||
+          cashDifference < 0 ||
+          emptyDifference < 0
+        ) {
+          settlementStatus = 'SHORTAGE';
+        } else {
+          settlementStatus = 'EXCESS';
+        }
+
         // Preserve any BPCL Report from existing notes OR local cache so it is NEVER lost!
         let bpclPart = '';
         if (current && (current.notes || '').includes(BPCL_REPORT_TAG)) {
@@ -830,6 +882,12 @@ export async function saveDayEndReportToDatabase(payload: {
               cash_cylinders: s.cashCount,
               upi_cylinders: s.upiCount,
               due_cylinders: s.dueCount,
+              expected_cash: expectedCash,
+              cash_difference: cashDifference,
+              online_amount: onlineAmount,
+              upi_amount: upiAmount,
+              total_amount: totalAmount,
+              status: settlementStatus,
               updated_at: nowIso,
             })
             .eq('id', current.id);
@@ -853,19 +911,19 @@ export async function saveDayEndReportToDatabase(payload: {
               settlement_date: payload.report_date,
               agent_id: payload.agent_id || null,
               agent_name: payload.agent_name,
-              cylinder_price: 994,
+              cylinder_price: rowPrice,
               supplied_cylinders: s.total,
               cash_cylinders: s.cashCount,
               upi_cylinders: s.upiCount,
               due_cylinders: s.dueCount,
               empty_cylinders: s.emptiesCollected,
-              expected_cash: s.cashCount * 994,
-              actual_cash: s.cashCount * 994,
-              cash_difference: 0,
-              online_amount: 0,
-              upi_amount: s.upiCount * 994,
-              total_amount: (s.cashCount + s.upiCount) * 994,
-              status: 'BALANCED',
+              expected_cash: expectedCash,
+              actual_cash: 0,
+              cash_difference: cashDifference,
+              online_amount: onlineAmount,
+              upi_amount: upiAmount,
+              total_amount: totalAmount,
+              status: settlementStatus,
               notes: combinedNote,
               updated_at: nowIso,
             });

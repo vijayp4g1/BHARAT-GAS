@@ -56,6 +56,86 @@ const getDisplayRemarks = (rawNotes: string | null | undefined): string => {
     .trim();
 };
 
+/**
+ * Money shown on the Staff Book must always match the quantities on screen.
+ * Older rows (especially ones created/updated by the day-end scanner) can have
+ * stale stored amounts, so every amount is derived from quantities × the row's
+ * own cylinder price instead of trusting the stored money columns.
+ */
+type SettlementMoney = {
+  cylinder_price: number;
+  expected_cash: number;
+  online_amount: number;
+  upi_amount: number;
+  due_amount: number;
+  total_amount: number;
+  cash_difference: number;
+  status: 'BALANCED' | 'SHORTAGE' | 'EXCESS';
+  cylinder_difference: number;
+  empty_difference: number;
+  cash_pending: boolean;
+};
+
+const deriveSettlementMoney = (
+  s: SettlementRecord,
+  fallbackRate: number
+): SettlementMoney => {
+  const price = Number(s.cylinder_price) > 0 ? Number(s.cylinder_price) : fallbackRate;
+  const cash = Number(s.cash_cylinders) || 0;
+  const online = Number(s.online_cylinders) || 0;
+  const upi = Number(s.upi_cylinders) || 0;
+  const due = Number(s.due_cylinders) || 0;
+  const supplied = Number(s.supplied_cylinders) || 0;
+  const returnedFull = Number(s.returned_full_cylinders) || 0;
+  const empties = Number(s.empty_cylinders) || 0;
+  const actualCash = Number(s.actual_cash) || 0;
+
+  const expectedCash = cash * price;
+  const onlineAmount = online * price;
+  const upiAmount = upi * price;
+  const dueAmount = due * price;
+  const totalAmount = (cash + online + upi + due) * price;
+  const cashDifference = actualCash - expectedCash;
+  const cylinderDifference =
+    supplied - (cash + online + upi + due + returnedFull);
+  const expectedEmpties = Math.max(0, supplied - returnedFull);
+  const emptyDifference = empties - expectedEmpties;
+
+  let status: 'BALANCED' | 'SHORTAGE' | 'EXCESS';
+  if (cylinderDifference === 0 && cashDifference === 0 && emptyDifference >= 0) {
+    status = 'BALANCED';
+  } else if (
+    cylinderDifference > 0 ||
+    cashDifference < 0 ||
+    emptyDifference < 0
+  ) {
+    status = 'SHORTAGE';
+  } else {
+    status = 'EXCESS';
+  }
+
+  return {
+    cylinder_price: price,
+    expected_cash: expectedCash,
+    online_amount: onlineAmount,
+    upi_amount: upiAmount,
+    due_amount: dueAmount,
+    total_amount: totalAmount,
+    cash_difference: cashDifference,
+    status,
+    cylinder_difference: cylinderDifference,
+    empty_difference: emptyDifference,
+    cash_pending: actualCash === 0 && expectedCash > 0,
+  };
+};
+
+type DisplaySettlement = SettlementRecord & {
+  due_amount: number;
+  cylinder_difference: number;
+  empty_difference: number;
+  cash_pending: boolean;
+};
+
 export const StaffCylinderSettlement: React.FC = () => {
   const navigate = useNavigate();
 
@@ -70,6 +150,9 @@ export const StaffCylinderSettlement: React.FC = () => {
   });
   const [isRateModalOpen, setIsRateModalOpen] = useState<boolean>(false);
   const [tempRate, setTempRate] = useState<number>(cylinderRate);
+  // Rate used by the open form. Editing an existing settlement must keep the
+  // price it was saved with, not the current global rate.
+  const [formCylinderRate, setFormCylinderRate] = useState<number>(cylinderRate);
 
   // Quick Action Menu state
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
@@ -172,10 +255,18 @@ export const StaffCylinderSettlement: React.FC = () => {
             .eq('settlement_date', date);
 
           if (!error && remoteData) {
-            // Auto-sync agency cylinder rate from latest database record
-            if (remoteData.length > 0 && remoteData[0].cylinder_price) {
-              const serverRate = Number(remoteData[0].cylinder_price);
-              if (serverRate > 0 && serverRate !== cylinderRate) {
+            // Use the cloud price only as a first-time initialisation. Do not
+            // overwrite a rate the user has explicitly saved on this device:
+            // older rows (e.g. day-end-created ones at ₹994) would otherwise
+            // keep pulling the header rate back to their old price.
+            if (remoteData.length > 0 && !localStorage.getItem('bgcls_cylinder_rate')) {
+              const latest = [...remoteData].sort(
+                (a: any, b: any) =>
+                  new Date(b.updated_at || 0).getTime() -
+                  new Date(a.updated_at || 0).getTime()
+              )[0];
+              const serverRate = Number(latest?.cylinder_price);
+              if (serverRate > 0) {
                 setCylinderRate(serverRate);
                 localStorage.setItem('bgcls_cylinder_rate', String(serverRate));
               }
@@ -300,6 +391,7 @@ export const StaffCylinderSettlement: React.FC = () => {
     }
     setCylinderRate(newRate);
     localStorage.setItem('bgcls_cylinder_rate', String(newRate));
+    if (!editingId) setFormCylinderRate(newRate);
     setIsRateModalOpen(false);
     toast.success(`Rate updated to ₹${newRate} / cyl`);
   };
@@ -317,15 +409,17 @@ export const StaffCylinderSettlement: React.FC = () => {
   const totalAccountedCylinders = numCash + numOnline + numUpi + numDue + numReturnedFull;
   const cylinderDifference = numSupplied - totalAccountedCylinders;
 
-  // Expected Cash = Cash cylinders * cylinderRate
-  const expectedCashAmount = numCash * cylinderRate;
-  const onlineAmount = numOnline * cylinderRate;
-  const upiAmount = numUpi * cylinderRate;
-  const dueAmount = numDue * cylinderRate;
-  const totalCylinderSalesValue = (numCash + numOnline + numUpi + numDue) * cylinderRate;
+  // Expected Cash = Cash cylinders * the rate saved with this settlement
+  const expectedCashAmount = numCash * formCylinderRate;
+  const onlineAmount = numOnline * formCylinderRate;
+  const upiAmount = numUpi * formCylinderRate;
+  const dueAmount = numDue * formCylinderRate;
+  const totalCylinderSalesValue = (numCash + numOnline + numUpi + numDue) * formCylinderRate;
 
   // Actual Cash & Difference
-  const numActualCash = actualCashInput === '' ? expectedCashAmount : Number(actualCashInput) || 0;
+  // Actual cash & Difference. Leaving the field blank means "not counted yet"
+  // (0 received), not "assume exact" — that used to hide real shortages.
+  const numActualCash = actualCashInput === '' ? 0 : Number(actualCashInput) || 0;
   const cashDifference = numActualCash - expectedCashAmount;
 
   // Empty cylinders balance check
@@ -339,22 +433,44 @@ export const StaffCylinderSettlement: React.FC = () => {
     return 'EXCESS';
   }, [cylinderDifference, cashDifference, emptyDifference]);
 
+  // Enriched settlements: every monetary value is derived from the current
+  // quantities and the row's own saved rate. This keeps the page correct even
+  // when the stored money columns are stale (e.g. day-end scanner updates).
+  const displaySettlements: DisplaySettlement[] = useMemo(() => {
+    return settlements.map((s) => {
+      const money = deriveSettlementMoney(s, cylinderRate);
+      return {
+        ...s,
+        expected_cash: money.expected_cash,
+        online_amount: money.online_amount,
+        upi_amount: money.upi_amount,
+        total_amount: money.total_amount,
+        cash_difference: money.cash_difference,
+        status: money.status,
+        due_amount: money.due_amount,
+        cylinder_difference: money.cylinder_difference,
+        empty_difference: money.empty_difference,
+        cash_pending: money.cash_pending,
+      };
+    });
+  }, [settlements, cylinderRate]);
+
   // Aggregate Daily KPIs for the entire agency
   const dailyKpis = useMemo(() => {
-    const totalSupplied = settlements.reduce((acc, s) => acc + s.supplied_cylinders, 0);
-    const totalCashQty = settlements.reduce((acc, s) => acc + s.cash_cylinders, 0);
-    const totalOnlineQty = settlements.reduce((acc, s) => acc + s.online_cylinders, 0);
-    const totalUpiQty = settlements.reduce((acc, s) => acc + s.upi_cylinders, 0);
-    const totalDueQty = settlements.reduce((acc, s) => acc + s.due_cylinders, 0);
-    const totalReturnedFull = settlements.reduce((acc, s) => acc + s.returned_full_cylinders, 0);
-    const totalEmpties = settlements.reduce((acc, s) => acc + s.empty_cylinders, 0);
+    const totalSupplied = displaySettlements.reduce((acc, s) => acc + Number(s.supplied_cylinders || 0), 0);
+    const totalCashQty = displaySettlements.reduce((acc, s) => acc + Number(s.cash_cylinders || 0), 0);
+    const totalOnlineQty = displaySettlements.reduce((acc, s) => acc + Number(s.online_cylinders || 0), 0);
+    const totalUpiQty = displaySettlements.reduce((acc, s) => acc + Number(s.upi_cylinders || 0), 0);
+    const totalDueQty = displaySettlements.reduce((acc, s) => acc + Number(s.due_cylinders || 0), 0);
+    const totalReturnedFull = displaySettlements.reduce((acc, s) => acc + Number(s.returned_full_cylinders || 0), 0);
+    const totalEmpties = displaySettlements.reduce((acc, s) => acc + Number(s.empty_cylinders || 0), 0);
 
-    const totalCashExpected = settlements.reduce((acc, s) => acc + s.expected_cash, 0);
-    const totalCashReceived = settlements.reduce((acc, s) => acc + s.actual_cash, 0);
-    const totalOnlineAmount = settlements.reduce((acc, s) => acc + s.online_amount, 0);
-    const totalUpiAmount = settlements.reduce((acc, s) => acc + s.upi_amount, 0);
-    const totalDueAmount = settlements.reduce((acc, s) => acc + (s.due_cylinders * s.cylinder_price), 0);
-    const totalNetRevenue = settlements.reduce((acc, s) => acc + s.total_amount, 0);
+    const totalCashExpected = displaySettlements.reduce((acc, s) => acc + Number(s.expected_cash || 0), 0);
+    const totalCashReceived = displaySettlements.reduce((acc, s) => acc + Number(s.actual_cash || 0), 0);
+    const totalOnlineAmount = displaySettlements.reduce((acc, s) => acc + Number(s.online_amount || 0), 0);
+    const totalUpiAmount = displaySettlements.reduce((acc, s) => acc + Number(s.upi_amount || 0), 0);
+    const totalDueAmount = displaySettlements.reduce((acc, s) => acc + Number(s.due_amount || 0), 0);
+    const totalNetRevenue = displaySettlements.reduce((acc, s) => acc + Number(s.total_amount || 0), 0);
     const netCashDifference = totalCashReceived - totalCashExpected;
 
     // Godown inventory calculation:
@@ -362,9 +478,17 @@ export const StaffCylinderSettlement: React.FC = () => {
     const netExpectedEmpties = totalSupplied - totalReturnedFull;
     const godownEmptyDiff = totalEmpties - netExpectedEmpties;
 
-    // Delivery boy with shortage if any
-    const boysWithShortage = settlements.filter(
-      (s) => s.cash_difference < 0 || s.supplied_cylinders > (s.cash_cylinders + s.online_cylinders + s.upi_cylinders + s.due_cylinders + s.returned_full_cylinders)
+    // A boy with unrecorded physical cash is still a cash shortage for the
+    // agency, but the card shows it as "Pending" instead of a red shortage.
+    const cashShortages = displaySettlements
+      .filter((s) => Number(s.cash_difference) < 0)
+      .sort((a, b) => Number(a.cash_difference) - Number(b.cash_difference));
+
+    const boysWithShortage = displaySettlements.filter(
+      (s) =>
+        Number(s.cash_difference) < 0 ||
+        Number(s.cylinder_difference) > 0 ||
+        Number(s.empty_difference) < 0
     );
 
     return {
@@ -383,11 +507,13 @@ export const StaffCylinderSettlement: React.FC = () => {
       totalNetRevenue,
       netCashDifference,
       godownEmptyDiff,
-      boyCount: settlements.length,
+      godownExpectedEmpties: Math.max(0, netExpectedEmpties),
+      boyCount: displaySettlements.length,
       boysWithShortage,
-      firstShortageBoy: boysWithShortage[0]?.agent_name || null,
+      firstShortageBoy: cashShortages[0]?.agent_name || boysWithShortage[0]?.agent_name || null,
+      shortageBoyCount: cashShortages.length,
     };
-  }, [settlements]);
+  }, [displaySettlements]);
 
   // Date Navigation
   const changeDateBy = (days: number) => {
@@ -411,7 +537,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Filtered settlements list
   const filteredSettlements = useMemo(() => {
-    return settlements.filter((item) => {
+    return displaySettlements.filter((item) => {
       const matchesSearch = 
         !searchQuery || 
         item.agent_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -427,7 +553,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       }
       return true;
     });
-  }, [settlements, searchQuery, statusFilter]);
+  }, [displaySettlements, searchQuery, statusFilter]);
 
   // Select an agent and automatically check if they already have an existing settlement for this date
   const handleSelectAgent = (agentId: string) => {
@@ -436,6 +562,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
     if (existing) {
       setEditingId(existing.id);
+      setFormCylinderRate(Number(existing.cylinder_price) > 0 ? Number(existing.cylinder_price) : cylinderRate);
       setSuppliedCylinders(existing.supplied_cylinders);
       setCashCylinders(existing.cash_cylinders);
       setOnlineCylinders(existing.online_cylinders);
@@ -448,6 +575,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       setShowAdvancedFields(Boolean(existing.due_cylinders || existing.returned_full_cylinders));
     } else {
       setEditingId(null);
+      setFormCylinderRate(cylinderRate);
       setSuppliedCylinders(40);
       setCashCylinders(20);
       setOnlineCylinders(10);
@@ -455,7 +583,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       setDueCylinders(0);
       setReturnedFullCylinders(0);
       setEmptyCylinders(40);
-      setActualCashInput(20 * cylinderRate);
+      setActualCashInput('');
       setNotes('');
       setShowAdvancedFields(false);
     }
@@ -472,6 +600,7 @@ export const StaffCylinderSettlement: React.FC = () => {
   const handleEdit = (item: SettlementRecord) => {
     setEditingId(item.id);
     setSelectedAgentId(item.agent_id);
+    setFormCylinderRate(Number(item.cylinder_price) > 0 ? Number(item.cylinder_price) : cylinderRate);
     setSuppliedCylinders(item.supplied_cylinders);
     setCashCylinders(item.cash_cylinders);
     setOnlineCylinders(item.online_cylinders);
@@ -615,7 +744,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       settlement_date: selectedDate,
       agent_id: selectedAgentId,
       agent_name: agentName,
-      cylinder_price: cylinderRate,
+      cylinder_price: formCylinderRate,
       supplied_cylinders: numSupplied,
       cash_cylinders: numCash,
       online_cylinders: numOnline,
@@ -780,8 +909,8 @@ export const StaffCylinderSettlement: React.FC = () => {
       msg += `• Net Status: *⚠️ Excess: +₹${dailyKpis.netCashDifference.toLocaleString('en-IN')}*\n`;
     }
 
-    msg += `\n🚚 *DELIVERY BOYS BREAKDOWN (${settlements.length}):*\n`;
-    settlements.forEach((s, idx) => {
+    msg += `\n🚚 *DELIVERY BOYS BREAKDOWN (${displaySettlements.length}):*\n`;
+    displaySettlements.forEach((s, idx) => {
       const statusIcon = s.cash_difference === 0 ? '✅' : s.cash_difference < 0 ? `❌ (Short -₹${Math.abs(s.cash_difference)})` : `⚠️ (+₹${s.cash_difference})`;
       msg += `${idx + 1}. *${s.agent_name}*: ${s.supplied_cylinders} Load | ${s.cash_cylinders} Cash (₹${s.expected_cash.toLocaleString('en-IN')}) | ${s.online_cylinders} Online | ${s.upi_cylinders} UPI | ${s.empty_cylinders} Empties | Cash: ₹${s.actual_cash.toLocaleString('en-IN')} ${statusIcon}\n`;
     });
@@ -791,7 +920,7 @@ export const StaffCylinderSettlement: React.FC = () => {
   };
 
   // WhatsApp Individual Receipt for Delivery Boy
-  const handleShareIndividualWhatsApp = (s: SettlementRecord) => {
+  const handleShareIndividualWhatsApp = (s: DisplaySettlement) => {
     const [y, m, d] = selectedDate.split('-');
     const formattedDate = `${d}/${m}/${y}`;
     const matchedAgent = agents.find((a) => a.id === s.agent_id || a.name === s.agent_name);
@@ -816,7 +945,9 @@ export const StaffCylinderSettlement: React.FC = () => {
     msg += `--------------------------------\n`;
     msg += `💰 *Expected Cash Handover:* ₹${s.expected_cash.toLocaleString('en-IN')}\n`;
     msg += `💵 *Cash Counted & Received:* ₹${s.actual_cash.toLocaleString('en-IN')}\n`;
-    if (s.cash_difference === 0) {
+    if (s.cash_pending) {
+      msg += `⏳ *Cash Status: HANDOVER NOT RECORDED YET*\n`;
+    } else if (s.cash_difference === 0) {
       msg += `✅ *Cash Status: EXACT 100% BALANCED*\n`;
     } else if (s.cash_difference < 0) {
       msg += `❌ *Cash Status: SHORTAGE -₹${Math.abs(s.cash_difference).toLocaleString('en-IN')}*\n`;
@@ -848,7 +979,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       return;
     }
 
-    const exportRows = settlements.map((s) => ({
+    const exportRows = displaySettlements.map((s) => ({
       'Delivery Boy': s.agent_name,
       'Date': s.settlement_date,
       'Supplied Cylinders': s.supplied_cylinders,
@@ -1194,7 +1325,7 @@ export const StaffCylinderSettlement: React.FC = () => {
               {dailyKpis.godownEmptyDiff === 0 ? (
                 <span className="inline-flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] px-2.5 py-1 rounded-full">
                   <CheckCircle2 size={13} className="text-emerald-400" />
-                  100% Balanced ({dailyKpis.totalEmpties}/{dailyKpis.totalSupplied})
+                  100% Balanced ({dailyKpis.totalEmpties}/{dailyKpis.godownExpectedEmpties})
                 </span>
               ) : dailyKpis.godownEmptyDiff < 0 ? (
                 <span className="inline-flex items-center gap-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 font-black text-[11px] px-2.5 py-1 rounded-full animate-pulse">
@@ -1268,6 +1399,17 @@ export const StaffCylinderSettlement: React.FC = () => {
               </div>
             </div>
 
+            {/* Due / credit is outside the three paid streams, so show it
+                explicitly when present; the total includes it. */}
+            {dailyKpis.totalDueQty > 0 && (
+              <div className="flex items-center justify-between bg-amber-500/5 border border-amber-500/20 rounded-xl px-2.5 py-1.5 mb-2 text-[11px]">
+                <span className="text-amber-300 font-bold">Due / Credit</span>
+                <span className="text-amber-300 font-black tabular-nums">
+                  ₹{dailyKpis.totalDueAmount.toLocaleString('en-IN')} ({dailyKpis.totalDueQty} cyl)
+                </span>
+              </div>
+            )}
+
             {/* Net Cash Handover Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <div className="flex items-center gap-1.5 text-xs">
@@ -1287,7 +1429,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                 <span className="inline-flex items-center gap-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 font-black text-[11px] px-2.5 py-1 rounded-full animate-pulse">
                   <AlertTriangle size={13} className="text-rose-400" />
                   Shortage: -₹{Math.abs(dailyKpis.netCashDifference).toLocaleString('en-IN')}
-                  {dailyKpis.firstShortageBoy && ` (${dailyKpis.firstShortageBoy})`}
+                  {dailyKpis.firstShortageBoy && ` (${dailyKpis.firstShortageBoy}${dailyKpis.shortageBoyCount > 1 ? ` +${dailyKpis.shortageBoyCount - 1}` : ''})`}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-[11px] px-2.5 py-1 rounded-full">
@@ -1430,7 +1572,11 @@ export const StaffCylinderSettlement: React.FC = () => {
                   const matchedAgent = agents.find((a) => a.id === item.agent_id);
                   const isBalanced = item.cash_difference === 0 && item.status === 'BALANCED';
                   const isShortage = item.cash_difference < 0 || item.status === 'SHORTAGE';
-                  const emptyMismatch = item.empty_cylinders < (item.supplied_cylinders - item.returned_full_cylinders);
+                  const emptyMismatch = item.empty_difference < 0;
+                  const isCashPending =
+                    item.cash_pending &&
+                    item.cylinder_difference === 0 &&
+                    item.empty_difference >= 0;
 
                   return (
                     <div
@@ -1456,7 +1602,11 @@ export const StaffCylinderSettlement: React.FC = () => {
 
                         {/* Status Pill */}
                         <div className="shrink-0">
-                          {isBalanced ? (
+                          {isCashPending ? (
+                            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-[10px] px-2.5 py-1 rounded-full">
+                              <AlertCircle size={11} className="text-amber-400" /> Cash Pending
+                            </span>
+                          ) : isBalanced ? (
                             <span className="inline-flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] px-2.5 py-1 rounded-full">
                               <CheckCircle2 size={11} className="text-emerald-400" /> Balanced
                             </span>
@@ -1465,7 +1615,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                               <AlertTriangle size={11} className="text-rose-400" />
                               {item.cash_difference < 0
                                 ? `-₹${Math.abs(item.cash_difference)}`
-                                : 'Pending'}
+                                : 'Cyl/Empty Short'}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-[10px] px-2.5 py-1 rounded-full">
@@ -1561,7 +1711,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
                             {/* Exact Math String */}
                             <div className="text-[10px] text-slate-500 font-mono">
-                              Sales Value: ({item.cash_cylinders} Cash + {item.online_cylinders} Online + {item.upi_cylinders} UPI) × ₹{item.cylinder_price} = ₹{item.total_amount.toLocaleString('en-IN')}
+                              Sales Value: ({item.cash_cylinders} Cash + {item.online_cylinders} Online + {item.upi_cylinders} UPI{item.due_cylinders > 0 ? ` + ${item.due_cylinders} Due` : ''}) × ₹{item.cylinder_price} = ₹{item.total_amount.toLocaleString('en-IN')}
                             </div>
                           </div>
                         )}
@@ -1634,7 +1784,11 @@ export const StaffCylinderSettlement: React.FC = () => {
                       {filteredSettlements.map((item) => {
                         const isBalanced = item.cash_difference === 0 && item.status === 'BALANCED';
                         const isShortage = item.cash_difference < 0 || item.status === 'SHORTAGE';
-                        const emptyMismatch = item.empty_cylinders < (item.supplied_cylinders - item.returned_full_cylinders);
+                        const emptyMismatch = item.empty_difference < 0;
+                        const isCashPending =
+                          item.cash_pending &&
+                          item.cylinder_difference === 0 &&
+                          item.empty_difference >= 0;
 
                         return (
                           <tr key={item.id} className="hover:bg-slate-850/60 transition-colors">
@@ -1704,13 +1858,19 @@ export const StaffCylinderSettlement: React.FC = () => {
 
                             {/* Status */}
                             <td className="py-3 px-3 text-center">
-                              {isBalanced ? (
+                              {isCashPending ? (
+                                <span className="inline-flex items-center gap-1 bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold text-[10px] px-2.5 py-0.5 rounded-full">
+                                  <AlertCircle size={11} /> Pending
+                                </span>
+                              ) : isBalanced ? (
                                 <span className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold text-[10px] px-2.5 py-0.5 rounded-full">
                                   <CheckCircle2 size={11} /> Balanced
                                 </span>
                               ) : isShortage ? (
                                 <span className="inline-flex items-center gap-1 bg-rose-500/15 text-rose-400 border border-rose-500/30 font-bold text-[10px] px-2.5 py-0.5 rounded-full">
-                                  -₹{Math.abs(item.cash_difference)}
+                                  {item.cash_difference < 0
+                                    ? `-₹${Math.abs(item.cash_difference)}`
+                                    : 'Cyl/Empty Short'}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold text-[10px] px-2.5 py-0.5 rounded-full">
@@ -1851,7 +2011,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                     {editingId ? 'Edit Settlement' : 'Speed Settlement Entry'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {formattedDisplayDate} • Rate ₹{cylinderRate}/cyl
+                    {formattedDisplayDate} • Rate ₹{formCylinderRate}/cyl
                   </p>
                 </div>
               </div>
@@ -2035,9 +2195,6 @@ export const StaffCylinderSettlement: React.FC = () => {
                       onChange={(e) => {
                         const val = e.target.value === '' ? '' : Number(e.target.value);
                         setCashCylinders(val);
-                        if (val !== '') {
-                          setActualCashInput(val * cylinderRate);
-                        }
                       }}
                       className="w-full bg-slate-900 border border-emerald-700/60 rounded-xl px-2.5 py-1.5 text-white font-black text-base tabular-nums focus:outline-none"
                       placeholder="20"
@@ -2205,11 +2362,11 @@ export const StaffCylinderSettlement: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => setActualCashInput(Math.max(0, expectedCashAmount - cylinderRate))}
+                    onClick={() => setActualCashInput(Math.max(0, expectedCashAmount - formCylinderRate))}
                     className="h-11 px-2.5 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 rounded-xl text-[11px] font-bold text-rose-300 shrink-0"
                     title="1 Cylinder Short"
                   >
-                    -₹{cylinderRate}
+                    -₹{formCylinderRate}
                   </button>
                 </div>
 
@@ -2282,7 +2439,9 @@ export const StaffCylinderSettlement: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-400">
-              Set the standard agency rate for 14.2kg domestic cylinders. All cash expectations update automatically.
+              Set the standard agency rate for 14.2kg domestic cylinders. New and
+              edited settlements use this rate; already-saved rows keep the price
+              they were saved with.
             </p>
 
             <div className="space-y-2">

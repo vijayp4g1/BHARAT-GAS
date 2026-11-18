@@ -593,6 +593,10 @@ interface SettlementStatusRow {
   agent_name?: string | null;
   notes?: string | null;
   updated_at?: string | null;
+  cylinder_price?: number | null;
+  online_cylinders?: number | null;
+  returned_full_cylinders?: number | null;
+  actual_cash?: number | null;
 }
 
 /**
@@ -614,7 +618,7 @@ export async function findSettlementRowForAgent(
   try {
     const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
-      .select('id, agent_id, agent_name, notes, updated_at')
+      .select('id, agent_id, agent_name, notes, updated_at, cylinder_price, online_cylinders, returned_full_cylinders, actual_cash')
       .eq('settlement_date', dateStr);
 
     if (error) {
