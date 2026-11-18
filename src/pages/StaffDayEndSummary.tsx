@@ -1208,6 +1208,7 @@ export const StaffDayEndSummary: React.FC = () => {
       source: 'manual',
       cylinder_type: '14.2KG_STD',
       payment_mode: isOnline ? 'UPI' : 'CASH',
+      bpcl_paid: isOnline,
       empty_collected: true,
       scanned_at: new Date().toISOString(),
     };
@@ -1243,13 +1244,16 @@ export const StaffDayEndSummary: React.FC = () => {
       .catch(() => {});
   };
 
-  // Auto-convert any scanned bills that are confirmed as BPCL Online (PayNBook) from CASH to UPI
+  // Mark scanned bills that are confirmed as BPCL Online (PayNBook). CASH bills
+  // are converted to UPI for backwards compatibility, and the explicit
+  // bpcl_paid flag lets the Staff Book report them under "BPCL Paid" instead of
+  // "UPI / QR".
   const autoConvertOnlineBills = useCallback((
     currentEntries: ItemEntry[],
     report: BpclReportData | null
-  ): { updatedEntries: ItemEntry[]; convertedCount: number } => {
+  ): { updatedEntries: ItemEntry[]; convertedCount: number; flaggedCount: number; changedCount: number } => {
     if (!report || !report.online_bills || report.online_bills.length === 0) {
-      return { updatedEntries: currentEntries, convertedCount: 0 };
+      return { updatedEntries: currentEntries, convertedCount: 0, flaggedCount: 0, changedCount: 0 };
     }
 
     const onlineConsSet = new Set(
@@ -1257,19 +1261,37 @@ export const StaffDayEndSummary: React.FC = () => {
     );
 
     let convertedCount = 0;
+    let flaggedCount = 0;
     const updatedEntries = currentEntries.map((entry) => {
       const norm = entry.consumer_number.trim().toLowerCase();
-      if (onlineConsSet.has(norm) && entry.payment_mode === 'CASH') {
+      if (!onlineConsSet.has(norm)) return entry;
+
+      if (entry.payment_mode === 'CASH') {
         convertedCount++;
         return {
           ...entry,
           payment_mode: 'UPI' as const,
+          bpcl_paid: true,
         };
       }
+
+      if (entry.payment_mode === 'UPI' && entry.bpcl_paid !== true) {
+        flaggedCount++;
+        return {
+          ...entry,
+          bpcl_paid: true,
+        };
+      }
+
       return entry;
     });
 
-    return { updatedEntries, convertedCount };
+    return {
+      updatedEntries,
+      convertedCount,
+      flaggedCount,
+      changedCount: convertedCount + flaggedCount,
+    };
   }, []);
 
   // Handler to manually or automatically convert a single bill to Online (UPI).
@@ -1291,29 +1313,30 @@ export const StaffDayEndSummary: React.FC = () => {
   // Handler to convert ALL online conflicts to Online
   const handleConvertAllOnlineConflicts = useCallback(() => {
     if (!activeBpclReport || !selectedBoy) return;
-    const { updatedEntries, convertedCount } = autoConvertOnlineBills(entries, activeBpclReport);
-    if (convertedCount > 0) {
+    const { updatedEntries, changedCount } = autoConvertOnlineBills(entries, activeBpclReport);
+    if (changedCount > 0) {
       setEntries(updatedEntries);
       setHasUnsavedChanges(true);
       triggerAutoSave(updatedEntries, selectedBoy, reportDate);
-      toast.success(`⚡ Converted ${convertedCount} bill${convertedCount > 1 ? 's' : ''} to Online!`);
+      toast.success(`⚡ Marked ${changedCount} BPCL online bill${changedCount > 1 ? 's' : ''} as BPCL Paid!`);
     } else {
-      toast('All online bills are already marked as Online', { icon: 'ℹ️' });
+      toast('All online bills are already marked as BPCL Paid', { icon: 'ℹ️' });
     }
   }, [activeBpclReport, entries, selectedBoy, reportDate, triggerAutoSave, autoConvertOnlineBills]);
 
-  // Effect: Automatically convert any CASH bill to Online whenever BPCL online_bills or entries change
+  // Effect: automatically flag BPCL Online bills whenever the report or the
+  // delivery list changes.
   useEffect(() => {
     if (!activeBpclReport?.online_bills || activeBpclReport.online_bills.length === 0) return;
     if (entries.length === 0 || !selectedBoy) return;
 
-    const { updatedEntries, convertedCount } = autoConvertOnlineBills(entries, activeBpclReport);
-    if (convertedCount > 0) {
+    const { updatedEntries, changedCount } = autoConvertOnlineBills(entries, activeBpclReport);
+    if (changedCount > 0) {
       setEntries(updatedEntries);
       setHasUnsavedChanges(true);
       triggerAutoSave(updatedEntries, selectedBoy, reportDate);
       toast.success(
-        `⚡ Automatically converted ${convertedCount} online bill${convertedCount > 1 ? 's' : ''} to Online!`,
+        `⚡ Marked ${changedCount} BPCL online bill${changedCount > 1 ? 's' : ''} as BPCL Paid!`,
         { id: 'auto-convert-online-toast' }
       );
     }
@@ -1928,6 +1951,7 @@ export const StaffDayEndSummary: React.FC = () => {
       source: 'local',
       cylinder_type: consumer.cylinder_type === '10KG_LITE' ? '10KG_LITE' : (consumer.cylinder_type as string) === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
       payment_mode: isBpclOnlineBill(consumer.consumer_number) ? 'UPI' : 'CASH',
+      bpcl_paid: isBpclOnlineBill(consumer.consumer_number),
       empty_collected: true,
       scanned_at: new Date().toISOString(),
       duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -1988,6 +2012,7 @@ export const StaffDayEndSummary: React.FC = () => {
           source: 'local',
           cylinder_type: '14.2KG_STD',
           payment_mode: isBpclOnlineBill(match.consumer_number) ? 'UPI' : 'CASH',
+          bpcl_paid: isBpclOnlineBill(match.consumer_number),
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -2022,6 +2047,7 @@ export const StaffDayEndSummary: React.FC = () => {
         source: 'manual',
         cylinder_type: '14.2KG_STD',
         payment_mode: isBpclOnlineBill(cleanInput) ? 'UPI' : 'CASH',
+        bpcl_paid: isBpclOnlineBill(cleanInput),
         empty_collected: true,
         scanned_at: new Date().toISOString(),
         duplicate_of_agent: otherClaimantUnverified ? otherClaimantUnverified.agentName : undefined,
@@ -2080,6 +2106,7 @@ export const StaffDayEndSummary: React.FC = () => {
           source: 'local',
           cylinder_type: match.cylinder_type === '10KG_LITE' ? '10KG_LITE' : (match.cylinder_type as string) === '19KG_COMM' ? '19KG_COMM' : '14.2KG_STD',
           payment_mode: isBpclOnlineBill(match.consumer_number) ? 'UPI' : 'CASH',
+          bpcl_paid: isBpclOnlineBill(match.consumer_number),
           empty_collected: true,
           scanned_at: new Date().toISOString(),
         });
@@ -2103,6 +2130,7 @@ export const StaffDayEndSummary: React.FC = () => {
           source: 'manual',
           cylinder_type: '14.2KG_STD',
           payment_mode: isBpclOnlineBill(num) ? 'UPI' : 'CASH',
+          bpcl_paid: isBpclOnlineBill(num),
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,
@@ -2184,6 +2212,7 @@ export const StaffDayEndSummary: React.FC = () => {
           source: 'camera',
           cylinder_type: '14.2KG_STD',
           payment_mode: isBpclOnlineBill(scannedItem.consumer_number) ? 'UPI' : 'CASH',
+          bpcl_paid: isBpclOnlineBill(scannedItem.consumer_number),
           empty_collected: true,
           scanned_at: new Date().toISOString(),
           duplicate_of_agent: otherClaimant ? otherClaimant.agentName : undefined,

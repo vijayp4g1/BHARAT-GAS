@@ -42,7 +42,9 @@ import { performLogout } from '../lib/auth';
 import { AppRefreshButton } from '../components/AppRefreshButton';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
 import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
-import { findSettlementRowForAgent } from '../lib/bpclReportService';
+import { findSettlementRowForAgent, extractBpclReportFromNotes } from '../lib/bpclReportService';
+import { extractScannedBillsFromNotes } from '../lib/dayEndService';
+import { numberKey } from '../lib/scanUtils';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 import { AddDeliveryBoyModal } from '../components/AddDeliveryBoyModal';
 import { ManageDeliveryBoysModal } from '../components/ManageDeliveryBoysModal';
@@ -315,6 +317,40 @@ export const StaffCylinderSettlement: React.FC = () => {
               const repairs: Array<{ id: string; fields: Record<string, any> }> = [];
 
               const localRows = remoteData.map((r: any) => {
+                // Existing rows may have BPCL PayNBook bills counted as UPI.
+                // The settlement notes carry both the scanned bills and the
+                // BPCL report, so reclassify the UPI portion that is actually
+                // BPCL Paid. This fixes the Payment Stream Matrix immediately.
+                const parsedBills = extractScannedBillsFromNotes(r.notes);
+                const bpclReport = extractBpclReportFromNotes(r.notes);
+                let onlineCylinders = Number(r.online_cylinders || 0);
+                let upiCylinders = Number(r.upi_cylinders || 0);
+                let reclassified = false;
+
+                if (bpclReport?.online_bills?.length && parsedBills.length > 0) {
+                  const onlineKeys = new Set(
+                    bpclReport.online_bills.map((b) => numberKey(b.consumer_number))
+                  );
+                  const onlineFromNotes = parsedBills.filter(
+                    (b) =>
+                      b.payment_mode === 'UPI' &&
+                      onlineKeys.has(numberKey(b.consumer_number))
+                  ).length;
+
+                  if (onlineFromNotes > 0) {
+                    const nextOnline = onlineFromNotes;
+                    const nextUpi = Math.max(0, upiCylinders - onlineFromNotes);
+                    if (
+                      nextOnline !== onlineCylinders ||
+                      nextUpi !== upiCylinders
+                    ) {
+                      onlineCylinders = nextOnline;
+                      upiCylinders = nextUpi;
+                      reclassified = true;
+                    }
+                  }
+                }
+
                 const base: SettlementRecord = {
                   id: r.id,
                   settlement_date: r.settlement_date,
@@ -323,8 +359,8 @@ export const StaffCylinderSettlement: React.FC = () => {
                   cylinder_price: Number(r.cylinder_price || cylinderRate),
                   supplied_cylinders: Number(r.supplied_cylinders || 0),
                   cash_cylinders: Number(r.cash_cylinders || 0),
-                  online_cylinders: Number(r.online_cylinders || 0),
-                  upi_cylinders: Number(r.upi_cylinders || 0),
+                  online_cylinders: onlineCylinders,
+                  upi_cylinders: upiCylinders,
                   due_cylinders: Number(r.due_cylinders || 0),
                   returned_full_cylinders: Number(r.returned_full_cylinders || 0),
                   empty_cylinders: Number(r.empty_cylinders || 0),
@@ -343,7 +379,8 @@ export const StaffCylinderSettlement: React.FC = () => {
                 const derived = deriveSettlementMoney(base, cylinderRate);
                 const needsRepair =
                   !localUnsyncedIds.has(r.id) &&
-                  (Math.abs(base.expected_cash - derived.expected_cash) > 0.5 ||
+                  (reclassified ||
+                    Math.abs(base.expected_cash - derived.expected_cash) > 0.5 ||
                     Math.abs(base.cash_difference - derived.cash_difference) > 0.5 ||
                     Math.abs(base.online_amount - derived.online_amount) > 0.5 ||
                     Math.abs(base.upi_amount - derived.upi_amount) > 0.5 ||
@@ -352,7 +389,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
                 if (!needsRepair) return base;
 
-                const fields = {
+                const fields: Record<string, any> = {
                   expected_cash: derived.expected_cash,
                   cash_difference: derived.cash_difference,
                   online_amount: derived.online_amount,
@@ -360,6 +397,10 @@ export const StaffCylinderSettlement: React.FC = () => {
                   total_amount: derived.total_amount,
                   status: derived.status,
                 };
+                if (reclassified) {
+                  fields.online_cylinders = onlineCylinders;
+                  fields.upi_cylinders = upiCylinders;
+                }
                 repairs.push({ id: r.id, fields });
                 return { ...base, ...fields };
               });

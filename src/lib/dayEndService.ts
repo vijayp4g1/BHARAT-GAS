@@ -68,6 +68,9 @@ export interface DayEndEntry {
   source?: 'local' | 'remote' | 'manual' | 'route' | 'camera';
   cylinder_type: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM';
   payment_mode: 'CASH' | 'UPI' | 'DUE';
+  /** BPCL PayNBook / online-paid bill. UPI is used as the storage mode for
+   * compatibility, but the Staff Book counts these as BPCL Paid. */
+  bpcl_paid?: boolean;
   empty_collected: boolean;
   dispatch_item_id?: string;
   scanned_at?: string;
@@ -597,6 +600,11 @@ const summarizeDayEndEntries = (entries: DayEndEntry[]) => ({
   emptiesCollected: entries.filter((e) => e.empty_collected).length,
   cashCount: entries.filter((e) => e.payment_mode === 'CASH').length,
   upiCount: entries.filter((e) => e.payment_mode === 'UPI').length,
+  // BPCL PayNBook bills are stored as UPI for backwards compatibility, but the
+  // Staff Book shows them in the separate "BPCL Paid" stream.
+  onlineCount: entries.filter(
+    (e) => e.payment_mode === 'UPI' && e.bpcl_paid === true
+  ).length,
   dueCount: entries.filter((e) => e.payment_mode === 'DUE').length,
   rawCsv: entries.map((e) => e.consumer_number).join(','),
 });
@@ -817,18 +825,33 @@ export async function saveDayEndReportToDatabase(payload: {
         const currentPrice = Number(current?.cylinder_price) || 0;
         const rowPrice =
           currentPrice > 0 ? currentPrice : getStoredCylinderRate();
-        const onlineCyl = Number(current?.online_cylinders) || 0;
+        // BPCL PayNBook bills are stored as UPI, but must be reported in the
+        // separate "BPCL Paid" stream. When the day-end entries carry BPCL
+        // flags, the split is authoritative; otherwise preserve a manually
+        // entered online count from the Staff Book.
+        const onlineFromBills = s.onlineCount;
+        const onlineCyl =
+          onlineFromBills > 0
+            ? onlineFromBills
+            : Number(current?.online_cylinders) || 0;
+        const upiCyl =
+          onlineFromBills > 0
+            ? Math.max(0, s.upiCount - onlineFromBills)
+            : Math.max(
+                0,
+                s.upiCount - (Number(current?.online_cylinders) || 0)
+              );
         const returnedFull = Number(current?.returned_full_cylinders) || 0;
         const actualCash = Number(current?.actual_cash) || 0;
         const expectedCash = s.cashCount * rowPrice;
         const onlineAmount = onlineCyl * rowPrice;
-        const upiAmount = s.upiCount * rowPrice;
+        const upiAmount = upiCyl * rowPrice;
         const totalAmount =
-          (s.cashCount + onlineCyl + s.upiCount + s.dueCount) * rowPrice;
+          (s.cashCount + onlineCyl + upiCyl + s.dueCount) * rowPrice;
         const cashDifference = actualCash - expectedCash;
         const cylinderDifference =
           s.total -
-          (s.cashCount + onlineCyl + s.upiCount + s.dueCount + returnedFull);
+          (s.cashCount + onlineCyl + upiCyl + s.dueCount + returnedFull);
         const expectedEmpties = Math.max(0, s.total - returnedFull);
         const emptyDifference = s.emptiesCollected - expectedEmpties;
         let settlementStatus: 'BALANCED' | 'SHORTAGE' | 'EXCESS';
@@ -880,7 +903,8 @@ export async function saveDayEndReportToDatabase(payload: {
               supplied_cylinders: s.total,
               empty_cylinders: s.emptiesCollected,
               cash_cylinders: s.cashCount,
-              upi_cylinders: s.upiCount,
+              upi_cylinders: upiCyl,
+              ...(onlineFromBills > 0 ? { online_cylinders: onlineCyl } : {}),
               due_cylinders: s.dueCount,
               expected_cash: expectedCash,
               cash_difference: cashDifference,
@@ -914,7 +938,8 @@ export async function saveDayEndReportToDatabase(payload: {
               cylinder_price: rowPrice,
               supplied_cylinders: s.total,
               cash_cylinders: s.cashCount,
-              upi_cylinders: s.upiCount,
+              upi_cylinders: upiCyl,
+              online_cylinders: onlineCyl,
               due_cylinders: s.dueCount,
               empty_cylinders: s.emptiesCollected,
               expected_cash: expectedCash,

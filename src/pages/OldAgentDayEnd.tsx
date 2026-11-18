@@ -78,6 +78,9 @@ export interface ItemEntry {
   source?: 'local' | 'remote' | 'manual' | 'route' | 'camera';
   cylinder_type: '14.2KG_STD' | '10KG_LITE' | '19KG_COMM';
   payment_mode: 'CASH' | 'UPI' | 'DUE';
+  /** BPCL PayNBook / online-paid bill. UPI is used as the storage mode for
+   * compatibility, but the Staff Book counts these as BPCL Paid. */
+  bpcl_paid?: boolean;
   empty_collected: boolean;
   dispatch_item_id?: string;
   scanned_at?: string;
@@ -503,6 +506,15 @@ export const OldAgentDayEnd: React.FC = () => {
       return;
     }
 
+    const isOnline =
+      /PayNBook|Online/i.test(bill.refill_type || '') ||
+      /Online Paid/i.test(bill.status || '') ||
+      Boolean(
+        bpclReport?.online_bills?.some(
+          (b) => b.consumer_number.trim().toLowerCase() === rawNumber.toLowerCase()
+        )
+      );
+
     // Add instantly from the BPCL report data; enrich in the background so the
     // button never waits for a database lookup.
     const newEntry: ItemEntry = {
@@ -513,7 +525,8 @@ export const OldAgentDayEnd: React.FC = () => {
       found: true,
       source: 'manual',
       cylinder_type: '14.2KG_STD',
-      payment_mode: 'CASH',
+      payment_mode: isOnline ? 'UPI' : 'CASH',
+      bpcl_paid: isOnline,
       empty_collected: true,
       scanned_at: new Date().toISOString(),
     };
@@ -551,11 +564,14 @@ export const OldAgentDayEnd: React.FC = () => {
   // Handler to manually convert a single bill to Online (UPI)
   const handleConvertBillToOnline = (consumerNo: string) => {
     const norm = consumerNo.trim().toLowerCase();
+    const isBpcl = Boolean(
+      bpclReport?.online_bills?.some((b) => b.consumer_number.trim().toLowerCase() === norm)
+    );
     setEntries((prev) => {
       const idx = prev.findIndex((e) => e.consumer_number.trim().toLowerCase() === norm);
       if (idx === -1) return prev;
       const updated = [...prev];
-      updated[idx] = { ...updated[idx], payment_mode: 'UPI' };
+      updated[idx] = { ...updated[idx], payment_mode: 'UPI', bpcl_paid: updated[idx].bpcl_paid || isBpcl };
       return updated;
     });
     setHasUnsavedChanges(true);
@@ -567,21 +583,58 @@ export const OldAgentDayEnd: React.FC = () => {
     if (!bpclReport?.online_bills) return;
     const onlineSet = new Set(bpclReport.online_bills.map((b) => b.consumer_number.trim().toLowerCase()));
     let count = 0;
-    setEntries((prev) => {
-      const updated = prev.map((e) => {
-        if (onlineSet.has(e.consumer_number.trim().toLowerCase()) && e.payment_mode === 'CASH') {
-          count++;
-          return { ...e, payment_mode: 'UPI' as const };
-        }
-        return e;
-      });
-      return updated;
+    const updated = entries.map((e) => {
+      if (!onlineSet.has(e.consumer_number.trim().toLowerCase())) return e;
+      if (e.payment_mode === 'CASH') {
+        count++;
+        return { ...e, payment_mode: 'UPI' as const, bpcl_paid: true };
+      }
+      if (e.payment_mode === 'UPI' && !e.bpcl_paid) {
+        count++;
+        return { ...e, bpcl_paid: true };
+      }
+      return e;
     });
+
     if (count > 0) {
+      setEntries(updated);
       setHasUnsavedChanges(true);
-      toast.success(`⚡ Converted ${count} bill${count > 1 ? 's' : ''} to Online (UPI)!`);
+      toast.success(`⚡ Marked ${count} BPCL online bill${count > 1 ? 's' : ''} as BPCL Paid!`);
+    } else {
+      toast('All online bills are already marked as BPCL Paid', { icon: 'ℹ️' });
     }
   };
+
+  // Automatically mark scanned bills that are in the BPCL Online (PayNBook)
+  // list. This covers scanner, manual and bulk additions and makes the Staff
+  // Book report them under BPCL Paid instead of UPI/QR.
+  useEffect(() => {
+    if (!bpclReport?.online_bills || bpclReport.online_bills.length === 0) return;
+    if (entries.length === 0) return;
+
+    const onlineSet = new Set(
+      bpclReport.online_bills.map((b) => b.consumer_number.trim().toLowerCase())
+    );
+    let changed = 0;
+
+    const updated = entries.map((e) => {
+      if (!onlineSet.has(e.consumer_number.trim().toLowerCase())) return e;
+      if (e.payment_mode === 'CASH') {
+        changed++;
+        return { ...e, payment_mode: 'UPI' as const, bpcl_paid: true };
+      }
+      if (e.payment_mode === 'UPI' && !e.bpcl_paid) {
+        changed++;
+        return { ...e, bpcl_paid: true };
+      }
+      return e;
+    });
+
+    if (changed > 0) {
+      setEntries(updated);
+      setHasUnsavedChanges(true);
+    }
+  }, [bpclReport, entries]);
 
   // Auto-convert any CASH bill to Online (UPI) when online bills are present
   useEffect(() => {
