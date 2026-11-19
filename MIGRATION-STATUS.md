@@ -41,7 +41,7 @@ Do not reintroduce full-table scans on an interval.
 | BPCL realtime | Broadcast payload updates the single boy’s report; no full `notes` re-query |
 | Staff Book realtime | Uses the postgres/broadcast row directly; no `fetchSettlements` notes re-query on each change |
 | Staff Book tab focus | Refetch at most once per 60 seconds |
-| Master consumer sync | Full 33k download only on empty DB / version change / manual force — removed the `localCount < remoteTotal` retry loop |
+| Master consumer sync | **Manual only** (Manager Dashboard → Resync Customers, or Agent Search → database icon). No automatic call on app start/online/interval. The full 33k master is intended to be updated about once a week. |
 | Day-end roster query | Explicit column list (stops pulling unused/large columns) |
 
 **Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
@@ -182,6 +182,7 @@ URL-encode each path segment, save one URL per line as `migration/old-object-url
 - **Do not** delete/pause the old project before the photo copy.
 - **Do not** commit `migration/`, `.env.local`, `.env*`, or any service keys. They are git-ignored.
 - **Do not** reintroduce 60-second full-table syncs.
+- **Do not** add automatic `autoSyncMasterConsumers()` calls. The 33k customer master is **manual-only** (weekly). Only `pullLatestCloudData()` (small incremental locations/photos/notes) is automatic.
 - **Do not** create more free organizations to reset quotas (fair-use risk).
 
 ---

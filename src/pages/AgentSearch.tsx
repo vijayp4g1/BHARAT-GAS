@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { useAgentLocationTracking } from '../hooks/useAgentLocationTracking';
 import { AgentBottomNav } from '../components/AgentBottomNav';
-import { pullLatestCloudData, autoSyncMasterConsumers, MASTER_DATA_VERSION } from '../lib/sync';
+import { pullLatestCloudData, autoSyncMasterConsumers } from '../lib/sync';
 import { performLogout } from '../lib/auth';
 import { AppRefreshButton } from '../components/AppRefreshButton';
 
@@ -25,6 +25,7 @@ export const AgentSearch = () => {
   const observerTarget = useRef(null);
   const [isHydrating, setIsHydrating] = useState(false);
   const [hydrationProgress, setHydrationProgress] = useState(0);
+  const [isResyncing, setIsResyncing] = useState(false);
 
   const handleLogout = async () => {
     const loggedOut = await performLogout();
@@ -44,7 +45,8 @@ export const AgentSearch = () => {
     };
   }, []);
 
-  // Check if DB needs sync and hydrate automatically
+  // Progress bar for the manual customer-master resync. The full 33k master is
+  // never downloaded automatically; it is updated manually at most weekly.
   useEffect(() => {
     const handleProgress = (e: any) => {
       if (e?.detail) {
@@ -54,29 +56,7 @@ export const AgentSearch = () => {
     };
     window.addEventListener('bgcls-sync-progress', handleProgress);
 
-    const hydrateIfNeeded = async () => {
-      if (!isOnline) return;
-      try {
-        const localVersion = localStorage.getItem('bgcls_master_version');
-        const isOutdatedVersion = localVersion !== MASTER_DATA_VERSION;
-        const localCount = await db.consumers.count();
-        const { count: remoteTotal } = await supabase
-          .from('manager_consumer_summary')
-          .select('*', { count: 'exact', head: true });
-
-        if (localCount === 0 || isOutdatedVersion || (remoteTotal && remoteTotal > localCount)) {
-          setIsHydrating(true);
-          await autoSyncMasterConsumers({
-            onProgress: (pct) => setHydrationProgress(pct),
-          });
-        }
-      } catch (err) {
-        console.error('Hydration error:', err);
-      } finally {
-        setIsHydrating(false);
-      }
-    };
-    hydrateIfNeeded();
+    // Incremental locations/photos/notes only. Not the customer master.
     if (isOnline) {
       pullLatestCloudData().catch(console.error);
     }
@@ -252,6 +232,47 @@ export const AgentSearch = () => {
     }
   };
 
+  // Manual full customer-master download. Deliberately NOT automatic: the
+  // agency updates customer data about once a week.
+  const handleResyncCustomers = async () => {
+    if (!isOnline) {
+      toast.error('You are offline. Connect to the internet and try again.');
+      return;
+    }
+    if (isResyncing) return;
+
+    const confirmed = window.confirm(
+      'Download the full customer master (33,000+ records)?\n\nUse this at most once a week.'
+    );
+    if (!confirmed) return;
+
+    setIsResyncing(true);
+    setIsHydrating(true);
+    setHydrationProgress(0);
+
+    try {
+      const result = await autoSyncMasterConsumers({
+        force: true,
+        onProgress: (pct) => setHydrationProgress(pct),
+      });
+      if (result.updated) {
+        toast.success(`Customers updated: ${result.syncedCount.toLocaleString()} records`, {
+          id: 'customer-resync',
+        });
+      } else {
+        toast.error('Customer sync did not complete. Local data was kept. Try again.', {
+          id: 'customer-resync',
+        });
+      }
+    } catch (err) {
+      console.error('Customer resync failed:', err);
+      toast.error('Customer sync failed. Try again.', { id: 'customer-resync' });
+    } finally {
+      setIsResyncing(false);
+      setIsHydrating(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-premium-gradient flex flex-col relative overflow-hidden">
       {/* Background blobs for premium feel */}
@@ -284,7 +305,7 @@ export const AgentSearch = () => {
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             <button 
               onClick={handleSyncData}
-              title="Sync latest updates"
+              title="Sync latest locations, photos and notes"
               className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all active:scale-95 border border-white/20 shadow-sm"
             >
               <RefreshCw size={16} className="text-white" />
@@ -329,6 +350,18 @@ export const AgentSearch = () => {
             + Add
           </button>
         </div>
+
+        {/* Manual weekly customer-master update. Never runs automatically. */}
+        <button
+          type="button"
+          onClick={handleResyncCustomers}
+          disabled={isResyncing}
+          className="w-full mb-4 flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white text-xs font-bold py-2.5 rounded-2xl border border-white/20 backdrop-blur-md transition-all active:scale-[0.99]"
+          title="Download the full customer master. Use at most once a week."
+        >
+          <Database size={14} className={isResyncing ? 'animate-pulse' : ''} />
+          <span>{isResyncing ? 'Updating customer master...' : 'Update customer master (weekly)'}</span>
+        </button>
 
         {/* Filter Options */}
         <div className="flex gap-2 bg-black/20 p-1.5 rounded-2xl backdrop-blur-md border border-white/10 overflow-x-auto hide-scrollbar">

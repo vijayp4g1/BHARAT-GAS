@@ -52,8 +52,8 @@ export const ManagerDashboard = () => {
   };
 
   // Manual full re-download of every consumer from the database into this
-  // device's local copy. Auto-sync only pulls when counts differ, so edits to
-  // existing consumers (names, mobiles, area codes) need this button.
+  // device's local copy. The 33k customer master is never auto-synced; use
+  // this button at most once a week after updating customer data.
   const handleResyncCustomers = async () => {
     if (isResyncing) return;
     if (!navigator.onLine) {

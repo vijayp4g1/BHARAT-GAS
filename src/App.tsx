@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
-import { setupSyncListeners, syncOfflineData, pullLatestCloudData, autoSyncMasterConsumers } from './lib/sync';
+import { setupSyncListeners, syncOfflineData, pullLatestCloudData } from './lib/sync';
 import { stripCacheBustParam } from './lib/appCache';
 import { runDailyStorageMaintenance } from './lib/storageCleanup';
 import { fetchAgencySettings } from './lib/agencySettings';
@@ -43,15 +43,15 @@ function App() {
     setupSyncListeners();
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);
-    // Automatically check and sync new master consumers without needing any button click
-    autoSyncMasterConsumers().catch(console.error);
+    // The 33k customer master is intentionally NOT auto-synced. It is updated
+    // manually at most once a week from Manager Dashboard / Agent Search.
 
     // Periodically pull latest data from cloud every 5 minutes when online.
-    // This was 60 seconds, which multiplied database egress on every device.
+    // This is the small incremental locations/photos/notes pull, not the full
+    // customer master.
     const intervalId = setInterval(() => {
       if (navigator.onLine) {
         pullLatestCloudData().catch(console.error);
-        autoSyncMasterConsumers().catch(console.error);
       }
     }, 5 * 60 * 1000);
 

@@ -15,6 +15,7 @@ The **old** project `skkebmqxhrtarpfwffgx` is **egress-restricted** on the Free 
 - Do **not** run `supabase init` (the repo already has `supabase/`) or `supabase db push` without reading the migration notes.
 - Do **not** commit `.env*`, `migration/`, database dumps, connection strings or service keys. They are git-ignored and contain personal data/credentials.
 - Do **not** reintroduce full-table sync scans on a timer; that caused the 5 GB egress overage (fixed in `0bd79ba`).
+- Do **not** add automatic `autoSyncMasterConsumers()` calls. The 33k customer master is manual-only (Manager Dashboard → Resync Customers, or Agent Search → database icon), about once a week. Only `pullLatestCloudData()` (incremental locations/photos/notes) is automatic.
 - Existing users must log in again once: the new project has a new JWT secret. Their old passwords were migrated.
 
 ### Pending task

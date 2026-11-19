@@ -580,6 +580,6 @@ export function setupSyncListeners() {
   window.addEventListener('online', () => {
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);
-    autoSyncMasterConsumers().catch(console.error);
+    // No autoSyncMasterConsumers here: the 33k customer master is manual-only.
   });
 }
