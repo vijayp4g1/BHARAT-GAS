@@ -29,7 +29,7 @@ request. There is no generic SQL passthrough and no access to `auth.users` lists
 
 ```bash
 npx supabase login
-npx supabase link --project-ref skkebmqxhrtarpfwffgx
+npx supabase link --project-ref zdipbxhgjhxfslpoizkj
 npx supabase functions deploy admin-api
 ```
 

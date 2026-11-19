@@ -2,7 +2,7 @@ import fs from 'fs';
 import * as XLSX from 'xlsx';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://zdipbxhgjhxfslpoizkj.supabase.co';
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY || 'PLACEHOLDER');

@@ -11,7 +11,7 @@ if (fs.existsSync('.env.local')) {
   });
 }
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || env.VITE_SUPABASE_URL || 'https://zdipbxhgjhxfslpoizkj.supabase.co';
 const SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
 if (!SERVICE_KEY) {

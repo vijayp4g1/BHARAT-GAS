@@ -5,7 +5,7 @@ import {
   isStorageQuotaError,
 } from './storageCleanup';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://zdipbxhgjhxfslpoizkj.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'PLACEHOLDER_KEY';
 
 /**

@@ -11,7 +11,7 @@ envContent.split('\n').forEach(line => {
   if (k && v.length) env[k.trim()] = v.join('=').trim();
 });
 
-const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://skkebmqxhrtarpfwffgx.supabase.co';
+const SUPABASE_URL = env.VITE_SUPABASE_URL || 'https://zdipbxhgjhxfslpoizkj.supabase.co';
 const SUPABASE_KEY = env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

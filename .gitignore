@@ -29,3 +29,6 @@ dev-dist
  
 .vercel
 .env*
+
+# Local database dump/restore files (contain personal data and auth hashes)
+migration/
