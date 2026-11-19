@@ -15,16 +15,14 @@ export interface GeminiOcrResult {
 /*    gemini-3.1-flash-lite ............ $0.25 input / $1.50 output (free tier)*/
 /*    gemini-3.5-flash-lite ............ $0.30 input / $2.50 output (free tier)*/
 /*                                                                            */
-/*  Thinking is forced to "minimal"/off because OCR is not a reasoning task;  */
-/*  thinking tokens are billed at the (expensive) output rate.                */
+/*  Thinking is "minimal" for normal OCR; only the no-digits retry uses low.  */
+/*  Thinking tokens are billed at the (expensive) output rate.                */
 /*                                                                            */
-/*  Override the primary scanner model from .env.local without touching code: */
-/*      VITE_GEMINI_SCAN_MODEL=gemini-3.1-flash-lite                          */
+/*  Bill scanning is locked to gemini-3.1-flash-lite in getScanModelCandidates;*/
+/*  do not add an env override or fallback model.                             */
 /* -------------------------------------------------------------------------- */
 
 export const CHEAP_SCAN_MODEL = 'gemini-3.1-flash-lite';
-// Cheapest vision fallback; only used if the primary model is unavailable.
-export const FALLBACK_SCAN_MODEL = 'gemini-2.5-flash-lite';
 
 /** Model used for Smart Dispatch / Smart Route (was gemini-3.6-flash). */
 export const CHEAP_AGENT_MODEL = 'gemini-3.5-flash-lite';
@@ -37,15 +35,9 @@ const MODEL_PRICE_PER_MILLION: Record<string, { input: number; output: number }>
 };
 
 export function getScanModelCandidates(): string[] {
-  let override: string | null = null;
-  try {
-    override =
-      (import.meta.env.VITE_GEMINI_SCAN_MODEL as string | undefined) ||
-      localStorage.getItem('VITE_GEMINI_SCAN_MODEL');
-  } catch (_) {
-    override = (import.meta.env.VITE_GEMINI_SCAN_MODEL as string | undefined) || null;
-  }
-  return Array.from(new Set([override, CHEAP_SCAN_MODEL, FALLBACK_SCAN_MODEL].filter(Boolean))) as string[];
+  // Bill scanning is deliberately locked to this one model. No override, no
+  // fallback model: changing it must be an explicit code change.
+  return [CHEAP_SCAN_MODEL];
 }
 
 function getGeminiApiKey(): string | null {

@@ -84,6 +84,20 @@ export interface ActiveScanFailAlert {
   reason: string;
 }
 
+/**
+ * A verified 33k-database match awaiting operator confirmation. Every match
+ * (exact or corrected) must be confirmed against the paper bill before it is
+ * added, so a single misread digit can never silently pick another customer.
+ */
+interface PendingMatchConfirmation {
+  consumer_number: string;
+  consumer_name: string;
+  address?: string;
+  mobile?: string;
+  printed_number: string;
+  printed_name?: string;
+}
+
 // One shared AudioContext: creating a new one per beep leaks contexts (Chrome
 // allows only a handful) and the double-bill fraud alarm goes silent after a
 // few scans. Nodes are still created per beep, only the context is reused.
@@ -188,6 +202,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   const [scannedSessionList, setScannedSessionList] = useState<ScannedSessionItem[]>([]);
   const [failedScanList, setFailedScanList] = useState<FailedScanItem[]>([]);
   const [activeScanFailAlert, setActiveScanFailAlert] = useState<ActiveScanFailAlert | null>(null);
+  const [pendingMatchConfirm, setPendingMatchConfirm] = useState<PendingMatchConfirmation | null>(null);
   const manualInputRef = useRef<HTMLInputElement | null>(null);
   const [statusText, setStatusText] = useState<string>('Align "Details of Receiver:" in view');
   const [manualInput, setManualInput] = useState<string>('');
@@ -293,6 +308,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       setNameMismatchNotice(null);
       setDuplicateScamNotice(null);
       setActiveScanFailAlert(null);
+      setPendingMatchConfirm(null);
       setSnapAttempts(0);
       setDuplicateCount(0);
       setShowDoneWarning(false);
@@ -303,6 +319,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     if (!isOpen) {
       setShowDoneWarning(false);
       isProcessingRef.current = false;
+      setPendingMatchConfirm(null);
     }
     prevOpenRef.current = isOpen;
   }, [isOpen]);
@@ -587,7 +604,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     setActiveScanFailAlert(null);
     const outcome = await processMatchedConsumerNumber(
       suggestion.consumer_number,
-      suggestion.consumer_name
+      suggestion.consumer_name,
+      { confirm: true }
     );
 
     if (outcome !== 'failed' && printedNumber) {
@@ -598,10 +616,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
 
       if (outcome === 'added') {
         setStatusText(
-          `Added #${suggestion.consumer_number} (corrected 8/6/0) — ready for next bill`
+          `Added #${suggestion.consumer_number} (corrected look-alike digits) — ready for next bill`
         );
         toast.success(
-          `✨ Added #${suggestion.consumer_number} — corrected faint 8/6/0 from #${printedNumber}`,
+          `✨ Added #${suggestion.consumer_number} — corrected look-alike digits from #${printedNumber}`,
           { id: 'scan-snap', duration: 5000 }
         );
       } else {
@@ -610,11 +628,52 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
   };
 
+  // The operator confirmed that the matched 33k-database customer is the one on
+  // the paper bill. Add it through the normal verified path.
+  const handleConfirmPendingMatch = async () => {
+    const pending = pendingMatchConfirm;
+    if (!pending) return;
+
+    setPendingMatchConfirm(null);
+    const outcome = await processMatchedConsumerNumber(
+      pending.consumer_number,
+      pending.consumer_name,
+      { confirm: true }
+    );
+
+    if (outcome === 'added') {
+      setStatusText(`Added #${pending.consumer_number} — ready for next bill`);
+      toast.success(`Confirmed & added #${pending.consumer_number}`, {
+        id: 'scan-snap',
+        duration: 4000,
+      });
+    } else if (outcome === 'duplicate') {
+      setDuplicateCount((n) => n + 1);
+      setStatusText(`#${pending.consumer_number} already added — ready for next bill`);
+    }
+  };
+
+  const handleCancelPendingMatch = () => {
+    const pending = pendingMatchConfirm;
+    if (!pending) return;
+
+    setPendingMatchConfirm(null);
+    recordFailedScan(
+      pending.printed_number || pending.consumer_number,
+      'Matched customer not confirmed'
+    );
+    setStatusText('Match not confirmed — rescan or type the correct Cons No');
+    toast('Not added — rescan or type the correct Cons No', {
+      id: 'scan-snap',
+      icon: '↩️',
+      duration: 4000,
+    });
+  };
+
   // A retake replaces one "unread" capture (a bill where no number could be
   // read). The row is only retired once a capture actually starts, so a retake
   // that never happens can never silently clear a not-added bill.
-  const queueUnreadRetake = (id?: string) => {
-    const targetId =
+  const queueUnreadRetake = (id?: string) => {    const targetId =
       id ||
       failedScanList.find((item) => !numberKey(item.raw_number))?.id ||
       '';
@@ -680,14 +739,16 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
   // Process a candidate consumer number match.
   // Returns:
   //   'added'     → the bill was newly added to the delivery list
+  //   'confirm'   → a database match is waiting for operator confirmation
   //   'duplicate' → this exact consumer is already in the list (safe re-scan)
   //   'failed'    → could not verify / add (alert + failed-list recorded)
   const processMatchedConsumerNumber = async (
     rawNum: string,
     extractedName?: string,
-    options: { silent?: boolean } = {}
-  ): Promise<'added' | 'duplicate' | 'failed'> => {
+    options: { silent?: boolean; confirm?: boolean } = {}
+  ): Promise<'added' | 'confirm' | 'duplicate' | 'failed'> => {
     const silent = options.silent === true;
+    const alreadyConfirmed = options.confirm === true;
     const cleanNum = normalizeDigits(rawNum);
 
     if (!cleanNum || cleanNum.length < 1 || cleanNum.length > 12) {
@@ -826,9 +887,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       }
     }
 
-    // Anti-spam cooldown (5 seconds for the same number). Skipped for internal
-    // silent passes so they never suppress the final user-facing error.
-    if (!silent) {
+    // Anti-spam cooldown (5 seconds for the same number). Do not set the stamp
+    // until the bill is actually added; otherwise confirming the match moments
+    // later would be mistaken for a duplicate re-scan.
+    if (!silent && !alreadyConfirmed) {
       const now = Date.now();
       const lastSeen =
         recentSeenCooldownRef.current.get(numberKey(resolvedNum)) ||
@@ -838,8 +900,6 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         // duplicate (not a lost bill) so the session counters stay honest.
         return 'duplicate';
       }
-      recentSeenCooldownRef.current.set(numberKey(resolvedNum), now);
-      recentSeenCooldownRef.current.set(numberKey(cleanNum), now);
     }
 
     const resolvedKey = numberKey(resolvedNum);
@@ -852,6 +912,36 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         setStatusText(`#${resolvedNum} already added — ready for next bill`);
       }
       return 'duplicate';
+    }
+
+    // EVERY database match must be confirmed against the paper bill before it
+    // is added. The confirmation card shows the database name/address and the
+    // number actually read from the receipt.
+    if (!alreadyConfirmed) {
+      setActiveScanFailAlert(null);
+      setPendingMatchConfirm({
+        consumer_number: resolvedNum,
+        consumer_name: finalName,
+        address: match.address,
+        mobile: match.mobile,
+        printed_number: cleanNum,
+        printed_name: extractedName,
+      });
+      setStatusText(`Confirm matched customer #${resolvedNum}`);
+      if (!silent) {
+        toast(`Matched #${resolvedNum} — confirm the customer`, {
+          id: 'scan-snap',
+          icon: '🔎',
+          duration: 4000,
+        });
+      }
+      return 'confirm';
+    }
+
+    if (!silent) {
+      const now = Date.now();
+      recentSeenCooldownRef.current.set(numberKey(resolvedNum), now);
+      recentSeenCooldownRef.current.set(numberKey(cleanNum), now);
     }
 
     // INSTANT ADDITION TO UI FOR VERIFIED CONSUMER
@@ -1062,6 +1152,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // This capture is a real retake: retire the queued unread row now.
     consumeQueuedUnreadRetake();
     setActiveScanFailAlert(null);
+    setPendingMatchConfirm(null);
     setNameMismatchNotice(null);
     setIsProcessing(true);
     setIsShutterFlash(true);
@@ -1095,6 +1186,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           first.consumerName,
           { silent: true }
         );
+        if (firstOutcome === 'confirm') {
+          setStatusText(`Confirm matched customer #${first.consumerNumber}`);
+          return;
+        }
         if (firstOutcome === 'added') {
           // The add path already showed a success or name-mismatch toast.
           setStatusText(`Matched #${first.consumerNumber}! Ready for next bill`);
@@ -1222,6 +1317,12 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     }
 
     const outcome = await processMatchedConsumerNumber(cleanNum, undefined, { silent: true });
+    if (outcome === 'confirm') {
+      // A database match is waiting for the operator to confirm the customer.
+      // Keep the typed value and any pending row until they decide.
+      setIsProcessing(false);
+      return;
+    }
     if (outcome === 'failed') {
       if (DISTRIBUTOR_BLACKLIST.has(cleanNum) || cleanNum.length > 12) {
         toast.error(`Consumer #${cleanNum} cannot be added`);
@@ -1808,6 +1909,102 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       </main>
 
 
+      {/* MATCH CONFIRMATION: every 33k-database match must be confirmed */}
+      {pendingMatchConfirm && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in zoom-in-95 duration-150 overflow-y-auto">
+          <div className="bg-gradient-to-b from-slate-900 via-emerald-950/40 to-slate-900 border-2 border-emerald-500 rounded-3xl p-4 w-full max-w-sm text-white shadow-[0_0_60px_rgba(16,185,129,0.35)] flex flex-col gap-3 max-h-[88vh] overflow-y-auto my-auto">
+            <div className="flex items-center justify-between border-b border-emerald-500/30 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0">
+                  <Check className="w-5 h-5 text-emerald-300" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-emerald-300 uppercase tracking-wide">
+                    Matched in 33k Database
+                  </h3>
+                  <p className="text-[10px] text-emerald-100/70 font-medium">
+                    Confirm this is the customer on the paper bill
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelPendingMatch}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+                aria-label="Cancel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950/80 rounded-2xl p-3 border border-emerald-500/30 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[9px] uppercase font-bold text-slate-400">Printed on bill</p>
+                  <p className="font-mono text-base font-black text-amber-400">
+                    #{pendingMatchConfirm.printed_number}
+                  </p>
+                </div>
+                <span className="text-emerald-400 font-black text-sm shrink-0">→</span>
+                <div className="min-w-0 text-right">
+                  <p className="text-[9px] uppercase font-bold text-slate-400">Database</p>
+                  <p className="font-mono text-base font-black text-emerald-200">
+                    #{pendingMatchConfirm.consumer_number}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-white/5 pt-2">
+                <p className="text-[9px] uppercase font-bold text-slate-400">Customer in database</p>
+                <p className="text-sm font-black text-white leading-tight">
+                  {pendingMatchConfirm.consumer_name}
+                </p>
+                {pendingMatchConfirm.address && (
+                  <p className="text-[10px] text-slate-300 leading-snug mt-0.5">
+                    {pendingMatchConfirm.address}
+                  </p>
+                )}
+                {pendingMatchConfirm.mobile && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Mobile: {pendingMatchConfirm.mobile}
+                  </p>
+                )}
+              </div>
+
+              {pendingMatchConfirm.printed_name && (
+                <div className="border-t border-white/5 pt-1.5">
+                  <p className="text-[9px] uppercase font-bold text-slate-400">Name read from bill</p>
+                  <p className="text-[11px] font-semibold text-slate-200">
+                    {pendingMatchConfirm.printed_name}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-2.5 text-[11px] text-emerald-100 font-semibold leading-relaxed">
+              Only confirm if this is the same customer. Nothing is added until you tap below.
+            </div>
+
+            <button
+              type="button"
+              onClick={handleConfirmPendingMatch}
+              className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-black py-3.5 px-3 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wide border border-emerald-400/60"
+            >
+              <Check className="w-5 h-5" />
+              <span>Confirm &amp; Add #{pendingMatchConfirm.consumer_number}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCancelPendingMatch}
+              className="w-full bg-slate-800 hover:bg-slate-700 border border-white/20 text-slate-300 font-bold py-2.5 px-3 rounded-xl text-[11px] active:scale-95 transition-all"
+            >
+              Not this customer — Rescan
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3. DIRECT SCAN FAILURE MODAL OVERLAY (SCROLLABLE & FULLY VISIBLE ON ANY MOBILE) */}
       {activeScanFailAlert && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in zoom-in-95 duration-150 overflow-y-auto">
@@ -1830,7 +2027,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                   </h3>
                   <p className="text-[10px] text-slate-300 font-medium">
                     {activeScanFailAlert.suggested_match
-                      ? 'Confirm the 8/6/0 correction before adding'
+                      ? 'Confirm the look-alike correction before adding'
                       : 'Choose action for this bill'}
                   </p>
                 </div>
@@ -1873,7 +2070,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
             {activeScanFailAlert.suggested_match && (
               <div className="bg-emerald-950/50 border-2 border-emerald-500/60 rounded-2xl p-3 flex flex-col gap-2.5">
                 <p className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
-                  Possible 8 / 6 / 0 correction
+                  Possible look-alike correction
                 </p>
 
                 <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-950/70 border border-emerald-500/30 px-2.5 py-2">
@@ -1897,7 +2094,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
                     {activeScanFailAlert.suggested_match.consumer_name}
                   </p>
                   <p className="text-[10px] text-emerald-200/80 leading-snug mt-0.5">
-                    The two numbers differ only in faint 8/6/0 digits and the name matches.
+                    The two numbers differ only in faint look-alike digits (8/6/0 or 2/7) and the name matches.
                     <b className="text-emerald-300"> Nothing is added until you confirm.</b>
                   </p>
                 </div>
