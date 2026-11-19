@@ -28,6 +28,17 @@ export interface BpclReportData {
 }
 
 const BPCL_STORAGE_PREFIX = 'bgcls_bpcl_report_';
+
+/**
+ * BPCL reports are stored inside settlement `notes`, which also contain the
+ * full scanned-bill JSON and the pasted BPCL raw text. Re-downloading all of
+ * them on every roster refresh is expensive, so keep a short per-date cache.
+ */
+const BPCL_CLOUD_CACHE_TTL_MS = 5 * 60 * 1000;
+const bpclCloudCache = new Map<
+  string,
+  { at: number; data: Record<string, BpclReportData> }
+>();
 const BPCL_TAG = '__BGCLS_BPCL_REPORT__';
 const SCANNED_TAG = '__BGCLS_SCANNED_BILLS__';
 
@@ -681,36 +692,59 @@ export async function fetchBpclReport(
  * Fetch all BPCL reports for all delivery boys for a specific date (for Roster badges)
  */
 export async function fetchAllBpclReportsForDate(
-  dateStr: string
+  dateStr: string,
+  options: { force?: boolean } = {}
 ): Promise<Record<string, BpclReportData>> {
   const result: Record<string, BpclReportData> = {};
 
-  // 1. Fetch from cloud
+  // 1. Fetch from cloud (short cache; force when a BPCL edit must be visible)
+  const fetchedStampKey = `bgcls_bpcl_cloud_fetched_${dateStr}`;
+  let localFetchFresh = false;
   try {
-    const { data, error } = await staffDb
-      .from('staff_cylinder_settlements')
-      .select('agent_name, agent_id, notes, updated_at')
-      .eq('settlement_date', dateStr);
+    const stamp = Number(localStorage.getItem(fetchedStampKey) || 0);
+    localFetchFresh = stamp > 0 && Date.now() - stamp < BPCL_CLOUD_CACHE_TTL_MS;
+  } catch (_) {}
 
-    if (!error && Array.isArray(data)) {
-      data.forEach((row) => {
-        const normName = (row.agent_name || '').trim().toUpperCase();
-        if (row.notes) {
-          const parsed = extractBpclReportFromNotes(row.notes);
-          if (parsed) {
-            const existing = result[normName];
-            const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
-            const existingTime = new Date(existing?.updated_at || 0).getTime();
-            if (!existing || parsedTime >= existingTime) {
-              result[normName] = parsed;
-              setLocalBpclReport(dateStr, normName, parsed);
+  const cachedCloud = bpclCloudCache.get(dateStr);
+  if (
+    !options.force &&
+    ((cachedCloud && Date.now() - cachedCloud.at < BPCL_CLOUD_CACHE_TTL_MS) ||
+      localFetchFresh)
+  ) {
+    if (cachedCloud) Object.assign(result, cachedCloud.data);
+  } else {
+    try {
+      const { data, error } = await staffDb
+        .from('staff_cylinder_settlements')
+        .select('agent_name, agent_id, notes, updated_at')
+        .eq('settlement_date', dateStr);
+
+      if (!error && Array.isArray(data)) {
+        data.forEach((row) => {
+          const normName = (row.agent_name || '').trim().toUpperCase();
+          if (row.notes) {
+            const parsed = extractBpclReportFromNotes(row.notes);
+            if (parsed) {
+              const existing = result[normName];
+              const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
+              const existingTime = new Date(existing?.updated_at || 0).getTime();
+              if (!existing || parsedTime >= existingTime) {
+                result[normName] = parsed;
+                setLocalBpclReport(dateStr, normName, parsed);
+              }
             }
           }
+        });
+        if (!error) {
+          bpclCloudCache.set(dateStr, { at: Date.now(), data: { ...result } });
+          try {
+            localStorage.setItem(fetchedStampKey, String(Date.now()));
+          } catch (_) {}
         }
-      });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch all BPCL reports for date:', err);
     }
-  } catch (err) {
-    console.warn('Failed to fetch all BPCL reports for date:', err);
   }
 
   // 2. Merge local storage keys

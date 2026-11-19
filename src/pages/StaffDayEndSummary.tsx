@@ -70,6 +70,7 @@ import {
   toggleBillsCheckedDone, 
   toggleBoyArchived,
   toggleBoyNoSupply,
+  setLocalBpclReport,
   type BpclReportData, 
   type BpclBillItem 
 } from '../lib/bpclReportService';
@@ -917,6 +918,16 @@ export const StaffDayEndSummary: React.FC = () => {
     }
   }, []);
 
+  // A settlement row changed (Staff Book load/cash edit). Only the small load
+  // summary is needed for the roster — do not re-download the day-end entries,
+  // BPCL notes and past-7-days notes for every change.
+  const refreshSettlementLoads = useCallback(async (dateStr: string) => {
+    const loads = await fetchSettlementLoadsForDate(dateStr);
+    if (reportDateRef.current === dateStr) {
+      setSettlementLoadsMap(loads || {});
+    }
+  }, []);
+
   useEffect(() => {
     loadRosterData(reportDate);
   }, [reportDate, loadRosterData]);
@@ -933,7 +944,7 @@ export const StaffDayEndSummary: React.FC = () => {
         () => {
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
-            void loadRosterData(reportDateRef.current, true);
+            void refreshSettlementLoads(reportDateRef.current);
           }, 600);
         }
       )
@@ -943,7 +954,7 @@ export const StaffDayEndSummary: React.FC = () => {
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [loadRosterData]);
+  }, [refreshSettlementLoads]);
 
   // Write-Ahead Engine: Immediately writes to local storage (0ms) and auto-saves to database (debounced 800ms)
   const triggerAutoSave = useCallback((updatedEntries: ItemEntry[], boy: DeliveryBoy, dateStr: string) => {
@@ -1664,8 +1675,44 @@ export const StaffDayEndSummary: React.FC = () => {
         }
 
         syncDebounceTimer = setTimeout(() => {
-          // Silently refresh roster summaries in-place (no loading spinner, no screen flicker)
-          loadRosterData(reportDate, true);
+          // Refresh only the boy that changed. The broadcast includes enough
+          // identity to fetch one report; a full roster reload would download
+          // every boy's entries + BPCL notes + 7 days of notes again.
+          const norm = (data.agent_name || '').trim().toUpperCase();
+          if (norm) {
+            const reportedTotal = Number(data.total_deliveries || 0);
+            if (reportedTotal === 0) {
+              setRosterSummaries((prev) => {
+                const existing = prev[norm];
+                return {
+                  ...prev,
+                  [norm]: {
+                    ...(existing || {
+                      report_date: reportDate,
+                      agent_id: data.agent_id,
+                      agent_name: data.agent_name,
+                    }),
+                    total_deliveries: 0,
+                    domestic_14kg: 0,
+                    composite_10kg: 0,
+                    commercial_19kg: 0,
+                    empties_collected: 0,
+                    cash_count: 0,
+                    upi_count: 0,
+                    due_count: 0,
+                    entries: [],
+                  } as DayEndReportSummary,
+                };
+              });
+            } else {
+              void fetchDayEndReportForAgent(reportDate, data.agent_name, data.agent_id).then(
+                (summary) => {
+                  if (reportDateRef.current !== reportDate || !summary) return;
+                  setRosterSummaries((prev) => ({ ...prev, [norm]: summary }));
+                }
+              );
+            }
+          }
 
           // If current user is in SCAN view for this delivery boy, sync bills silently without clobbering unsaved edits
           if (
@@ -1692,39 +1739,70 @@ export const StaffDayEndSummary: React.FC = () => {
             clearTimeout(bpclDebounceTimer);
           }
           bpclDebounceTimer = setTimeout(() => {
-            fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
-              setBpclReportsMap(updatedMap);
-              if (selectedBoyRef.current) {
-                const norm = selectedBoyRef.current.name.trim().toUpperCase();
-                if (updatedMap[norm]) {
-                  setActiveBpclReport(updatedMap[norm]);
-                }
-              }
-            });
+            // The broadcast already carries the full parsed BPCL report.
+            // Update only that boy instead of re-downloading every settlement
+            // note for the date.
+            const report = payload?.payload?.reportData as BpclReportData | undefined;
+            if (!report) return;
+            const norm = (report.agent_name || payload?.payload?.agentName || '')
+              .trim()
+              .toUpperCase();
+            if (!norm) return;
+
+            setLocalBpclReport(reportDate, norm, report);
+            setBpclReportsMap((prev) => ({ ...prev, [norm]: report }));
+            if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
+              setActiveBpclReport(report);
+            }
           }, 1500);
         }
       })
       .subscribe();
 
     const handleLocalUpdate = (e: any) => {
-      if (e?.detail?.report_date === reportDate) {
-        // Silently update roster summaries without unmounting the list or showing a spinner
-        loadRosterData(reportDate, true);
-      }
+      if (e?.detail?.report_date !== reportDate) return;
+      const agentName = String(e?.detail?.agent_name || '').trim();
+      if (!agentName) return;
+      const norm = agentName.toUpperCase();
+
+      // Refresh only this boy's summary. A full roster reload would re-download
+      // every boy's entries after every local save.
+      void fetchDayEndReportForAgent(reportDate, agentName).then((summary) => {
+        if (reportDateRef.current !== reportDate) return;
+        setRosterSummaries((prev) => {
+          if (summary) return { ...prev, [norm]: summary };
+          const existing = prev[norm];
+          return {
+            ...prev,
+            [norm]: {
+              ...(existing || { report_date: reportDate, agent_name: agentName }),
+              total_deliveries: 0,
+              domestic_14kg: 0,
+              composite_10kg: 0,
+              commercial_19kg: 0,
+              empties_collected: 0,
+              cash_count: 0,
+              upi_count: 0,
+              due_count: 0,
+              entries: [],
+            } as DayEndReportSummary,
+          };
+        });
+      });
     };
     window.addEventListener('bgcls-day-end-updated', handleLocalUpdate);
 
     const handleBpclLocalUpdate = (e: any) => {
-      if (e?.detail?.dateStr === reportDate) {
-        fetchAllBpclReportsForDate(reportDate).then((updatedMap) => {
-          setBpclReportsMap(updatedMap);
-          if (selectedBoyRef.current) {
-            const norm = selectedBoyRef.current.name.trim().toUpperCase();
-            if (updatedMap[norm]) {
-              setActiveBpclReport(updatedMap[norm]);
-            }
-          }
-        });
+      if (e?.detail?.dateStr !== reportDate) return;
+      const report = e?.detail?.reportData as BpclReportData | undefined;
+      if (!report) return;
+      const norm = (report.agent_name || e?.detail?.agentName || '')
+        .trim()
+        .toUpperCase();
+      if (!norm) return;
+      setBpclReportsMap((prev) => ({ ...prev, [norm]: report }));
+      if (selectedBoyRef.current?.name.trim().toUpperCase() === norm) {
+        setActiveBpclReport(report);
       }
     };
     window.addEventListener('bgcls-bpcl-updated', handleBpclLocalUpdate);

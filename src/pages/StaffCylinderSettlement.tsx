@@ -179,6 +179,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Realtime channel reference for instant multi-staff broadcast
   const syncChannelRef = useRef<any>(null);
+  const lastSettlementFetchRef = useRef<number>(0);
 
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
@@ -472,10 +473,17 @@ export const StaffCylinderSettlement: React.FC = () => {
         if (payload.settlement_date === selectedDate) {
           if (payload.action === 'SAVE' && payload.record) {
             await db.staff_cylinder_settlements.put(payload.record);
+            setSettlements((prev) => {
+              const next = prev.filter((row) => row.id !== payload.record.id);
+              next.push(payload.record);
+              return next;
+            });
           } else if (payload.action === 'DELETE' && payload.id) {
             await db.staff_cylinder_settlements.delete(payload.id);
+            setSettlements((prev) => prev.filter((row) => row.id !== payload.id));
           }
-          await fetchSettlements(selectedDate);
+          // No fetchSettlements here: the broadcast already carries the full
+          // settlement row. Re-querying would re-download every row's notes.
           const senderName = payload.sender || 'Staff member';
           const boyName = payload.record?.agent_name ? ` for ${payload.record.agent_name}` : '';
           toast(`⚡ ${senderName} updated settlement${boyName}!`, {
@@ -488,10 +496,27 @@ export const StaffCylinderSettlement: React.FC = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
-        () => {
+        (payload) => {
           if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
           pgRefreshTimer = setTimeout(() => {
-            void fetchSettlements(selectedDate);
+            if (payload.eventType === 'DELETE') {
+              const oldRow = payload.old as any;
+              if (oldRow?.id) {
+                setSettlements((prev) => prev.filter((row) => row.id !== oldRow.id));
+                void db.staff_cylinder_settlements.delete(oldRow.id);
+              }
+              return;
+            }
+
+            const row = payload.new as SettlementRecord;
+            if (!row?.id || String(row.settlement_date) !== selectedDate) return;
+
+            setSettlements((prev) => {
+              const next = prev.filter((item) => item.id !== row.id);
+              next.push(row);
+              return next;
+            });
+            void db.staff_cylinder_settlements.put(row);
           }, 600);
         }
       )
@@ -510,9 +535,12 @@ export const StaffCylinderSettlement: React.FC = () => {
 
     // Auto re-sync when switching back to tab / unlocking phone
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        fetchSettlements(selectedDate);
-      }
+      if (document.visibilityState !== 'visible') return;
+      // Realtime already keeps the list current. Avoid re-downloading every
+      // settlement's notes each time the tab regains focus.
+      if (Date.now() - lastSettlementFetchRef.current < 60_000) return;
+      lastSettlementFetchRef.current = Date.now();
+      fetchSettlements(selectedDate);
     };
 
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);

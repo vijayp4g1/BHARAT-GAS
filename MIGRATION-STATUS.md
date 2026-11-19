@@ -31,6 +31,21 @@ The old project is restricted because Free-plan **egress reached 5.781 GB / 5 GB
 
 Do not reintroduce full-table scans on an interval.
 
+### Additional egress guards added after the migration (2026-11-19)
+
+| Area | Change |
+|---|---|
+| Past-7-days duplicate map | Cached in localStorage with a 30-minute TTL; no longer re-downloads 7 days of settlement notes on every roster refresh |
+| BPCL reports | 5-minute in-memory + localStorage TTL; page reloads reuse per-boy local reports instead of re-reading every settlement note |
+| Day-end realtime | A `cash_memos_updated` broadcast now refreshes only the affected boy’s report, not the whole roster |
+| BPCL realtime | Broadcast payload updates the single boy’s report; no full `notes` re-query |
+| Staff Book realtime | Uses the postgres/broadcast row directly; no `fetchSettlements` notes re-query on each change |
+| Staff Book tab focus | Refetch at most once per 60 seconds |
+| Master consumer sync | Full 33k download only on empty DB / version change / manual force — removed the `localCount < remoteTotal` retry loop |
+| Day-end roster query | Explicit column list (stops pulling unused/large columns) |
+
+**Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
+
 ---
 
 ## 2. What was migrated (verified)

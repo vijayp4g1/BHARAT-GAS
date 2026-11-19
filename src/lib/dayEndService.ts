@@ -8,6 +8,9 @@ import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
 
+/** Past days rarely change; avoid re-downloading 7 days of settlement notes. */
+const PAST_7_DAYS_CACHE_TTL_MS = 30 * 60 * 1000;
+
 /**
  * Current godown cylinder rate saved by the Staff Book. Used when the day-end
  * scanner creates a settlement row so it does not hardcode ₹994.
@@ -184,7 +187,9 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
   try {
     const { data, error } = await staffDb
       .from('day_end_reports')
-      .select('*')
+      .select(
+        'id, report_date, agent_id, agent_name, total_deliveries, domestic_14kg, composite_10kg, commercial_19kg, empties_collected, cash_count, upi_count, due_count, entries, updated_at, created_at'
+      )
       .eq('report_date', dateStr);
 
     if (!error && data && data.length > 0) {
@@ -1099,6 +1104,16 @@ export async function fetchPast7DaysBills(
 ): Promise<Record<string, PastClaimantInfo>> {
   const result: Record<string, PastClaimantInfo> = {};
 
+  // Past days are static for duplicate-detection purposes. Reuse the local
+  // cache instead of downloading every settlement note on each roster refresh.
+  const stampKey = `bgcls_past_7days_fetched_${reportDateStr}_${daysBack}`;
+  try {
+    const stamp = Number(localStorage.getItem(stampKey) || 0);
+    if (stamp > 0 && Date.now() - stamp < PAST_7_DAYS_CACHE_TTL_MS) {
+      return getLocalPast7DaysBills(reportDateStr);
+    }
+  } catch (_) {}
+
   try {
     const [yStr, mStr, dStr] = reportDateStr.split('-').map(Number);
     const targetDate = new Date(yStr, (mStr || 1) - 1, dStr || 1, 12, 0, 0);
@@ -1153,6 +1168,7 @@ export async function fetchPast7DaysBills(
       // Cache locally for fast instant access on next load
       try {
         localStorage.setItem(`bgcls_past_7days_bills_${reportDateStr}`, JSON.stringify(result));
+        localStorage.setItem(stampKey, String(Date.now()));
       } catch (_) {}
     }
   } catch (err) {

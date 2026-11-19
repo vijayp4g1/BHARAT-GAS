@@ -450,9 +450,13 @@ export async function autoSyncMasterConsumers(options?: {
         return { syncedCount: localCount, updated: false };
       }
 
-      // Auto-sync if force requested, DB empty, fewer records, or outdated version
+      // Sync the 33k-record master only when it is genuinely needed. Do NOT
+      // re-download it just because localCount < remoteTotal: one skipped or
+      // failed local row would otherwise trigger a full download every 5
+      // minutes on that device (hundreds of MB of egress per day). New
+      // consumers are still found by exact-number cloud lookup.
       const isOutdatedVersion = localVersion !== MASTER_DATA_VERSION;
-      const needsSync = options?.force || localCount < remoteTotal || localCount === 0 || isOutdatedVersion;
+      const needsSync = options?.force || localCount === 0 || isOutdatedVersion;
       if (!needsSync) {
         return { syncedCount: localCount, updated: false };
       }
