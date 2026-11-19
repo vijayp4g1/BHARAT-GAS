@@ -40,6 +40,7 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { performLogout } from '../lib/auth';
 import { AppRefreshButton } from '../components/AppRefreshButton';
+import { AgentBottomNav } from '../components/AgentBottomNav';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
 import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
 import { findSettlementRowForAgent, extractBpclReportFromNotes, fetchAllBpclReportsForDate } from '../lib/bpclReportService';
@@ -1629,6 +1630,20 @@ export const StaffCylinderSettlement: React.FC = () => {
     navigate('/', { replace: true });
   };
 
+  // Use an in-app back step when possible; if this page was opened directly
+  // (new tab / PWA shortcut) fall back to the correct staff landing page
+  // instead of doing a browser reload.
+  const handleBack = () => {
+    const historyIndex = Number((window.history.state as { idx?: number } | null)?.idx ?? 0);
+    if (historyIndex > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate(currentUserRole === 'MANAGER' ? '/manager/dashboard' : '/staff/day-end', {
+      replace: true,
+    });
+  };
+
   const toggleCardExpand = (id: string) => {
     setExpandedCards((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -1640,13 +1655,14 @@ export const StaffCylinderSettlement: React.FC = () => {
       <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-xl border-b border-slate-800/80 px-3.5 sm:px-5 py-3 flex items-center justify-between gap-3 shadow-2xl">
         {/* Left: Back Arrow + Clean Title + User Pill */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <Link
-            to={currentUserRole === 'MANAGER' ? '/manager/dashboard' : '/agent/search'}
+          <button
+            type="button"
+            onClick={handleBack}
             className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all active:scale-95 shrink-0"
             title="Back to Navigation"
           >
             <ArrowLeft size={19} />
-          </Link>
+          </button>
 
           <div className="flex items-center gap-2 min-w-0">
             <div className="flex flex-col">
@@ -3224,6 +3240,10 @@ export const StaffCylinderSettlement: React.FC = () => {
         onOpenAddModal={() => setIsAddDeliveryBoyModalOpen(true)}
         onListUpdated={() => refreshDeliveryBoys()}
       />
+
+      <div className="print:hidden">
+        <AgentBottomNav />
+      </div>
 
     </div>
   );

@@ -29,6 +29,10 @@ export default defineConfig(({ mode }) => {
           name: 'Bharat Gas Consumer Location System',
           short_name: 'BGCLS',
           description: 'Offline-first progressive web app for delivery agents',
+          start_url: '/',
+          scope: '/',
+          display: 'standalone',
+          orientation: 'portrait',
           theme_color: '#1E3A8A',
           icons: [
             {
