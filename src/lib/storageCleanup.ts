@@ -48,6 +48,13 @@ export interface StorageCleanupOptions {
   pasteDraftMaxAgeDays?: number;
   /** Second pass used only when the quota is already exhausted. */
   aggressive?: boolean;
+  /**
+   * Last resort before a login is blocked by the quota: also remove today's /
+   * yesterday's re-fetchable caches. Login cannot write the auth token without
+   * free space, and these caches are rebuilt from Supabase (or the settlement
+   * notes) after sign-in.
+   */
+  critical?: boolean;
 }
 
 export interface StorageCleanupReport {
@@ -89,11 +96,12 @@ export function freeLocalStorageSpace(
     dayEndDraftMaxAgeDays = 30,
     pasteDraftMaxAgeDays = 2,
     aggressive = false,
+    critical = false,
   } = options;
 
-  const dayEndMaxAge = aggressive ? 3 : dayEndDraftMaxAgeDays;
-  const pasteMaxAge = aggressive ? 1 : pasteDraftMaxAgeDays;
-  const auditKeep = aggressive ? 50 : auditMaxEntries;
+  const dayEndMaxAge = aggressive || critical ? 3 : dayEndDraftMaxAgeDays;
+  const pasteMaxAge = aggressive || critical ? 1 : pasteDraftMaxAgeDays;
+  const auditKeep = critical ? 10 : aggressive ? 50 : auditMaxEntries;
 
   const report: StorageCleanupReport = {
     removedKeys: 0,
@@ -120,9 +128,10 @@ export function freeLocalStorageSpace(
     }
     if (value === null) continue;
 
-    // 1. Re-fetchable display caches (today/yesterday are kept).
+    // 1. Re-fetchable display caches (today/yesterday are kept unless the
+    // quota is already blocking login).
     if (removeCaches && CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-      if (isRecentDatedCache(key, todayIso, yesterdayIso)) continue;
+      if (!critical && isRecentDatedCache(key, todayIso, yesterdayIso)) continue;
 
       try {
         localStorage.removeItem(key);
@@ -167,10 +176,77 @@ export function freeLocalStorageSpace(
 }
 
 /**
- * Last-resort: remove the oldest abandoned draft when the auth session cannot
- * be persisted. Keeps the two newest drafts (the ones most likely still in use).
- * Returns false when there is nothing safe left to remove.
+ * True when localStorage can accept a session-sized write right now.
+ * The probe is written and removed immediately; it never touches app data.
  */
+export function hasLocalStorageRoom(requiredBytes = 48 * 1024): boolean {
+  const probeKey = 'bgcls_storage_probe';
+  try {
+    localStorage.removeItem(probeKey);
+    localStorage.setItem(probeKey, 'x'.repeat(requiredBytes));
+    localStorage.removeItem(probeKey);
+    return true;
+  } catch (_) {
+    try {
+      localStorage.removeItem(probeKey);
+    } catch (_) {}
+    return false;
+  }
+}
+
+/**
+ * Runs before sign-in. Supabase auth must write a token to localStorage, so a
+ * full quota otherwise turns a valid password into "Device storage is full".
+ *
+ * 1. Normal + aggressive cleanup (keeps today's/yesterday's caches).
+ * 2. If the quota is still blocking, critical cleanup also drops those
+ *    re-fetchable caches (they are rebuilt from Supabase after login).
+ * 3. Finally evict the oldest drafts, always keeping the two newest.
+ */
+export function prepareStorageForAuth(requiredBytes = 48 * 1024): {
+  ok: boolean;
+  removedKeys: number;
+  freedBytes: number;
+  trimmedAudit: boolean;
+} {
+  let removedKeys = 0;
+  let freedBytes = 0;
+  let trimmedAudit = false;
+
+  const collect = (r: StorageCleanupReport) => {
+    removedKeys += r.removedKeys;
+    freedBytes += r.freedBytes;
+    trimmedAudit = trimmedAudit || r.trimmedAudit;
+  };
+
+  collect(freeLocalStorageSpace({ aggressive: true }));
+  if (hasLocalStorageRoom(requiredBytes)) {
+    return { ok: true, removedKeys, freedBytes, trimmedAudit };
+  }
+
+  collect(freeLocalStorageSpace({ aggressive: true, critical: true }));
+  if (hasLocalStorageRoom(requiredBytes)) {
+    return { ok: true, removedKeys, freedBytes, trimmedAudit };
+  }
+
+  // Absolute last resort: drop the oldest unsynced drafts (two newest stay).
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (!evictOldestDraft()) break;
+    removedKeys++;
+    if (hasLocalStorageRoom(requiredBytes)) {
+      return { ok: true, removedKeys, freedBytes, trimmedAudit };
+    }
+  }
+
+  return {
+    ok: hasLocalStorageRoom(requiredBytes),
+    removedKeys,
+    freedBytes,
+    trimmedAudit,
+  };
+}
+
+
 export function evictOldestDraft(): boolean {
   try {
     const drafts: Array<{ key: string; timestamp: number }> = [];

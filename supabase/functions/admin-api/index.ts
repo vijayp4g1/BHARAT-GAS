@@ -99,6 +99,8 @@ type Filter = {
 
 type Caller = {
   userId: string
+  /** agents.id for this login (may differ from auth uid on legacy accounts). */
+  agentId: string | null
   email: string | null
   username: string
   name: string | null
@@ -106,6 +108,13 @@ type Caller = {
   is_staff: boolean
   isManager: boolean
   isStaff: boolean
+}
+
+/** Every agent_id value that can legitimately identify this caller. */
+function callerAgentIds(caller: Caller): string[] {
+  return Array.from(
+    new Set([caller.userId, caller.agentId].filter((id): id is string => Boolean(id)))
+  )
 }
 
 const asString = (value: unknown, max = 500): string =>
@@ -162,10 +171,14 @@ async function loadCaller(admin: SupabaseClient, user: Record<string, any>): Pro
   const username = String(activeAgent?.username || (email || '').split('@')[0] || '')
     .toLowerCase()
     .trim()
-  const isStaff = isManager || activeAgent?.is_staff === true
+  // The app treats these two accounts as staff even before a manager toggles
+  // agents.is_staff. Keep the API in sync so their Staff Book still works.
+  const isDefaultStaff = username === 'john' || username === 'ganesh'
+  const isStaff = isManager || activeAgent?.is_staff === true || isDefaultStaff
 
   return {
     userId: user.id,
+    agentId: activeAgent?.id ?? null,
     email,
     username,
     name: activeAgent?.name ?? null,
@@ -291,6 +304,11 @@ async function handleSelect(admin: SupabaseClient, caller: Caller, body: any) {
 
   try {
     let query = admin.from(table).select(checkColumns(body.columns))
+    // Non-staff users may only read their own settlement rows. Day-end reports
+    // keep cross-agent claim reads for duplicate detection.
+    if (!caller.isStaff && table === 'staff_cylinder_settlements') {
+      query = query.in('agent_id', callerAgentIds(caller))
+    }
     query = applyFilters(query, body.filters)
     query = applyOrder(query, body.order)
     query = applyWindow(query, body.limit, body.offset)
@@ -318,18 +336,20 @@ async function handleWrite(admin: SupabaseClient, caller: Caller, action: string
 
   // Non-staff delivery boys may only touch their own day-end rows.
   if (!caller.isStaff && isSelfService) {
+    const ownedIds = callerAgentIds(caller)
     if (action === 'insert') {
       const values = body.values
       if (!values || typeof values !== 'object' || Array.isArray(values)) {
         return fail('values are required', 'BAD_REQUEST')
       }
-      if ((values as Record<string, unknown>).agent_id !== caller.userId) {
+      const rowAgentId = (values as Record<string, unknown>).agent_id
+      if (typeof rowAgentId !== 'string' || !ownedIds.includes(rowAgentId)) {
         return fail('You can only save your own day-end data', 'FORBIDDEN')
       }
     } else {
       body.filters = [
         ...(body.filters as unknown[]),
-        { op: 'eq', column: 'agent_id', value: caller.userId },
+        { op: 'in', column: 'agent_id', value: ownedIds },
       ]
     }
   }

@@ -43,6 +43,8 @@ import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 import { numberKey } from '../lib/scanUtils';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { isDayLocked } from '../lib/dayLock';
+import { getIstDateString } from '../lib/dateUtils';
 import { 
   getDayEndDeliveryBoys, 
   fetchAllDayEndReportsForDate, 
@@ -55,9 +57,11 @@ import {
   getWorkingDraftKey,
   filterEntriesCrossDateDuplicates,
   mergeDayEndEntries,
+  fetchSettlementLoadsForDate,
   type DayEndEntry, 
   type DayEndReportSummary,
-  type PastClaimantInfo
+  type PastClaimantInfo,
+  type SettlementLoadSummary
 } from '../lib/dayEndService';
 import type { DeliveryBoy } from '../lib/agentService';
 import { 
@@ -113,9 +117,20 @@ export const StaffDayEndSummary: React.FC = () => {
   };
   
   // Date State
-  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayIso = useMemo(() => getIstDateString(), []);
   const [reportDate, setReportDate] = useState<string>(todayIso);
   const activeDateRef = useRef<string>(todayIso);
+  const [isDayLockedState, setIsDayLockedState] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void isDayLocked(reportDate).then((locked) => {
+      if (mounted) setIsDayLockedState(locked);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [reportDate]);
 
   // Delivery Boys Roster State
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
@@ -128,6 +143,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
   // Multi-Agent Roster Cache for selected date
   const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
+  const [settlementLoadsMap, setSettlementLoadsMap] = useState<Record<string, SettlementLoadSummary>>({});
   const [isLoadingRoster, setIsLoadingRoster] = useState<boolean>(true);
 
   // Past 7 Days Bills Cache for cross-day double-bill scam & duplicate protection
@@ -509,6 +525,31 @@ export const StaffDayEndSummary: React.FC = () => {
     return noSupplyBoyNames.has(selectedBoy.name.trim().toUpperCase());
   }, [selectedBoy, noSupplyBoyNames, isCurrentBoyHasBills]);
 
+  // Morning load + online reconciliation for the boy currently open in the
+  // scanner: e.g. 45/46 bills and 11/11 online.
+  const selectedBoyLoad = useMemo(() => {
+    if (!selectedBoy) return 0;
+    const norm = selectedBoy.name.trim().toUpperCase();
+    return Number(settlementLoadsMap[norm]?.supplied_cylinders || 0);
+  }, [selectedBoy, settlementLoadsMap]);
+
+  const selectedOnlineStats = useMemo(() => {
+    if (!selectedBoy || !activeBpclReport) return { delivered: 0, total: 0 };
+    // Guard against a stale report from the previously selected boy.
+    const reportName = String(activeBpclReport.agent_name || '').trim().toUpperCase();
+    if (reportName && reportName !== selectedBoy.name.trim().toUpperCase()) {
+      return { delivered: 0, total: 0 };
+    }
+    const onlineBills = activeBpclReport.online_bills || [];
+    const total = onlineBills.length;
+    if (total === 0) return { delivered: 0, total: 0 };
+    const onlineNumbers = new Set(onlineBills.map((bill) => numberKey(bill.consumer_number)));
+    const delivered = entries.filter((entry) =>
+      onlineNumbers.has(numberKey(entry.consumer_number))
+    ).length;
+    return { delivered: Math.min(delivered, total), total };
+  }, [activeBpclReport, entries, selectedBoy]);
+
   const activeBoys = useMemo(() => {
     const query = boySearchQuery.trim().toLowerCase();
     return deliveryBoys.filter((boy) => {
@@ -848,10 +889,11 @@ export const StaffDayEndSummary: React.FC = () => {
       setIsLoadingRoster(true);
     }
     try {
-      const [summaries, bpclMap, past7DaysMap] = await Promise.all([
+      const [summaries, bpclMap, past7DaysMap, loads] = await Promise.all([
         fetchAllDayEndReportsForDate(dateStr),
         fetchAllBpclReportsForDate(dateStr),
         fetchPast7DaysBills(dateStr),
+        fetchSettlementLoadsForDate(dateStr),
       ]);
       // A slower request for the previous date must never overwrite the maps of
       // the date the user is now viewing (that could restore old archive /
@@ -859,6 +901,7 @@ export const StaffDayEndSummary: React.FC = () => {
       if (reportDateRef.current !== dateStr) return;
       bpclMapDateRef.current = dateStr;
       setRosterSummaries(summaries);
+      setSettlementLoadsMap(loads || {});
       setBpclReportsMap(bpclMap);
       setPast7DaysBillsMap(past7DaysMap);
       if (selectedBoyRef.current) {
@@ -877,6 +920,30 @@ export const StaffDayEndSummary: React.FC = () => {
   useEffect(() => {
     loadRosterData(reportDate);
   }, [reportDate, loadRosterData]);
+
+  // Keep the morning-load comparison live when the Staff Book saves a
+  // settlement on another device/tab.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const channel = supabase
+      .channel('bgcls_settlement_loads')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
+        () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            void loadRosterData(reportDateRef.current, true);
+          }, 600);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [loadRosterData]);
 
   // Write-Ahead Engine: Immediately writes to local storage (0ms) and auto-saves to database (debounced 800ms)
   const triggerAutoSave = useCallback((updatedEntries: ItemEntry[], boy: DeliveryBoy, dateStr: string) => {
@@ -1850,6 +1917,7 @@ export const StaffDayEndSummary: React.FC = () => {
     // already had bills and produced false "scam" badges until the async reload
     // finished. They are repopulated for `newDate` by loadRosterData.
     setRosterSummaries({});
+    setSettlementLoadsMap({});
     setPast7DaysBillsMap({});
     setBpclReportsMap({});
     setActiveBpclReport(null);
@@ -2596,6 +2664,25 @@ export const StaffDayEndSummary: React.FC = () => {
     const isCheckedDone = bpcl?.checked_done ?? false;
     const pendingCount = bpcl?.pending_bills?.length || 0;
     const onlineCount = bpcl?.online_bills?.length || 0;
+    // How many of the BPCL online bills are actually present in this boy's
+    // Day End list (e.g. 11/11 online).
+    const onlineTotal = onlineCount;
+    const onlineNumbers = new Set(
+      (bpcl?.online_bills || []).map((bill) => numberKey(bill.consumer_number))
+    );
+    const onlineAdded =
+      onlineTotal > 0 && summary?.entries
+        ? summary.entries.filter((entry) =>
+            onlineNumbers.has(numberKey(entry.consumer_number))
+          ).length
+        : 0;
+    const onlineDelivered = Math.min(onlineAdded, onlineTotal);
+
+    const loadInfo = settlementLoadsMap[normName];
+    const loadSupplied = Number(loadInfo?.supplied_cylinders || 0);
+    const billCount = Number(summary?.total_deliveries || 0);
+    const missingBills = loadSupplied > 0 ? Math.max(0, loadSupplied - billCount) : 0;
+    const extraBills = loadSupplied > 0 ? Math.max(0, billCount - loadSupplied) : 0;
 
     // 1. Scanned bills of delivery boys should be green as before!
     // 2. Checked done with pending bills -> amber warning with big alert banner
@@ -2648,11 +2735,16 @@ export const StaffDayEndSummary: React.FC = () => {
                   <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
                     hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
                   }`}>
-                    {summary.total_deliveries} Bills
+                    {billCount}{loadSupplied > 0 ? `/${loadSupplied}` : ''} Bills
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
-                    0 Bills
+                    0{loadSupplied > 0 ? `/${loadSupplied}` : ''} Bills
+                  </span>
+                )}
+                {onlineTotal > 0 && (
+                  <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full">
+                    🌐 {onlineDelivered}/{onlineTotal} Online
                   </span>
                 )}
               </div>
@@ -2708,6 +2800,17 @@ export const StaffDayEndSummary: React.FC = () => {
                 🌐 {onlineCount} Online
               </span>
             )}
+            {missingBills > 0 && (
+              <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs flex items-center gap-0.5 animate-pulse">
+                <AlertTriangle className="w-3 h-3" />
+                {missingBills} Bill{missingBills > 1 ? 's' : ''} Missing
+              </span>
+            )}
+            {extraBills > 0 && (
+              <span className="text-[10px] font-black bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full shadow-xs flex items-center gap-0.5">
+                +{extraBills} Extra Bill{extraBills > 1 ? 's' : ''}
+              </span>
+            )}
             {hasScams && (
               <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-xs animate-pulse flex items-center gap-1">
                 <ShieldAlert className="w-3 h-3" /> {scamInfo.scamCount} SCAM BILL{scamInfo.scamCount > 1 ? 'S' : ''}
@@ -2720,6 +2823,7 @@ export const StaffDayEndSummary: React.FC = () => {
             <div>
               <div className="flex items-center gap-2 flex-wrap text-[11px] font-medium text-slate-600">
                 <span>Std: <b>{summary.domestic_14kg}</b></span>
+                {loadSupplied > 0 && <span className="text-slate-700 font-bold">Load: {loadSupplied}</span>}
                 {summary.composite_10kg > 0 && <span className="text-purple-700 font-bold">10kg: {summary.composite_10kg}</span>}
                 <span className="text-emerald-700 font-bold">Cash: {summary.cash_count}</span>
                 <span className="text-blue-700 font-bold">Online: {summary.upi_count}</span>
@@ -2897,6 +3001,23 @@ export const StaffDayEndSummary: React.FC = () => {
     <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-2xl mx-auto font-sans print:p-0 print:m-0 print:bg-white print:max-w-none print:pb-0 print:min-h-0">
       {/* Day End Page Main Content - Strictly Hidden on Print */}
       <div className="day-end-main-page print:hidden">
+        {isDayLockedState && (
+          <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-amber-900">
+              <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+              <span>
+                {reportDate} is locked. Staff/manager can unlock it in the Staff Book.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/staff/settlement')}
+              className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
+            >
+              Open Staff Book
+            </button>
+          </div>
+        )}
         {/* Top Header Card */}
         <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-3.5 sm:p-4 shadow-xl border border-white/10 mb-3">
         {/* Header Title & Date Picker (Responsive for Mobile) */}
@@ -3492,7 +3613,10 @@ export const StaffDayEndSummary: React.FC = () => {
             <div className="grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
               <div className="bg-blue-50/80 rounded-xl p-1.5 sm:p-2 border border-blue-100">
                 <span className="text-[9px] sm:text-[10px] font-bold text-blue-600 block uppercase truncate">Total Bills</span>
-                <span className="text-sm sm:text-base font-black text-blue-950">{kpis.totalDeliveries}</span>
+                <span className="text-sm sm:text-base font-black text-blue-950">
+                  {kpis.totalDeliveries}
+                  {selectedBoyLoad > 0 ? `/${selectedBoyLoad}` : ''}
+                </span>
               </div>
               <div className="bg-purple-50/80 rounded-xl p-1.5 sm:p-2 border border-purple-100">
                 <span className="text-[9px] sm:text-[10px] font-bold text-purple-600 block uppercase truncate">10kg Lite</span>
@@ -3504,10 +3628,70 @@ export const StaffDayEndSummary: React.FC = () => {
               </div>
               <div className="bg-indigo-50/80 rounded-xl p-1.5 sm:p-2 border border-indigo-100">
                 <span className="text-[9px] sm:text-[10px] font-bold text-indigo-600 block uppercase truncate">Online</span>
-                <span className="text-sm sm:text-base font-black text-indigo-950">{kpis.upiCount}</span>
+                <span className="text-sm sm:text-base font-black text-indigo-950">
+                  {selectedOnlineStats.total > 0
+                    ? `${selectedOnlineStats.delivered}/${selectedOnlineStats.total}`
+                    : kpis.upiCount}
+                </span>
               </div>
             </div>
           </div>
+
+          {/* Load vs bills reconciliation: 45/46 bills, 11/11 online */}
+          {selectedBoyLoad > 0 && (
+            <div
+              className={`rounded-2xl px-3 py-2 border flex flex-wrap items-center justify-between gap-2 ${
+                kpis.totalDeliveries < selectedBoyLoad
+                  ? 'bg-rose-50 border-rose-300'
+                  : kpis.totalDeliveries > selectedBoyLoad
+                  ? 'bg-amber-50 border-amber-300'
+                  : 'bg-emerald-50 border-emerald-200'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs font-black">
+                {kpis.totalDeliveries < selectedBoyLoad ? (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                ) : kpis.totalDeliveries > selectedBoyLoad ? (
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
+                <span
+                  className={
+                    kpis.totalDeliveries < selectedBoyLoad
+                      ? 'text-rose-900'
+                      : kpis.totalDeliveries > selectedBoyLoad
+                      ? 'text-amber-900'
+                      : 'text-emerald-900'
+                  }
+                >
+                  Bills {kpis.totalDeliveries}/{selectedBoyLoad}
+                  {selectedOnlineStats.total > 0 &&
+                    ` • Online ${selectedOnlineStats.delivered}/${selectedOnlineStats.total}`}
+                  {kpis.totalDeliveries < selectedBoyLoad
+                    ? ` • ${selectedBoyLoad - kpis.totalDeliveries} bill${
+                        selectedBoyLoad - kpis.totalDeliveries > 1 ? 's' : ''
+                      } missing`
+                    : kpis.totalDeliveries > selectedBoyLoad
+                    ? ` • ${kpis.totalDeliveries - selectedBoyLoad} extra bill${
+                        kpis.totalDeliveries - selectedBoyLoad > 1 ? 's' : ''
+                      }`
+                    : ' • Load fully billed'}
+                </span>
+              </div>
+              {selectedOnlineStats.total > 0 && (
+                <span
+                  className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                    selectedOnlineStats.delivered < selectedOnlineStats.total
+                      ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                      : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  }`}
+                >
+                  🌐 {selectedOnlineStats.delivered}/{selectedOnlineStats.total} Online
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Double-Bill Scam Alert Banner */}
           {duplicateScamCount > 0 && (
@@ -3537,6 +3721,7 @@ export const StaffDayEndSummary: React.FC = () => {
             agentName={selectedBoy.name}
             reportDate={reportDate}
             scannedEntries={entries}
+            loadCount={selectedBoyLoad}
             onOpenPasteModal={() => setIsBpclModalOpen(true)}
             onToggleCheckedDone={handleToggleActiveCheckedDone}
             onAddBillToScanned={handleAddPendingBillToScanned}

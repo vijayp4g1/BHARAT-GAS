@@ -7,7 +7,7 @@ import { Loader2, User, ShieldCheck, Database } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getFastAuthSession } from '../lib/auth';
 import { hasStaffPermission, refreshCurrentStaffPermission } from '../lib/staffAuth';
-import { freeLocalStorageSpace, isStorageQuotaError, safeSetItem } from '../lib/storageCleanup';
+import { prepareStorageForAuth, isStorageQuotaError, safeSetItem } from '../lib/storageCleanup';
 import { AppRefreshButton } from '../components/AppRefreshButton';
 
 export const Login = () => {
@@ -90,10 +90,15 @@ export const Login = () => {
       sessionStorage.removeItem('bgcls_just_logged_out');
 
       // Login and Supabase auth both need to write to localStorage. A full
-      // quota would abort sign-in (the screenshot's "exceeded the quota"
-      // error), so free re-fetchable caches first. Saved bills, offline data
-      // and recent drafts are kept.
-      freeLocalStorageSpace({ aggressive: false });
+      // quota would abort sign-in (the "exceeded the quota" error), so make
+      // room first. Normal caches are removed; today's caches are only dropped
+      // if the quota is already blocking the session write. If the device still
+      // has no writable storage, try the sign-in anyway: private/restricted
+      // browsers can still authenticate for the current session.
+      const prepared = prepareStorageForAuth();
+      if (!prepared.ok) {
+        console.warn('[Login] localStorage is still tight; attempting sign-in anyway.');
+      }
 
       // Handle Remember Me
       if (rememberMe) {
@@ -111,11 +116,27 @@ export const Login = () => {
         authEmail = `${authEmail}@bgcls.local`;
       }
       
-      const { data, error } = await supabase.auth.signInWithPassword({
+      let authResult = await supabase.auth.signInWithPassword({
         email: authEmail,
         password: password,
       });
 
+      // If the token could not be written because the quota filled up between
+      // the pre-flight check and now, free space once more and retry silently.
+      for (
+        let attempt = 0;
+        attempt < 2 && authResult.error && isStorageQuotaError(authResult.error);
+        attempt++
+      ) {
+        const retry = prepareStorageForAuth();
+        if (!retry.ok) break;
+        authResult = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: password,
+        });
+      }
+
+      const { data, error } = authResult;
       if (error) throw error;
 
       // Signed in again: clear the previous sign-out diagnostic/banner.
@@ -219,11 +240,11 @@ export const Login = () => {
       // safe caches/old drafts and ask for one retry; Supabase auth cannot
       // persist a session without storage.
       if (isStorageQuotaError(error)) {
-        const report = freeLocalStorageSpace({ aggressive: true });
+        const prepared = prepareStorageForAuth();
         toast.error(
-          report.removedKeys > 0 || report.trimmedAudit
+          prepared.ok
             ? 'Device storage was full. Space has been freed — please tap Login again.'
-            : 'Device storage is full. Close other browser tabs/apps and try again.',
+            : 'Device storage is still full. Close other apps/tabs (or clear site data) and try again.',
           { id: 'storage-full', duration: 8000 }
         );
         return;
@@ -252,17 +273,22 @@ export const Login = () => {
   };
 
   const handleFreeSpace = () => {
-    const report = freeLocalStorageSpace({ aggressive: false });
-    const kb = Math.round(report.freedBytes / 1024);
-    if (report.removedKeys > 0 || report.trimmedAudit) {
+    const prepared = prepareStorageForAuth();
+    const kb = Math.round(prepared.freedBytes / 1024);
+    if (prepared.removedKeys > 0 || prepared.trimmedAudit) {
       toast.success(
-        `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills, today's data and recent drafts are kept.`,
+        `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills and recent drafts are kept.`,
         { id: 'storage-free', duration: 5000 }
       );
+    } else if (prepared.ok) {
+      toast('Storage already has room for login. No cleanup needed.', {
+        icon: 'ℹ️',
+        id: 'storage-free',
+      });
     } else {
-      toast(
-        'No re-fetchable cache to remove. Your saved data is already minimal.',
-        { icon: 'ℹ️', id: 'storage-free' }
+      toast.error(
+        'Could not free enough device storage. Clear site data for this app or free phone storage.',
+        { id: 'storage-free', duration: 7000 }
       );
     }
   };
@@ -287,13 +313,16 @@ export const Login = () => {
   }
 
   return (
-    <div className="min-h-screen bg-premium-gradient flex flex-col items-center justify-center p-4 overflow-hidden relative">
+    <div className="min-h-screen bg-premium-gradient overflow-y-auto relative">
       {/* Decorative background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
       <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
       <div className="absolute bottom-[-20%] left-[20%] w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
-      
-      <div className="glass-card rounded-[2rem] shadow-2xl overflow-hidden max-w-md w-full relative z-10 border border-white/20">
+
+      {/* Content column: the repair buttons and version sit BELOW the card so
+          they can never cover the login button on small screens. */}
+      <div className="min-h-screen w-full flex flex-col items-center justify-center gap-4 px-4 py-8 relative z-10">
+        <div className="glass-card rounded-[2rem] shadow-2xl overflow-hidden max-w-md w-full relative border border-white/20">
         <div className="p-10 text-center relative">
           <div className="absolute inset-0 bg-white/5 backdrop-blur-sm pointer-events-none"></div>
           <div className="relative z-10">
@@ -386,30 +415,33 @@ export const Login = () => {
             </button>
           </form>
         </div>
-      </div>
-      
-      {/* Local storage/quota repair */}
-      <button
-        type="button"
-        onClick={handleFreeSpace}
-        className="absolute bottom-24 z-10 flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
-        title="Free re-fetchable caches and old drafts"
-      >
-        <Database size={12} />
-        <span>Storage full? Free space</span>
-      </button>
+        </div>
 
-      {/* App cache repair — useful when Chrome is serving an old app version */}
-      <AppRefreshButton
-        variant="link"
-        className="absolute bottom-16 z-10 flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
-        label="App not updating? Clear cache"
-        title="Refresh app / clear cache"
-      />
+        {/* Local storage/quota repair — in normal flow, never over the form */}
+        <div className="flex flex-col items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleFreeSpace}
+            className="flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
+            title="Free re-fetchable caches and old drafts"
+          >
+            <Database size={12} />
+            <span>Storage full? Free space</span>
+          </button>
 
-      {/* Version Label */}
-      <div className="absolute bottom-6 text-white/50 text-xs font-medium font-mono tracking-wider z-10 backdrop-blur-sm bg-black/10 px-3 py-1 rounded-full border border-white/10">
-        v2.0.0
+          {/* App cache repair — useful when Chrome is serving an old app version */}
+          <AppRefreshButton
+            variant="link"
+            className="flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/90 bg-black/10 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10"
+            label="App not updating? Clear cache"
+            title="Refresh app / clear cache"
+          />
+        </div>
+
+        {/* Version Label */}
+        <div className="text-white/50 text-xs font-medium font-mono tracking-wider backdrop-blur-sm bg-black/10 px-3 py-1 rounded-full border border-white/10 shrink-0">
+          v2.0.0
+        </div>
       </div>
     </div>
   );

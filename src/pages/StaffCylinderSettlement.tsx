@@ -42,9 +42,13 @@ import { performLogout } from '../lib/auth';
 import { AppRefreshButton } from '../components/AppRefreshButton';
 import { isCurrentStaffOrManager } from '../lib/staffAuth';
 import { fetchCylinderBookDeliveryBoys } from '../lib/agentService';
-import { findSettlementRowForAgent, extractBpclReportFromNotes } from '../lib/bpclReportService';
+import { findSettlementRowForAgent, extractBpclReportFromNotes, fetchAllBpclReportsForDate } from '../lib/bpclReportService';
 import { extractScannedBillsFromNotes } from '../lib/dayEndService';
 import { numberKey } from '../lib/scanUtils';
+import { getIstDateString, shiftDateString } from '../lib/dateUtils';
+import { fetchAgencySettings, saveAgencyRate } from '../lib/agencySettings';
+import { isDayLocked, unlockDay } from '../lib/dayLock';
+import { logGodownAudit } from '../lib/godownAudit';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 import { AddDeliveryBoyModal } from '../components/AddDeliveryBoyModal';
 import { ManageDeliveryBoysModal } from '../components/ManageDeliveryBoysModal';
@@ -138,29 +142,13 @@ type DisplaySettlement = SettlementRecord & {
   cash_pending: boolean;
 };
 
-/**
- * The godown operates on IST dates. `toISOString()` is UTC, so between
- * 00:00 and 05:30 IST the Staff Book used to open on yesterday's date.
- */
-const getIstDateString = (date: Date = new Date()): string => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const year = parts.find((p) => p.type === 'year')?.value;
-  const month = parts.find((p) => p.type === 'month')?.value;
-  const day = parts.find((p) => p.type === 'day')?.value;
-  return `${year}-${month}-${day}`;
-};
-
-const shiftDateString = (dateStr: string, days: number): string => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-};
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 export const StaffCylinderSettlement: React.FC = () => {
   const navigate = useNavigate();
@@ -195,6 +183,7 @@ export const StaffCylinderSettlement: React.FC = () => {
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
   const [isLoadingSettlements, setIsLoadingSettlements] = useState<boolean>(true);
+  const [isDayLockedState, setIsDayLockedState] = useState<boolean>(false);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -221,6 +210,7 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Staff User profile & role
   const currentUserRole = localStorage.getItem('bgcls_user_role') || 'AGENT';
+  const canEditRate = currentUserRole === 'MANAGER';
   const staffUserName = useMemo(() => {
     const raw = localStorage.getItem('bgcls_remember_username') || '';
     if (raw) return raw.replace('@', '');
@@ -260,6 +250,37 @@ export const StaffCylinderSettlement: React.FC = () => {
     refreshDeliveryBoys();
   }, [refreshDeliveryBoys]);
 
+  // Shared manager-only cylinder rate (falls back to localStorage until the
+  // settings migration is applied).
+  useEffect(() => {
+    let mounted = true;
+    const sync = async () => {
+      const settings = await fetchAgencySettings();
+      if (!mounted || !settings) return;
+      setCylinderRate(settings.cylinder_rate);
+      setFormCylinderRate((current) => (editingId ? current : settings.cylinder_rate));
+    };
+    void sync();
+    window.addEventListener('online', sync);
+    return () => {
+      mounted = false;
+      window.removeEventListener('online', sync);
+    };
+  }, [editingId]);
+
+  // Automatic day lock: past IST dates are locked unless a day_unlocks row
+  // exists. Staff/manager can unlock from the banner.
+  useEffect(() => {
+    let mounted = true;
+    void isDayLocked(selectedDate).then((locked) => {
+      if (!mounted) return;
+      setIsDayLockedState(locked);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [selectedDate]);
+
   // Fetch settlements for the selected date (Dexie + Supabase sync)
   const fetchSettlements = useCallback(async (date: string) => {
     setIsLoadingSettlements(true);
@@ -281,22 +302,7 @@ export const StaffCylinderSettlement: React.FC = () => {
             .eq('settlement_date', date);
 
           if (!error && remoteData) {
-            // Use the cloud price only as a first-time initialisation. Do not
-            // overwrite a rate the user has explicitly saved on this device:
-            // older rows (e.g. day-end-created ones at ₹994) would otherwise
-            // keep pulling the header rate back to their old price.
-            if (remoteData.length > 0 && !localStorage.getItem('bgcls_cylinder_rate')) {
-              const latest = [...remoteData].sort(
-                (a: any, b: any) =>
-                  new Date(b.updated_at || 0).getTime() -
-                  new Date(a.updated_at || 0).getTime()
-              )[0];
-              const serverRate = Number(latest?.cylinder_price);
-              if (serverRate > 0) {
-                setCylinderRate(serverRate);
-                localStorage.setItem('bgcls_cylinder_rate', String(serverRate));
-              }
-            }
+            // The shared agency rate is handled by the agency_settings effect.
 
             // Remove any local synced records that were deleted on another device
             const remoteIds = new Set(remoteData.map((r: any) => r.id));
@@ -489,6 +495,15 @@ export const StaffCylinderSettlement: React.FC = () => {
           }, 600);
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agency_settings' },
+        () => {
+          void fetchAgencySettings().then((settings) => {
+            if (settings) setCylinderRate(settings.cylinder_rate);
+          });
+        }
+      )
       .subscribe();
 
     syncChannelRef.current = channel;
@@ -511,17 +526,44 @@ export const StaffCylinderSettlement: React.FC = () => {
     };
   }, [selectedDate, fetchSettlements]);
 
-  // Save cylinder rate
-  const handleSaveRate = (newRate: number) => {
-    if (newRate <= 0) {
+  // Save cylinder rate (manager-only shared setting)
+  const handleSaveRate = async (newRate: number) => {
+    if (!canEditRate) {
+      toast.error('Only a manager can change the shared cylinder rate.');
+      return;
+    }
+    if (!(newRate > 0)) {
       toast.error('Invalid rate amount');
       return;
     }
+
+    const previousRate = cylinderRate;
+    const result = await saveAgencyRate(newRate);
+    if (!result.ok) {
+      toast.error(result.error || 'Could not save the cylinder rate');
+      return;
+    }
+
     setCylinderRate(newRate);
-    localStorage.setItem('bgcls_cylinder_rate', String(newRate));
     if (!editingId) setFormCylinderRate(newRate);
     setIsRateModalOpen(false);
-    toast.success(`Rate updated to ₹${newRate} / cyl`);
+
+    void logGodownAudit({
+      action: 'RATE_CHANGE',
+      entity_type: 'settings',
+      before_data: { rate: previousRate },
+      after_data: { rate: newRate },
+      source: 'staff_book',
+    });
+
+    if (result.shared) {
+      toast.success(`Rate updated to ₹${newRate} / cyl for all devices`);
+    } else {
+      toast(
+        'Rate saved on this device. Apply the settings migration to share it with all devices.',
+        { icon: 'ℹ️', duration: 6000 }
+      );
+    }
   };
 
   // Calculations for Current Modal Form
@@ -601,14 +643,44 @@ export const StaffCylinderSettlement: React.FC = () => {
     const totalNetRevenue = displaySettlements.reduce((acc, s) => acc + Number(s.total_amount || 0), 0);
     const netCashDifference = totalCashReceived - totalCashExpected;
 
+    // "Cash pending" (handover not counted yet) is not the same as a confirmed
+    // shortage. Pending money must not make the agency badge show a huge
+    // negative shortage; it is reported separately.
+    const pendingCashRows = displaySettlements.filter(
+      (s) => Number(s.actual_cash || 0) === 0 && Number(s.expected_cash || 0) > 0
+    );
+    const pendingCashExpected = pendingCashRows.reduce(
+      (acc, s) => acc + Number(s.expected_cash || 0),
+      0
+    );
+    const pendingCashQty = pendingCashRows.reduce(
+      (acc, s) => acc + Number(s.cash_cylinders || 0),
+      0
+    );
+    const pendingCashBoys = pendingCashRows.length;
+
+    const confirmedRows = displaySettlements.filter(
+      (s) => Number(s.actual_cash || 0) > 0 || Number(s.expected_cash || 0) === 0
+    );
+    const confirmedCashExpected = confirmedRows.reduce(
+      (acc, s) => acc + Number(s.expected_cash || 0),
+      0
+    );
+    const confirmedCashReceived = confirmedRows.reduce(
+      (acc, s) => acc + Number(s.actual_cash || 0),
+      0
+    );
+    const confirmedNetCashDifference =
+      confirmedCashReceived - confirmedCashExpected;
+
     // Godown inventory calculation:
     // Empties should equal Total Supplied - Full Returned
     const netExpectedEmpties = totalSupplied - totalReturnedFull;
     const godownEmptyDiff = totalEmpties - netExpectedEmpties;
 
-    // A boy with unrecorded physical cash is still a cash shortage for the
-    // agency, but the card shows it as "Pending" instead of a red shortage.
-    const cashShortages = displaySettlements
+    // Only counted rows can be called a confirmed shortage. Pending rows are
+    // shown separately as "Cash Pending".
+    const cashShortages = confirmedRows
       .filter((s) => Number(s.cash_difference) < 0)
       .sort((a, b) => Number(a.cash_difference) - Number(b.cash_difference));
 
@@ -634,14 +706,48 @@ export const StaffCylinderSettlement: React.FC = () => {
       totalDueAmount,
       totalNetRevenue,
       netCashDifference,
+      confirmedCashExpected,
+      confirmedCashReceived,
+      confirmedNetCashDifference,
+      pendingCashExpected,
+      pendingCashQty,
+      pendingCashBoys,
       godownEmptyDiff,
       godownExpectedEmpties: Math.max(0, netExpectedEmpties),
       boyCount: displaySettlements.length,
       boysWithShortage,
-      firstShortageBoy: cashShortages[0]?.agent_name || boysWithShortage[0]?.agent_name || null,
+      firstShortageBoy: cashShortages[0]?.agent_name || null,
       shortageBoyCount: cashShortages.length,
     };
   }, [displaySettlements]);
+
+  // Unlock an auto-locked past date (staff or manager).
+  const handleUnlockDay = async () => {
+    if (!isCurrentStaffOrManager()) {
+      toast.error('Staff permission required to unlock a day.');
+      return;
+    }
+    const reason = window.prompt(
+      `Unlock ${selectedDate} for editing?\n\nEnter a reason (required):`
+    );
+    if (!reason || !reason.trim()) return;
+
+    const result = await unlockDay(selectedDate, reason.trim());
+    if (!result.ok) {
+      toast.error(result.error || 'Could not unlock this day');
+      return;
+    }
+
+    setIsDayLockedState(false);
+    void logGodownAudit({
+      action: 'DAY_UNLOCK',
+      entity_type: 'day',
+      settlement_date: selectedDate,
+      reason: reason.trim(),
+      source: 'staff_book',
+    });
+    toast.success(`${selectedDate} unlocked for editing`);
+  };
 
   // Date Navigation
   const changeDateBy = (days: number) => {
@@ -684,6 +790,19 @@ export const StaffCylinderSettlement: React.FC = () => {
     });
   }, [displaySettlements, searchQuery, statusFilter]);
 
+  // Boys who still have no settlement row for the date. Archived / No Supply
+  // boys are skipped at print time (see handlePrintFinalPdf), because they are
+  // recorded in the BPCL report instead of the settlement table.
+  const unaccountedBoys = useMemo(() => {
+    return agents.filter((boy: any) => {
+      const norm = String(boy.name || '').trim().toUpperCase();
+      if (!norm) return false;
+      return !settlements.some(
+        (s) => s.agent_id === boy.id || s.agent_name.trim().toUpperCase() === norm
+      );
+    });
+  }, [agents, settlements]);
+
   // Select an agent and automatically check if they already have an existing settlement for this date
   const handleSelectAgent = (agentId: string) => {
     setSelectedAgentId(agentId);
@@ -720,6 +839,10 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Open Speed Entry Modal
   const handleOpenNewForm = (preselectedAgentId?: string) => {
+    if (isDayLockedState) {
+      toast.error('This day is locked. Unlock it before editing.');
+      return;
+    }
     const targetAgentId = preselectedAgentId || agents[0]?.id || '';
     handleSelectAgent(targetAgentId);
     setIsFormOpen(true);
@@ -727,6 +850,10 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Open Form to Edit
   const handleEdit = (item: SettlementRecord) => {
+    if (isDayLockedState) {
+      toast.error('This day is locked. Unlock it before editing.');
+      return;
+    }
     setEditingId(item.id);
     setSelectedAgentId(item.agent_id);
     setFormCylinderRate(Number(item.cylinder_price) > 0 ? Number(item.cylinder_price) : cylinderRate);
@@ -743,12 +870,88 @@ export const StaffCylinderSettlement: React.FC = () => {
     setIsFormOpen(true);
   };
 
+  // Clear a previously auto-filled / partial cash amount so the row goes back
+  // to "Cash Pending" instead of being counted as a confirmed shortage.
+  const handleMarkCashPending = async (item: SettlementRecord) => {
+    if (isDayLockedState) {
+      toast.error('This day is locked. Unlock it before editing.');
+      return;
+    }
+    if (
+      !confirm(
+        `Mark physical cash as NOT COUNTED for ${item.agent_name}?\n\nThe row will move to Cash Pending until you enter the real amount.`
+      )
+    ) {
+      return;
+    }
+
+    const lockedNow = await isDayLocked(selectedDate, { force: true });
+    if (lockedNow) {
+      setIsDayLockedState(true);
+      toast.error('This day is locked. Unlock it before editing.');
+      return;
+    }
+
+    const derived = deriveSettlementMoney({ ...item, actual_cash: 0 }, cylinderRate);
+    const nowIso = new Date().toISOString();
+    const fields = {
+      actual_cash: 0,
+      cash_difference: derived.cash_difference,
+      status: derived.status,
+      updated_at: nowIso,
+    };
+
+    try {
+      const { data: updatedRows, error } = await supabase
+        .from('staff_cylinder_settlements')
+        .update(fields)
+        .eq('id', item.id)
+        .select('id');
+
+      if (error) throw new Error(error.message);
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('No matching settlement row was updated.');
+      }
+
+      await db.staff_cylinder_settlements.update(item.id, fields);
+      await fetchSettlements(selectedDate);
+
+      void logGodownAudit({
+        action: 'SETTLEMENT_SAVE',
+        entity_type: 'settlement',
+        entity_id: item.id,
+        settlement_date: selectedDate,
+        agent_id: item.agent_id,
+        agent_name: item.agent_name,
+        before_data: item,
+        after_data: { ...item, ...fields },
+        reason: 'Cash marked as not counted / pending',
+        source: 'staff_book',
+      });
+
+      toast.success(`Cash marked pending for ${item.agent_name}`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not mark cash as pending');
+    }
+  };
+
   // Delete Settlement
   const handleDelete = async (id: string, name: string) => {
+    if (isDayLockedState) {
+      toast.error('This day is locked. Unlock it before deleting.');
+      return;
+    }
     if (!confirm(`Are you sure you want to remove the settlement record for ${name}?`)) return;
 
     if (!navigator.onLine) {
       toast.error('Connect to the internet to delete a saved settlement.');
+      return;
+    }
+
+    const lockedNow = await isDayLocked(selectedDate, { force: true });
+    if (lockedNow) {
+      setIsDayLockedState(true);
+      toast.error('This day is locked. Unlock it before deleting.');
       return;
     }
 
@@ -787,6 +990,19 @@ export const StaffCylinderSettlement: React.FC = () => {
 
       await db.staff_cylinder_settlements.delete(id);
       setSettlements((prev) => prev.filter((s) => s.id !== id));
+
+      void logGodownAudit({
+        action: 'SETTLEMENT_DELETE',
+        entity_type: 'settlement',
+        entity_id: id,
+        settlement_date: selectedDate,
+        agent_id: localRecord?.agent_id || null,
+        agent_name: localRecord?.agent_name || name,
+        before_data: localRecord || null,
+        after_data: null,
+        source: 'staff_book',
+      });
+
       toast.success(`Removed settlement for ${name}`);
 
       // Broadcast deletion event to other connected staff/managers instantly
@@ -810,6 +1026,18 @@ export const StaffCylinderSettlement: React.FC = () => {
   // Save Settlement (Dexie + Supabase + Realtime Broadcast)
   const handleSaveSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isDayLockedState) {
+      toast.error('This day is locked. Unlock it before saving.');
+      return;
+    }
+
+    const lockedNow = await isDayLocked(selectedDate, { force: true });
+    if (lockedNow) {
+      setIsDayLockedState(true);
+      toast.error('This day is locked. Unlock it before saving.');
+      return;
+    }
 
     if (!selectedAgentId) {
       toast.error('Please select a Delivery Boy');
@@ -974,6 +1202,19 @@ export const StaffCylinderSettlement: React.FC = () => {
       await fetchSettlements(selectedDate);
       setIsFormOpen(false);
 
+      void logGodownAudit({
+        action: 'SETTLEMENT_SAVE',
+        entity_type: 'settlement',
+        entity_id: record.id,
+        settlement_date: selectedDate,
+        agent_id: selectedAgentId,
+        agent_name: agentName,
+        before_data: existing || null,
+        after_data: record,
+        reason: cloudSynced ? undefined : 'saved locally / cloud sync pending',
+        source: 'staff_book',
+      });
+
       if (cloudSynced) {
         toast.success(`Settlement saved for ${agentName}!`);
       } else if (!navigator.onLine) {
@@ -1046,17 +1287,26 @@ export const StaffCylinderSettlement: React.FC = () => {
     msg += `💵 *CASH RECONCILIATION:*\n`;
     msg += `• Expected: ₹${dailyKpis.totalCashExpected.toLocaleString('en-IN')}\n`;
     msg += `• Physical Received: ₹${dailyKpis.totalCashReceived.toLocaleString('en-IN')}\n`;
-    if (dailyKpis.netCashDifference === 0) {
-      msg += `• Net Status: *✅ 100% Cash Balanced*\n`;
-    } else if (dailyKpis.netCashDifference < 0) {
-      msg += `• Net Status: *❌ Shortage: -₹${Math.abs(dailyKpis.netCashDifference).toLocaleString('en-IN')}*\n`;
+    if (dailyKpis.pendingCashBoys > 0) {
+      msg += `• Cash Pending: ₹${dailyKpis.pendingCashExpected.toLocaleString('en-IN')} (${dailyKpis.pendingCashBoys} ${dailyKpis.pendingCashBoys === 1 ? 'boy' : 'boys'} not counted)\n`;
+    }
+    if (dailyKpis.confirmedNetCashDifference === 0) {
+      msg += `• Confirmed Status: *✅ 100% Cash Balanced*\n`;
+    } else if (dailyKpis.confirmedNetCashDifference < 0) {
+      msg += `• Confirmed Status: *❌ Shortage: -₹${Math.abs(dailyKpis.confirmedNetCashDifference).toLocaleString('en-IN')}*\n`;
     } else {
-      msg += `• Net Status: *⚠️ Excess: +₹${dailyKpis.netCashDifference.toLocaleString('en-IN')}*\n`;
+      msg += `• Confirmed Status: *⚠️ Excess: +₹${dailyKpis.confirmedNetCashDifference.toLocaleString('en-IN')}*\n`;
     }
 
     msg += `\n🚚 *DELIVERY BOYS BREAKDOWN (${displaySettlements.length}):*\n`;
     displaySettlements.forEach((s, idx) => {
-      const statusIcon = s.cash_difference === 0 ? '✅' : s.cash_difference < 0 ? `❌ (Short -₹${Math.abs(s.cash_difference)})` : `⚠️ (+₹${s.cash_difference})`;
+      const statusIcon = s.cash_pending
+        ? `⏳ (Pending ₹${s.expected_cash.toLocaleString('en-IN')})`
+        : s.cash_difference === 0
+        ? '✅'
+        : s.cash_difference < 0
+        ? `❌ (Short -₹${Math.abs(s.cash_difference).toLocaleString('en-IN')})`
+        : `⚠️ (+₹${s.cash_difference.toLocaleString('en-IN')})`;
       msg += `${idx + 1}. *${s.agent_name}*: ${s.supplied_cylinders} Load | ${s.cash_cylinders} Cash (₹${s.expected_cash.toLocaleString('en-IN')}) | ${s.online_cylinders} Online | ${s.upi_cylinders} UPI | ${s.empty_cylinders} Empties | Cash: ₹${s.actual_cash.toLocaleString('en-IN')} ${statusIcon}\n`;
     });
 
@@ -1131,7 +1381,8 @@ export const StaffCylinderSettlement: React.FC = () => {
       'Cash Cylinders': s.cash_cylinders,
       'Expected Cash (₹)': s.expected_cash,
       'Actual Cash Received (₹)': s.actual_cash,
-      'Cash Difference (₹)': s.cash_difference,
+      'Cash Difference (₹)': s.cash_pending ? 0 : s.cash_difference,
+      'Cash Pending (₹)': s.cash_pending ? s.expected_cash : 0,
       'Online Cylinders (BPCL)': s.online_cylinders,
       'Online Amount (₹)': s.online_amount,
       'UPI Cylinders': s.upi_cylinders,
@@ -1140,7 +1391,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       'Full Returned': s.returned_full_cylinders,
       'Empty Cylinders Returned': s.empty_cylinders,
       'Total Value (₹)': s.total_amount,
-      'Status': s.status,
+      'Status': s.cash_pending ? 'CASH PENDING' : s.status,
       'Staff Notes': getDisplayRemarks(s.notes),
     }));
 
@@ -1151,7 +1402,8 @@ export const StaffCylinderSettlement: React.FC = () => {
       'Cash Cylinders': dailyKpis.totalCashQty,
       'Expected Cash (₹)': dailyKpis.totalCashExpected,
       'Actual Cash Received (₹)': dailyKpis.totalCashReceived,
-      'Cash Difference (₹)': dailyKpis.netCashDifference,
+      'Cash Difference (₹)': dailyKpis.confirmedNetCashDifference,
+      'Cash Pending (₹)': dailyKpis.pendingCashExpected,
       'Online Cylinders (BPCL)': dailyKpis.totalOnlineQty,
       'Online Amount (₹)': dailyKpis.totalOnlineAmount,
       'UPI Cylinders': dailyKpis.totalUpiQty,
@@ -1160,7 +1412,13 @@ export const StaffCylinderSettlement: React.FC = () => {
       'Full Returned': dailyKpis.totalReturnedFull,
       'Empty Cylinders Returned': dailyKpis.totalEmpties,
       'Total Value (₹)': dailyKpis.totalNetRevenue,
-      'Status': dailyKpis.netCashDifference === 0 ? 'BALANCED' : dailyKpis.netCashDifference < 0 ? 'SHORTAGE' : 'EXCESS',
+      'Status': dailyKpis.pendingCashBoys > 0
+        ? `PENDING (${dailyKpis.pendingCashBoys} ${dailyKpis.pendingCashBoys === 1 ? 'boy' : 'boys'})`
+        : dailyKpis.confirmedNetCashDifference === 0
+        ? 'BALANCED'
+        : dailyKpis.confirmedNetCashDifference < 0
+        ? 'SHORTAGE'
+        : 'EXCESS',
       'Staff Notes': 'Agency Grand Totals',
     });
 
@@ -1169,6 +1427,172 @@ export const StaffCylinderSettlement: React.FC = () => {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Cylinder Settlement');
     XLSX.writeFile(workbook, `BharatGas_Settlement_${selectedDate}.xlsx`);
     toast.success('Downloaded Excel settlement report!');
+  };
+
+  // Final day register (browser Print → Save as PDF). Enabled only after every
+  // active delivery boy is settled or marked Archived / No Supply.
+  const handlePrintFinalPdf = async () => {
+    if (settlements.length === 0) {
+      toast.error('No settlements recorded for this date yet');
+      return;
+    }
+
+    // Archived / No Supply boys have no settlement row; their status lives in
+    // the BPCL report. Resolve it live so the gate reflects the latest state.
+    const archivedNames = new Set<string>();
+    try {
+      const reports = await fetchAllBpclReportsForDate(selectedDate);
+      Object.values(reports).forEach((report: any) => {
+        const norm = String(report?.agent_name || '').trim().toUpperCase();
+        if (norm && (report?.archived || report?.no_supply)) {
+          archivedNames.add(norm);
+        }
+      });
+    } catch (err) {
+      console.warn('Could not check archived/no-supply boys for the final PDF:', err);
+    }
+
+    const reallyMissing = unaccountedBoys.filter(
+      (b: any) => !archivedNames.has(String(b.name || '').trim().toUpperCase())
+    );
+
+    if (reallyMissing.length > 0) {
+      const names = reallyMissing.map((b: any) => b.name).join(', ');
+      toast.error(
+        `${reallyMissing.length} ${reallyMissing.length === 1 ? 'boy is' : 'boys are'} still not settled: ${names}`,
+        { id: 'final-pdf-pending', duration: 7000 }
+      );
+      return;
+    }
+
+    const rows = [...displaySettlements].sort((a, b) =>
+      a.agent_name.localeCompare(b.agent_name)
+    );
+    const money = (n: number) => Number(n || 0).toLocaleString('en-IN');
+    const cashStatus =
+      dailyKpis.pendingCashBoys > 0
+        ? `Cash Pending ₹${money(dailyKpis.pendingCashExpected)} (${dailyKpis.pendingCashBoys} boys)`
+        : dailyKpis.confirmedNetCashDifference === 0
+        ? 'Cash Balanced'
+        : dailyKpis.confirmedNetCashDifference < 0
+        ? `Shortage ₹${money(Math.abs(dailyKpis.confirmedNetCashDifference))}`
+        : `Excess ₹${money(dailyKpis.confirmedNetCashDifference)}`;
+
+    const rowHtml = rows
+      .map((s) => {
+        const status = s.cash_pending ? 'CASH PENDING' : s.status;
+        const statusClass = s.cash_pending
+          ? 'pending'
+          : s.status === 'BALANCED'
+          ? 'ok'
+          : s.status === 'SHORTAGE'
+          ? 'bad'
+          : 'excess';
+        return `<tr>
+          <td>${escapeHtml(s.agent_name)}</td>
+          <td class="num">${s.supplied_cylinders}</td>
+          <td class="num">${s.cash_cylinders}</td>
+          <td class="num">${s.online_cylinders}</td>
+          <td class="num">${s.upi_cylinders}</td>
+          <td class="num">${s.due_cylinders}</td>
+          <td class="num">${s.empty_cylinders}</td>
+          <td class="num">₹${money(s.expected_cash)}</td>
+          <td class="num">₹${money(s.actual_cash)}</td>
+          <td>${s.cash_pending ? `Pending ₹${money(s.expected_cash)}` : `₹${money(s.cash_difference)}`}</td>
+          <td class="${statusClass}">${escapeHtml(status)}</td>
+        </tr>`;
+      })
+      .join('');
+
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8" />
+<title>Bharat Gas Godown Register ${escapeHtml(selectedDate)}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 18px; margin: 0 0 2px; text-align: center; letter-spacing: .4px; }
+  h2 { font-size: 12px; margin: 0 0 10px; text-align: center; font-weight: normal; }
+  .meta { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+  .kpi { border: 1px solid #999; padding: 5px 7px; font-size: 10px; }
+  .kpi b { display: block; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+  th, td { border: 1px solid #777; padding: 3px 4px; text-align: left; }
+  th { background: #eee; font-size: 9px; text-transform: uppercase; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: bold; background: #f3f3f3; }
+  .ok { color: #067a3a; font-weight: bold; }
+  .bad { color: #b00020; font-weight: bold; }
+  .pending { color: #a15c00; font-weight: bold; }
+  .excess { color: #8a5a00; font-weight: bold; }
+  .sign { display: flex; justify-content: space-between; margin-top: 18px; font-size: 10px; }
+  .sign div { border-top: 1px solid #333; width: 28%; padding-top: 4px; text-align: center; }
+  .note { margin-top: 8px; font-size: 9px; color: #555; }
+</style></head><body>
+  <h1>SIDDHARTHA BHARAT GAS</h1>
+  <h2>Daily Godown Cylinder Register — ${escapeHtml(selectedDate)}</h2>
+  <div class="meta">
+    <span>Rate: ₹${money(cylinderRate)} / 14.2 kg cylinder</span>
+    <span>Boys settled: ${rows.length}</span>
+    <span>Printed: ${escapeHtml(new Date().toLocaleString('en-IN'))}</span>
+  </div>
+  <div class="kpis">
+    <div class="kpi">Filled Load <b>${dailyKpis.totalSupplied} cyl</b></div>
+    <div class="kpi">Empties In <b>${dailyKpis.totalEmpties} cyl</b></div>
+    <div class="kpi">Cash Sales <b>₹${money(dailyKpis.totalCashExpected)} (${dailyKpis.totalCashQty} cyl)</b></div>
+    <div class="kpi">BPCL Paid <b>₹${money(dailyKpis.totalOnlineAmount)} (${dailyKpis.totalOnlineQty} cyl)</b></div>
+    <div class="kpi">UPI / QR <b>₹${money(dailyKpis.totalUpiAmount)} (${dailyKpis.totalUpiQty} cyl)</b></div>
+    <div class="kpi">Due / Credit <b>₹${money(dailyKpis.totalDueAmount)} (${dailyKpis.totalDueQty} cyl)</b></div>
+    <div class="kpi">Total Sales <b>₹${money(dailyKpis.totalNetRevenue)}</b></div>
+    <div class="kpi">Cash Status <b>${escapeHtml(cashStatus)}</b></div>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Delivery Boy</th><th>Load</th><th>Cash</th><th>BPCL</th><th>UPI</th>
+      <th>Due</th><th>Empties</th><th>Expected</th><th>Received</th>
+      <th>Cash Difference / Pending</th><th>Status</th>
+    </tr></thead>
+    <tbody>${rowHtml}</tbody>
+    <tfoot><tr>
+      <td>TOTAL</td>
+      <td class="num">${dailyKpis.totalSupplied}</td>
+      <td class="num">${dailyKpis.totalCashQty}</td>
+      <td class="num">${dailyKpis.totalOnlineQty}</td>
+      <td class="num">${dailyKpis.totalUpiQty}</td>
+      <td class="num">${dailyKpis.totalDueQty}</td>
+      <td class="num">${dailyKpis.totalEmpties}</td>
+      <td class="num">₹${money(dailyKpis.totalCashExpected)}</td>
+      <td class="num">₹${money(dailyKpis.totalCashReceived)}</td>
+      <td>${escapeHtml(cashStatus)}</td>
+      <td>${dailyKpis.pendingCashBoys > 0 ? 'PENDING' : 'FINAL'}</td>
+    </tr></tfoot>
+  </table>
+  <div class="sign">
+    <div>Godown Staff</div>
+    <div>Manager</div>
+    <div>Owner</div>
+  </div>
+  <div class="note">
+    This register is generated after all active delivery boys are settled or marked Archived / No Supply.
+    Cash Pending means the physical handover for that row has not been counted yet.
+  </div>
+</body></html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      toast.error('Allow pop-ups to print the final PDF.');
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => {
+      try {
+        win.print();
+      } catch (_) {}
+    }, 400);
   };
 
   const handleLogout = async () => {
@@ -1222,6 +1646,10 @@ export const StaffCylinderSettlement: React.FC = () => {
           {/* Prominent Tap-to-Edit Rate Badge */}
           <button
             onClick={() => {
+              if (!canEditRate) {
+                toast.error('Only a manager can change the shared cylinder rate.');
+                return;
+              }
               setTempRate(cylinderRate);
               setIsRateModalOpen(true);
             }}
@@ -1285,6 +1713,17 @@ export const StaffCylinderSettlement: React.FC = () => {
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
+                    handlePrintFinalPdf();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-bold text-slate-200 hover:text-white hover:bg-slate-800 rounded-xl transition-colors text-left"
+                >
+                  <Receipt size={15} className="text-indigo-400" />
+                  <span>Final Day PDF</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
                     fetchSettlements(selectedDate);
                     toast.success('Syncing with database...');
                   }}
@@ -1297,6 +1736,10 @@ export const StaffCylinderSettlement: React.FC = () => {
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
+                    if (!canEditRate) {
+                      toast.error('Only a manager can change the shared cylinder rate.');
+                      return;
+                    }
                     setTempRate(cylinderRate);
                     setIsRateModalOpen(true);
                   }}
@@ -1414,6 +1857,27 @@ export const StaffCylinderSettlement: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* AUTOMATIC DAY LOCK BANNER */}
+      {isDayLockedState && (
+        <section className="bg-amber-500/10 border-y border-amber-500/30 px-3.5 sm:px-5 py-2.5">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-amber-200 text-xs font-bold">
+              <AlertTriangle size={15} className="text-amber-400 shrink-0" />
+              <span>
+                {selectedDate} is locked. Staff or manager can unlock it to edit.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleUnlockDay}
+              className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
+            >
+              Unlock {selectedDate}
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* MAIN CONTAINER */}
       <main className="max-w-7xl w-full mx-auto p-3.5 sm:p-5 md:p-6 space-y-4 sm:space-y-5 flex-1 pb-28 md:pb-8">
@@ -1565,21 +2029,42 @@ export const StaffCylinderSettlement: React.FC = () => {
                 <span className="text-slate-500 text-[10px]">(Exp: ₹{dailyKpis.totalCashExpected.toLocaleString('en-IN')})</span>
               </div>
 
-              {dailyKpis.netCashDifference === 0 ? (
+              {dailyKpis.pendingCashBoys > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black text-[11px] px-2.5 py-1 rounded-full">
+                    <AlertCircle size={13} className="text-amber-400" />
+                    Cash Pending: ₹{dailyKpis.pendingCashExpected.toLocaleString('en-IN')}
+                    {' '}({dailyKpis.pendingCashBoys} {dailyKpis.pendingCashBoys === 1 ? 'boy' : 'boys'})
+                  </span>
+                  {dailyKpis.confirmedNetCashDifference < 0 && (
+                    <span className="inline-flex items-center gap-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 font-black text-[11px] px-2.5 py-1 rounded-full">
+                      <AlertTriangle size={13} className="text-rose-400" />
+                      Confirmed Short: -₹{Math.abs(dailyKpis.confirmedNetCashDifference).toLocaleString('en-IN')}
+                      {dailyKpis.firstShortageBoy && ` (${dailyKpis.firstShortageBoy}${dailyKpis.shortageBoyCount > 1 ? ` +${dailyKpis.shortageBoyCount - 1}` : ''})`}
+                    </span>
+                  )}
+                  {dailyKpis.confirmedNetCashDifference > 0 && (
+                    <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-[11px] px-2.5 py-1 rounded-full">
+                      <AlertCircle size={13} className="text-amber-400" />
+                      Confirmed Excess: +₹{dailyKpis.confirmedNetCashDifference.toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
+              ) : dailyKpis.confirmedNetCashDifference === 0 ? (
                 <span className="inline-flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] px-2.5 py-1 rounded-full">
                   <CheckCircle2 size={13} className="text-emerald-400" />
                   Cash 100% Balanced
                 </span>
-              ) : dailyKpis.netCashDifference < 0 ? (
+              ) : dailyKpis.confirmedNetCashDifference < 0 ? (
                 <span className="inline-flex items-center gap-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 font-black text-[11px] px-2.5 py-1 rounded-full animate-pulse">
                   <AlertTriangle size={13} className="text-rose-400" />
-                  Shortage: -₹{Math.abs(dailyKpis.netCashDifference).toLocaleString('en-IN')}
+                  Shortage: -₹{Math.abs(dailyKpis.confirmedNetCashDifference).toLocaleString('en-IN')}
                   {dailyKpis.firstShortageBoy && ` (${dailyKpis.firstShortageBoy}${dailyKpis.shortageBoyCount > 1 ? ` +${dailyKpis.shortageBoyCount - 1}` : ''})`}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-[11px] px-2.5 py-1 rounded-full">
                   <AlertCircle size={13} className="text-amber-400" />
-                  Excess: +₹{dailyKpis.netCashDifference.toLocaleString('en-IN')}
+                  Excess: +₹{dailyKpis.confirmedNetCashDifference.toLocaleString('en-IN')}
                 </span>
               )}
             </div>
@@ -1886,7 +2371,7 @@ export const StaffCylinderSettlement: React.FC = () => {
                           )}
                         </button>
 
-                        {/* Action Buttons: WhatsApp, Edit, Delete */}
+                        {/* Action Buttons: WhatsApp, Reset Cash, Edit, Delete */}
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleShareIndividualWhatsApp(item)}
@@ -1895,6 +2380,16 @@ export const StaffCylinderSettlement: React.FC = () => {
                           >
                             <MessageCircle size={15} />
                           </button>
+
+                          {Number(item.actual_cash) > 0 && (
+                            <button
+                              onClick={() => handleMarkCashPending(item)}
+                              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 p-2 rounded-xl transition-all active:scale-95"
+                              title="Cash not counted yet? Mark this row as pending"
+                            >
+                              <RotateCcw size={15} />
+                            </button>
+                          )}
 
                           <button
                             onClick={() => handleEdit(item)}
@@ -2044,6 +2539,15 @@ export const StaffCylinderSettlement: React.FC = () => {
                                 >
                                   <MessageCircle size={14} />
                                 </button>
+                                {Number(item.actual_cash) > 0 && (
+                                  <button
+                                    onClick={() => handleMarkCashPending(item)}
+                                    className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-colors"
+                                    title="Cash not counted yet? Mark as pending"
+                                  >
+                                    <RotateCcw size={14} />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleEdit(item)}
                                   className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
@@ -2104,15 +2608,29 @@ export const StaffCylinderSettlement: React.FC = () => {
                           </div>
                         </td>
                         <td className="py-4 px-3 text-center">
-                          {dailyKpis.netCashDifference === 0 ? (
+                          {dailyKpis.pendingCashBoys > 0 ? (
+                            <div>
+                              <div className="text-amber-400 font-bold">
+                                Pending ₹{dailyKpis.pendingCashExpected.toLocaleString('en-IN')}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {dailyKpis.pendingCashBoys} {dailyKpis.pendingCashBoys === 1 ? 'boy' : 'boys'} not counted
+                              </div>
+                              {dailyKpis.confirmedNetCashDifference !== 0 && (
+                                <div className={dailyKpis.confirmedNetCashDifference < 0 ? 'text-rose-400 text-[10px] font-bold' : 'text-amber-400 text-[10px] font-bold'}>
+                                  Confirmed {dailyKpis.confirmedNetCashDifference < 0 ? '-' : '+'}₹{Math.abs(dailyKpis.confirmedNetCashDifference).toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </div>
+                          ) : dailyKpis.confirmedNetCashDifference === 0 ? (
                             <span className="text-emerald-400 font-bold">✅ Balanced</span>
-                          ) : dailyKpis.netCashDifference < 0 ? (
+                          ) : dailyKpis.confirmedNetCashDifference < 0 ? (
                             <span className="text-rose-400 font-bold">
-                              -₹{Math.abs(dailyKpis.netCashDifference).toLocaleString('en-IN')}
+                              -₹{Math.abs(dailyKpis.confirmedNetCashDifference).toLocaleString('en-IN')}
                             </span>
                           ) : (
                             <span className="text-amber-400 font-bold">
-                              +₹{dailyKpis.netCashDifference.toLocaleString('en-IN')}
+                              +₹{dailyKpis.confirmedNetCashDifference.toLocaleString('en-IN')}
                             </span>
                           )}
                         </td>
@@ -2597,6 +3115,11 @@ export const StaffCylinderSettlement: React.FC = () => {
               Set the standard agency rate for 14.2kg domestic cylinders. New and
               edited settlements use this rate; already-saved rows keep the price
               they were saved with.
+              {!canEditRate && (
+                <span className="block mt-2 text-amber-400 font-bold">
+                  Manager only. Ask a manager to change the shared rate.
+                </span>
+              )}
             </p>
 
             <div className="space-y-2">
@@ -2639,7 +3162,11 @@ export const StaffCylinderSettlement: React.FC = () => {
               </button>
               <button
                 onClick={() => handleSaveRate(tempRate)}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 active:scale-95"
+                disabled={!canEditRate}
+                className={`flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 active:scale-95 ${
+                  canEditRate ? '' : 'opacity-50 cursor-not-allowed'
+                }`}
+                title={canEditRate ? 'Apply rate to all devices' : 'Manager only'}
               >
                 Apply Rate
               </button>

@@ -5,6 +5,7 @@ import { seedDatabase } from './lib/seed';
 import { setupSyncListeners, syncOfflineData, pullLatestCloudData, autoSyncMasterConsumers } from './lib/sync';
 import { stripCacheBustParam } from './lib/appCache';
 import { runDailyStorageMaintenance } from './lib/storageCleanup';
+import { fetchAgencySettings } from './lib/agencySettings';
 import { Login } from './pages/Login';
 import { AgentSearch } from './pages/AgentSearch';
 import { AgentRoute } from './pages/AgentRoute';
@@ -32,6 +33,13 @@ function App() {
     // localStorage cannot fill up and block login again.
     runDailyStorageMaintenance();
 
+    // Keep the shared manager-only cylinder rate cached for day-end entry.
+    void fetchAgencySettings();
+    const syncSettings = () => {
+      if (navigator.onLine) void fetchAgencySettings();
+    };
+    window.addEventListener('online', syncSettings);
+
     setupSyncListeners();
     syncOfflineData().catch(console.error);
     pullLatestCloudData().catch(console.error);
@@ -46,7 +54,10 @@ function App() {
       }
     }, 60000);
 
-    return () => clearInterval(intervalId);
+    return () => {
+      window.removeEventListener('online', syncSettings);
+      clearInterval(intervalId);
+    };
   }, []);
 
   return (

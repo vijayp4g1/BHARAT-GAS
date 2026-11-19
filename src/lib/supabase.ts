@@ -45,6 +45,17 @@ const quotaSafeAuthStorage = {
       if (!isStorageQuotaError(err)) throw err;
     }
 
+    // 2nd retry: the quota is already critical, so also drop today's /
+    // yesterday's re-fetchable caches. Login must be able to persist a token;
+    // these caches are rebuilt from Supabase (or settlement notes) afterwards.
+    freeLocalStorageSpace({ aggressive: true, critical: true });
+    try {
+      window.localStorage.setItem(key, value);
+      return;
+    } catch (err) {
+      if (!isStorageQuotaError(err)) throw err;
+    }
+
     // Last resort: evict the oldest drafts (newest two are kept) until the
     // auth/session token fits. Saved bills live in Supabase/IndexedDB.
     for (let attempt = 0; attempt < 10; attempt++) {

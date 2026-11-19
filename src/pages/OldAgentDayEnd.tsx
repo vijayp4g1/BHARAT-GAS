@@ -53,6 +53,8 @@ import {
 } from '../lib/dayEndService';
 import type { DeliveryBoy } from '../lib/agentService';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
+import { isDayLocked } from '../lib/dayLock';
+import { getIstDateString } from '../lib/dateUtils';
 import { PERMISSIONS_TOPIC } from '../lib/realtimeBus';
 import { 
   getAgentAssignedDeliveryBoy, 
@@ -196,13 +198,24 @@ export const OldAgentDayEnd: React.FC = () => {
   const [agentId, setAgentId] = useState<string>(() => localStorage.getItem('bgcls_agent_id') || 'agent_default');
 
   // Date State
-  const [reportDate, setReportDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [reportDate, setReportDate] = useState<string>(() => getIstDateString());
+  const [isDayLockedState, setIsDayLockedState] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void isDayLocked(reportDate).then((locked) => {
+      if (mounted) setIsDayLockedState(locked);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [reportDate]);
   const activeDateRef = useRef<string>(reportDate);
 
   // Bill Entries State
   const [entries, setEntries] = useState<ItemEntry[]>(() => {
     const currentAgent = localStorage.getItem('bgcls_agent_id') || 'agent_default';
-    const today = new Date().toISOString().split('T')[0];
+    const today = getIstDateString();
     return loadEntriesForDate(currentAgent, today);
   });
 
@@ -1837,6 +1850,28 @@ export const OldAgentDayEnd: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 pb-56 pt-3 px-3 max-w-xl mx-auto font-sans">
+      {isDayLockedState && (
+        <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-amber-900">
+            <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+            <span>
+              {reportDate} is locked.{' '}
+              {isStaffOrManager
+                ? 'Unlock it in the Staff Book to edit.'
+                : 'Ask staff or a manager to unlock it.'}
+            </span>
+          </div>
+          {isStaffOrManager && (
+            <button
+              type="button"
+              onClick={() => navigate('/staff/settlement')}
+              className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
+            >
+              Open Staff Book
+            </button>
+          )}
+        </div>
+      )}
       {/* Sleek Mobile Compact Header */}
       <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 text-white rounded-3xl p-4 shadow-xl border border-white/10 mb-3">
         <div className="flex items-center justify-between mb-3">

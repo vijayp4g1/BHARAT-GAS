@@ -3,6 +3,7 @@ import { staffDb } from './staffDb';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import { numberKey } from './scanUtils';
 import { findSettlementRowForAgent } from './bpclReportService';
+import { isDayLocked } from './dayLock';
 import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
@@ -323,6 +324,49 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
 }
 
 /**
+ * Load summary for the Staff Day End roster: the morning load entered in the
+ * Staff Book, compared against the bills scanned in Day End.
+ */
+export interface SettlementLoadSummary {
+  supplied_cylinders: number;
+  cash_cylinders: number;
+  online_cylinders: number;
+  upi_cylinders: number;
+  due_cylinders: number;
+}
+
+export async function fetchSettlementLoadsForDate(
+  dateStr: string
+): Promise<Record<string, SettlementLoadSummary>> {
+  const result: Record<string, SettlementLoadSummary> = {};
+  try {
+    const { data, error } = await staffDb
+      .from('staff_cylinder_settlements')
+      .select(
+        'agent_id, agent_name, supplied_cylinders, cash_cylinders, online_cylinders, upi_cylinders, due_cylinders'
+      )
+      .eq('settlement_date', dateStr);
+
+    if (!error && Array.isArray(data)) {
+      for (const row of data as any[]) {
+        const norm = String(row.agent_name || '').trim().toUpperCase();
+        if (!norm) continue;
+        result[norm] = {
+          supplied_cylinders: Number(row.supplied_cylinders || 0),
+          cash_cylinders: Number(row.cash_cylinders || 0),
+          online_cylinders: Number(row.online_cylinders || 0),
+          upi_cylinders: Number(row.upi_cylinders || 0),
+          due_cylinders: Number(row.due_cylinders || 0),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load settlement loads:', err);
+  }
+  return result;
+}
+
+/**
  * Fetch saved bills for a single delivery boy on a given date.
  */
 export async function fetchDayEndReportForAgent(
@@ -632,6 +676,16 @@ export async function saveDayEndReportToDatabase(payload: {
   const normName = payload.agent_name.trim().toUpperCase();
   const nowIso = new Date().toISOString();
   let lastError: string | undefined;
+
+  // Automatic day lock: past IST dates are read-only until staff/manager
+  // unlocks them. Fails open if the lock table has not been migrated yet.
+  if (await isDayLocked(payload.report_date)) {
+    return {
+      success: false,
+      error:
+        'This day is locked. A staff member or manager must unlock it before editing.',
+    };
+  }
 
   // ---- 1. Read the freshest server-side state BEFORE writing anything ----
   const fetchReportRow = async () => {

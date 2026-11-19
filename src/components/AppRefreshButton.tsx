@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCw, Settings, X, Loader2, AlertTriangle, WifiOff, ShieldCheck, Database } from 'lucide-react';
 import { clearAppCacheAndReload } from '../lib/appCache';
-import { freeLocalStorageSpace } from '../lib/storageCleanup';
+import { prepareStorageForAuth } from '../lib/storageCleanup';
 
 /* -------------------------------------------------------------------------- */
 /*  Modal                                                                     */
@@ -41,12 +41,14 @@ export const AppRefreshModal: React.FC<AppRefreshModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   const handleFreeUpSpace = () => {
-    const report = freeLocalStorageSpace({ aggressive: false });
-    const kb = Math.round(report.freedBytes / 1024);
+    const prepared = prepareStorageForAuth();
+    const kb = Math.round(prepared.freedBytes / 1024);
     setStorageMessage(
-      report.removedKeys > 0 || report.trimmedAudit
+      prepared.removedKeys > 0 || prepared.trimmedAudit
         ? `Freed ${kb > 0 ? `${kb} KB` : 'space'}. Saved bills and recent drafts are kept.`
-        : 'No re-fetchable cache to free.'
+        : prepared.ok
+        ? 'Storage already has room for login. No cleanup needed.'
+        : 'Could not free enough storage. Clear site data or free phone storage.'
     );
   };
 

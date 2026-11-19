@@ -40,6 +40,8 @@ interface BpclBillsViewProps {
   agentName: string;
   reportDate: string;
   scannedEntries: DayEndEntry[];
+  /** Morning load from the Staff Book settlement (e.g. 46). */
+  loadCount?: number;
   onOpenPasteModal: () => void;
   onToggleCheckedDone: () => void;
   onAddBillToScanned?: (bill: BpclBillItem) => void;
@@ -55,6 +57,7 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   agentName,
   reportDate,
   scannedEntries,
+  loadCount = 0,
   onOpenPasteModal,
   onToggleCheckedDone,
   onAddBillToScanned,
@@ -105,6 +108,21 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
   const pendingBills = report?.pending_bills || [];
   const onlineBills = report?.online_bills || [];
   const isCheckedDone = report?.checked_done ?? false;
+
+  // Bills vs morning load, and how many BPCL online bills are already scanned.
+  const normalizeCons = (value: unknown) =>
+    String(value || '').replace(/\D/g, '').trim();
+  const billCount = scannedEntries.length;
+  const missingBills = loadCount > 0 ? Math.max(0, loadCount - billCount) : 0;
+  const extraBills = loadCount > 0 ? Math.max(0, billCount - loadCount) : 0;
+  const scannedConsSet = new Set(
+    scannedEntries.map((entry) => normalizeCons(entry.consumer_number))
+  );
+  const onlineDelivered = Math.min(
+    onlineBills.filter((bill) => scannedConsSet.has(normalizeCons(bill.consumer_number)))
+      .length,
+    onlineBills.length
+  );
 
   // Collapsible Accordion State:
   // Starts expanded if pending bills exist, or collapsed if all clear/empty
@@ -492,6 +510,38 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
 
       {/* Quick Summary Pill Bar (Always visible) */}
       <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border ${
+            missingBills > 0
+              ? 'bg-rose-50 text-rose-800 border-rose-300'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+          }`}
+          title={
+            loadCount > 0
+              ? `${billCount} of ${loadCount} loaded cylinders have bills`
+              : `${billCount} bills scanned`
+          }
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>
+            Bills:{' '}
+            <b>
+              {billCount}
+              {loadCount > 0 ? `/${loadCount}` : ''}
+            </b>
+          </span>
+          {missingBills > 0 && (
+            <span className="text-[10px] font-black bg-rose-600 text-white px-1.5 py-0.2 rounded-full">
+              {missingBills} missing
+            </span>
+          )}
+          {extraBills > 0 && (
+            <span className="text-[10px] font-black bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded-full">
+              +{extraBills} extra
+            </span>
+          )}
+        </span>
+
         <button
           type="button"
           onClick={() => {
@@ -521,7 +571,12 @@ export const BpclBillsView: React.FC<BpclBillsViewProps> = ({
           }`}
         >
           <Globe className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Online (PayNBook): <b>{onlineBills.length}</b></span>
+          <span>
+            Online:{' '}
+            <b>
+              {onlineBills.length > 0 ? `${onlineDelivered}/${onlineBills.length}` : '0'}
+            </b>
+          </span>
         </button>
 
         {!isExpanded && (
