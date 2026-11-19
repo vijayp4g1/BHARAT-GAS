@@ -175,6 +175,18 @@ export const StaffDayEndSummary: React.FC = () => {
     } catch (_) {}
   }, [selectedBoy, reportDate]);
 
+  // Opening a boy from the All Boys roster keeps the previous scroll position
+  // (often far down the list). Always start a newly opened Scan view at the top.
+  useEffect(() => {
+    if (activeTab !== 'SCAN') return;
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, selectedBoy?.name]);
+
   // Multi-Agent Roster Cache for selected date
   const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
   const [settlementLoadsMap, setSettlementLoadsMap] = useState<Record<string, SettlementLoadSummary>>({});
