@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { ConsumerModal } from '../components/ConsumerModal';
 import { syncOfflineData } from '../lib/sync';
 import { supabase } from '../lib/supabase';
+import { handlePhotoError } from '../lib/photoFallback';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { LocationPermissionModal } from '../components/LocationPermissionModal';
 import { getAccurateLocation } from '../lib/geolocation';
@@ -534,7 +535,7 @@ export const ConsumerProfile = () => {
             <div className={`p-4 rounded-2xl mb-5 flex flex-col sm:flex-row gap-4 items-center justify-between border ${consumer.cylinder_type === '10KG_LITE' ? 'bg-white/10 border-white/20 text-white' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center gap-3">
                 {photos && photos.length > 0 ? (
-                  <img src={photos[0].photo_data_url || photos[0].photo_url} alt="House preview" className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md" />
+                  <img src={photos[0].photo_data_url || photos[0].photo_url} alt="House preview" onError={handlePhotoError} className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md" />
                 ) : (
                   <div className="w-14 h-14 rounded-xl bg-purple-200/30 text-purple-600 flex items-center justify-center font-bold text-xs">No Photo</div>
                 )}
@@ -680,6 +681,7 @@ export const ConsumerProfile = () => {
                       <img 
                         src={photo.photo_data_url || photo.photo_url} 
                         alt="Consumer Upload" 
+                        onError={handlePhotoError}
                         className="w-full h-full object-cover cursor-pointer hover:scale-110 transition-transform duration-300" 
                         onClick={() => setSelectedPhoto(photo.photo_data_url || photo.photo_url || null)}
                       />
@@ -840,6 +842,7 @@ export const ConsumerProfile = () => {
             <img 
               src={selectedPhoto} 
               alt="Consumer Document/House" 
+              onError={handlePhotoError}
               className="max-w-full max-h-full object-contain rounded-xl shadow-2xl animate-in zoom-in-95 duration-300" 
               onClick={(e) => e.stopPropagation()}
             />

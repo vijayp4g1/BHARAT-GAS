@@ -11,6 +11,7 @@ import { ManagerConsumerModal } from '../components/ManagerConsumerModal';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { LocationPermissionModal } from '../components/LocationPermissionModal';
 import { getAccurateLocation } from '../lib/geolocation';
+import { handlePhotoError } from '../lib/photoFallback';
 import { HelpCircle } from 'lucide-react';
 
 // Fix Leaflet default marker
@@ -552,6 +553,7 @@ export const ManagerConsumerProfile = () => {
                       <img 
                         src={photo.photo_url} 
                         alt="Consumer Upload" 
+                        onError={handlePhotoError}
                         className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform" 
                         onClick={() => setSelectedPhoto(photo.photo_url)}
                       />
@@ -689,6 +691,7 @@ export const ManagerConsumerProfile = () => {
           <img 
             src={selectedPhoto} 
             alt="Preview" 
+            onError={handlePhotoError}
             className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" 
             onClick={(e) => e.stopPropagation()}
           />
