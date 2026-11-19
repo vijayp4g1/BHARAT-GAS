@@ -286,13 +286,25 @@ export function evictOldestDraft(): boolean {
 
 /** True when an error is the browser's localStorage quota error. */
 export function isStorageQuotaError(error: unknown): boolean {
-  const err = error as { name?: string; message?: string } | null;
-  return (
-    err?.name === 'QuotaExceededError' ||
-    err?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-    /quota/i.test(String(err?.message || '')) ||
-    /exceeded the quota/i.test(String(err?.message || ''))
-  );
+  const err = error as { name?: string; message?: string; code?: string | number } | null;
+  if (!err) return false;
+
+  const name = String(err.name || '');
+  const message = String(err.message || '');
+  const code = String(err.code || '');
+
+  // Real browser storage errors (localStorage / IndexedDB).
+  if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+    return true;
+  }
+  if (code === 'QUOTA_EXCEEDED_ERR' || code === '22' || code === '1014') {
+    return true;
+  }
+
+  // Our auth storage adapter's explicit marker. Do NOT match a generic
+  // /quota/i: Supabase's "organization has used up its quota" error also
+  // contains that word, and it is a billing problem, not device storage.
+  return /localStorage quota exceeded while saving the session/i.test(message);
 }
 
 /**

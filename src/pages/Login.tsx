@@ -250,6 +250,28 @@ export const Login = () => {
         return;
       }
 
+      // Supabase's own "organization has used up its quota" / restricted-project
+      // error is a billing problem, NOT device storage. Show it clearly instead
+      // of blaming the phone.
+      const rawMessage = String(error?.message || '');
+      const statusCode = Number(error?.status || error?.statusCode || 0);
+      const isSupabaseRestricted =
+        /usage limits|services restricted|organization[^.]*quota|exceeded[^.]*quota|billing|project[^.]*(paused|restricted)|payment required/i.test(
+          rawMessage
+        ) ||
+        statusCode === 402 ||
+        (statusCode === 403 && /quota|restricted|limit/i.test(rawMessage));
+
+      if (isSupabaseRestricted) {
+        toast.error(
+          `Supabase is not accepting requests: ${
+            rawMessage || 'project restricted because the organization exceeded its usage limits'
+          }. The project owner must resolve the Supabase billing/usage limit — this is not a device storage issue.`,
+          { id: 'supabase-restricted', duration: 12000 }
+        );
+        return;
+      }
+
       if (!navigator.onLine || error.message?.toLowerCase().includes('fetch')) {
         try {
           const localCount = await db.consumers.count();
