@@ -45,19 +45,11 @@ function App() {
     pullLatestCloudData().catch(console.error);
     // The 33k customer master is intentionally NOT auto-synced. It is updated
     // manually at most once a week from Manager Dashboard / Agent Search.
-
-    // Periodically pull latest data from cloud every 5 minutes when online.
-    // This is the small incremental locations/photos/notes pull, not the full
-    // customer master.
-    const intervalId = setInterval(() => {
-      if (navigator.onLine) {
-        pullLatestCloudData().catch(console.error);
-      }
-    }, 5 * 60 * 1000);
+    // Incremental locations/photos/notes are pulled on app open, on reconnect,
+    // and from the manual Refresh button — not on a timer.
 
     return () => {
       window.removeEventListener('online', syncSettings);
-      clearInterval(intervalId);
     };
   }, []);
 

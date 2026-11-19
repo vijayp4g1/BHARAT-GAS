@@ -238,7 +238,8 @@ export async function resolveCurrentAgentDeliveryBoy(): Promise<{
   let sessionUserId: string | null = null;
   let sessionUsername: string | null = null;
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (user) {
       sessionUserId = user.id;
       sessionUsername = user.email ? user.email.replace('@bgcls.local', '').trim().toLowerCase() : null;

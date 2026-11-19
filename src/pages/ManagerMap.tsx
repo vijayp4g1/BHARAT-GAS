@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
@@ -81,6 +81,7 @@ export const ManagerMap = () => {
   
   const [showAgents, setShowAgents] = useState(false);
   const [agentLocations, setAgentLocations] = useState<Record<string, any>>({});
+  const agentNamesRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (!showAgents) return;
@@ -99,6 +100,11 @@ export const ManagerMap = () => {
           acc[curr.agent_id] = curr;
           return acc;
         }, {});
+        const names: Record<string, string> = {};
+        data.forEach((curr: any) => {
+          if (curr.agents?.name) names[curr.agent_id] = curr.agents.name;
+        });
+        agentNamesRef.current = names;
         setAgentLocations(locationsMap);
       }
     };
@@ -109,12 +115,23 @@ export const ManagerMap = () => {
       .channel('agent_tracking')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_locations' }, async (payload) => {
         const newLocation = payload.new as any;
-        const { data, error } = await supabase.from('agents').select('name').eq('id', newLocation.agent_id).single();
-        if (error) {
-           console.error('Error fetching agent name on realtime update:', error);
-        }
-        if (data) {
-           newLocation.agents = { name: data.name };
+        const cachedName = agentNamesRef.current[newLocation.agent_id];
+        if (cachedName) {
+          newLocation.agents = { name: cachedName };
+        } else {
+          // Only query a name the first time an unseen agent appears.
+          const { data, error } = await supabase
+            .from('agents')
+            .select('name')
+            .eq('id', newLocation.agent_id)
+            .single();
+          if (error) {
+            console.error('Error fetching agent name on realtime update:', error);
+          }
+          if (data) {
+            agentNamesRef.current[newLocation.agent_id] = data.name;
+            newLocation.agents = { name: data.name };
+          }
         }
         setAgentLocations(prev => ({
           ...prev,

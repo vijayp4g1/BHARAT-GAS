@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUserId } from './supabase';
 import { isPastGodownDate } from './dateUtils';
 
 /**
@@ -74,13 +74,13 @@ export async function unlockDay(
   if (!dateStr) return { ok: false, error: 'Missing date' };
 
   try {
-    const { data: userData } = await supabase.auth.getUser();
+    const unlockedBy = await getSessionUserId();
     const now = new Date().toISOString();
 
     const { error } = await supabase.from('day_unlocks').upsert(
       {
         unlock_date: dateStr,
-        unlocked_by: userData?.user?.id ?? null,
+        unlocked_by: unlockedBy,
         reason: reason || 'Manual unlock',
         unlocked_at: now,
       },

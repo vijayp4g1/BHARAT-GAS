@@ -144,6 +144,20 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * out", so a dropped mobile connection at token-expiry time does not bounce the
  * user to the login screen.
  */
+/**
+ * Cached session user id. `getUser()` performs a network call; most writes only
+ * need the already-validated session id. Use this instead of getUser() in
+ * uploads/audit logs to avoid extra Auth API calls.
+ */
+export async function getSessionUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user?.id ?? null;
+  } catch (_) {
+    return null;
+  }
+}
+
 export function readPersistedAuthSession(): { userId: string; email: string } | null {
   try {
     const findKey = (storage: Storage): string | null =>

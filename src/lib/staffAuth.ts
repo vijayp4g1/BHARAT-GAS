@@ -178,80 +178,120 @@ async function readAgentPermissionRow(
  * such a user out, fall back to reading the agents row directly by auth id and
  * then by the login username.
  */
-export async function refreshCurrentStaffPermission(): Promise<boolean> {
-  const persist = (
-    userId: string,
-    username: string,
-    name: string | null,
-    role: string,
-    isManager: boolean,
-    isStaff: boolean
-  ) => {
-    safeSetItem('bgcls_user_role', isManager ? 'MANAGER' : role || 'AGENT');
-    if (username) safeSetItem('bgcls_logged_username', username);
-    if (name) safeSetItem('bgcls_agent_name', name);
-    if (userId) safeSetItem('bgcls_agent_id', userId);
-    safeSetItem('bgcls_is_staff', isStaff ? 'true' : 'false');  };
+let permissionCache: { userId: string; isStaff: boolean; at: number } | null = null;
+let permissionInFlight: Promise<boolean> | null = null;
+const PERMISSION_CACHE_TTL_MS = 2 * 60 * 1000;
 
+/** Call after login/logout or a manager changes staff access. */
+export function invalidateStaffPermissionCache(): void {
+  permissionCache = null;
+  permissionInFlight = null;
+}
+
+export async function refreshCurrentStaffPermission(
+  options: { force?: boolean } = {}
+): Promise<boolean> {
+  // Reuse an in-flight check. Navigation and several components all ask for
+  // this on mount; without dedupe each one costs an admin-api + agents query.
+  if (permissionInFlight && !options.force) return permissionInFlight;
+
+  const run = async (): Promise<boolean> => {
+    const persist = (
+      userId: string,
+      username: string,
+      name: string | null,
+      role: string,
+      isManager: boolean,
+      isStaff: boolean
+    ) => {
+      safeSetItem('bgcls_user_role', isManager ? 'MANAGER' : role || 'AGENT');
+      if (username) safeSetItem('bgcls_logged_username', username);
+      if (name) safeSetItem('bgcls_agent_name', name);
+      if (userId) safeSetItem('bgcls_agent_id', userId);
+      safeSetItem('bgcls_is_staff', isStaff ? 'true' : 'false');
+    };
+
+    try {
+      // Auth-js may still be restoring/refreshing the stored session; retry once
+      // before treating the user as signed out.
+      let session = (await supabase.auth.getSession()).data.session;
+      if (!session) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        session = (await supabase.auth.getSession()).data.session;
+      }
+      if (!session?.user) {
+        // A transient refresh failure keeps the token in localStorage. Keep the
+        // cached permission in that case instead of downgrading the user.
+        if (readPersistedAuthSession()) {
+          return localStorage.getItem('bgcls_is_staff') === 'true';
+        }
+        safeSetItem('bgcls_is_staff', 'false');
+        return false;
+      }
+
+      const userId = session.user.id;
+
+      // Route changes and bottom-nav mounts hit this repeatedly. A 2-minute
+      // cache removes those duplicate admin-api/agents calls.
+      if (
+        !options.force &&
+        permissionCache &&
+        permissionCache.userId === userId &&
+        Date.now() - permissionCache.at < PERMISSION_CACHE_TTL_MS
+      ) {
+        return permissionCache.isStaff;
+      }
+
+      const emailLocal = (session.user.email || '').split('@')[0].toLowerCase().trim();
+      const cachedUsername =
+        (localStorage.getItem('bgcls_logged_username') || '').toLowerCase().trim();
+
+      let isStaff = false;
+      let isManager = false;
+      let role = 'AGENT';
+      let username = cachedUsername || emailLocal;
+      let name: string | null = null;
+
+      // 1. Server identity
+      const { data: identity, error } = await staffAction<StaffIdentity>('me');
+      if (!error && identity) {
+        isStaff = identity.isStaff;
+        isManager = identity.isManager;
+        role = identity.role || 'AGENT';
+        username = (identity.username || username).toLowerCase().trim();
+        name = identity.name ?? null;
+      }
+
+      // 2. Direct agents-row verification when the server identity did not
+      //    resolve to a staff member. This covers legacy auth/agents id drift.
+      if (!isStaff) {
+        const agentRow = await readAgentPermissionRow(userId, username || emailLocal);
+
+        if (agentRow && agentRow.status !== 'DELETED') {
+          isManager = isManager || agentRow.role === 'MANAGER';
+          isStaff = isManager || agentRow.is_staff === true;
+          if (agentRow.username) username = agentRow.username.toLowerCase().trim();
+          if (agentRow.name) name = agentRow.name;
+          if (isManager) role = 'MANAGER';
+          else if (agentRow.role) role = agentRow.role;
+        }
+      }
+
+      persist(userId, username, name, role, isManager, isStaff);
+      permissionCache = { userId, isStaff, at: Date.now() };
+      return isStaff;
+    } catch (err) {
+      console.warn('Failed to refresh staff permission from cloud:', err);
+      return localStorage.getItem('bgcls_is_staff') === 'true';
+    }
+  };
+
+  const task = run();
+  permissionInFlight = task;
   try {
-    // Auth-js may still be restoring/refreshing the stored session; retry once
-    // before treating the user as signed out.
-    let session = (await supabase.auth.getSession()).data.session;
-    if (!session) {
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      session = (await supabase.auth.getSession()).data.session;
-    }
-    if (!session?.user) {
-      // A transient refresh failure keeps the token in localStorage. Keep the
-      // cached permission in that case instead of downgrading the user.
-      if (readPersistedAuthSession()) {
-        return localStorage.getItem('bgcls_is_staff') === 'true';
-      }
-      safeSetItem('bgcls_is_staff', 'false');
-      return false;
-    }
-
-    const userId = session.user.id;
-    const emailLocal = (session.user.email || '').split('@')[0].toLowerCase().trim();
-    const cachedUsername =
-      (localStorage.getItem('bgcls_logged_username') || '').toLowerCase().trim();
-
-    let isStaff = false;
-    let isManager = false;
-    let role = 'AGENT';
-    let username = cachedUsername || emailLocal;
-    let name: string | null = null;
-
-    // 1. Server identity
-    const { data: identity, error } = await staffAction<StaffIdentity>('me');
-    if (!error && identity) {
-      isStaff = identity.isStaff;
-      isManager = identity.isManager;
-      role = identity.role || 'AGENT';
-      username = (identity.username || username).toLowerCase().trim();
-      name = identity.name ?? null;
-    }
-
-    // 2. Direct agents-row verification when the server identity did not
-    //    resolve to a staff member. This covers legacy auth/agents id drift.
-    if (!isStaff) {
-      const agentRow = await readAgentPermissionRow(userId, username || emailLocal);
-
-      if (agentRow && agentRow.status !== 'DELETED') {
-        isManager = isManager || agentRow.role === 'MANAGER';
-        isStaff = isManager || agentRow.is_staff === true;
-        if (agentRow.username) username = agentRow.username.toLowerCase().trim();
-        if (agentRow.name) name = agentRow.name;
-        if (isManager) role = 'MANAGER';
-        else if (agentRow.role) role = agentRow.role;
-      }
-    }
-
-    persist(userId, username, name, role, isManager, isStaff);
-    return isStaff;
-  } catch (err) {
-    console.warn('Failed to refresh staff permission from cloud:', err);
-    return localStorage.getItem('bgcls_is_staff') === 'true';
+    return await task;
+  } finally {
+    if (permissionInFlight === task) permissionInFlight = null;
   }
 }
 
@@ -316,6 +356,7 @@ export async function grantStaffPermission(
     username: cleanUsername,
     is_staff: true,
   });
+  invalidateStaffPermissionCache();
   return { ok: true };
 }
 
@@ -372,5 +413,6 @@ export async function revokeStaffPermission(
     username: cleanUsername,
     is_staff: false,
   });
+  invalidateStaffPermissionCache();
   return { ok: true };
 }

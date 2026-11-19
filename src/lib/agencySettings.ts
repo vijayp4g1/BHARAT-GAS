@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUserId } from './supabase';
 import { getIstDateString } from './dateUtils';
 
 /**
@@ -78,7 +78,7 @@ export async function saveAgencyRate(
   cacheCylinderRate(rate);
 
   try {
-    const { data: userData } = await supabase.auth.getUser();
+    const updatedBy = await getSessionUserId();
     const now = new Date().toISOString();
     const today = getIstDateString();
 
@@ -87,7 +87,7 @@ export async function saveAgencyRate(
         id: 1,
         cylinder_rate: rate,
         rate_effective_from: today,
-        updated_by: userData?.user?.id ?? null,
+        updated_by: updatedBy,
         updated_at: now,
       },
       { onConflict: 'id' }

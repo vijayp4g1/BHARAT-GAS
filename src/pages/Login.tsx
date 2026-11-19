@@ -217,7 +217,7 @@ export const Login = () => {
 
         // The server is authoritative for role and staff access. Reconcile
         // whatever the fast local guess above produced with admin-api.
-        isStaffMember = await refreshCurrentStaffPermission();
+        isStaffMember = await refreshCurrentStaffPermission({ force: true });
         if (localStorage.getItem('bgcls_user_role') === 'MANAGER') {
           actualRole = 'MANAGER';
         }

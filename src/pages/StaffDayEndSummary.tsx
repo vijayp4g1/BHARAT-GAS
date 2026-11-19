@@ -1871,8 +1871,8 @@ export const StaffDayEndSummary: React.FC = () => {
     const toastId = toast.loading(`Saving ${entries.length} bills for ${selectedBoy.name} to database...`);
 
     try {
-      const userMeta = await supabase.auth.getUser();
-      const staffName = userMeta?.data?.user?.user_metadata?.name || userMeta?.data?.user?.email?.split('@')[0] || 'Staff';
+      const session = (await supabase.auth.getSession()).data.session;
+      const staffName = session?.user?.user_metadata?.name || session?.user?.email?.split('@')[0] || 'Staff';
 
       const result = await saveDayEndReportToDatabase({
         report_date: reportDate,

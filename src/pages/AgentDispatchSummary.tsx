@@ -67,7 +67,7 @@ export const AgentDispatchSummary: React.FC = () => {
 
           if (!matches) return;
 
-          refreshCurrentStaffPermission().then((liveStaff) => {
+          refreshCurrentStaffPermission({ force: true }).then((liveStaff) => {
             if (isMounted) setIsStaff(liveStaff);
           });
         }

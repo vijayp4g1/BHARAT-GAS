@@ -9,8 +9,13 @@ export function useAgentLocationTracking() {
     const startTracking = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      
+
       const agentId = session.user.id;
+
+      // Skip the role lookup for known managers/staff. Only non-agent roles
+      // need to be filtered out; an unknown role still checks the agents row.
+      const cachedRole = localStorage.getItem('bgcls_user_role');
+      if (cachedRole && cachedRole !== 'AGENT') return;
 
       // Check if user is actually an agent
       const { data: agent } = await supabase
@@ -27,15 +32,26 @@ export function useAgentLocationTracking() {
       }
 
       let lastUpdateTime = 0;
+      let lastLat: number | null = null;
+      let lastLng: number | null = null;
 
       watchId = navigator.geolocation.watchPosition(
         async (position) => {
           const now = Date.now();
-          // Throttle updates to every 15 seconds
-          if (now - lastUpdateTime < 15000) return;
-          
-          lastUpdateTime = now;
           const { latitude, longitude } = position.coords;
+
+          // Reduce database writes: at most once a minute while moving, and a
+          // 5-minute heartbeat while stationary. The old code wrote every 15s.
+          const moved =
+            lastLat === null ||
+            Math.abs(latitude - lastLat) > 0.0005 ||
+            Math.abs(longitude - lastLng!) > 0.0005;
+          const minInterval = moved ? 60_000 : 5 * 60_000;
+          if (lastUpdateTime > 0 && now - lastUpdateTime < minInterval) return;
+
+          lastUpdateTime = now;
+          lastLat = latitude;
+          lastLng = longitude;
 
           try {
             const { error } = await supabase
@@ -46,11 +62,9 @@ export function useAgentLocationTracking() {
                 longitude,
                 updated_at: new Date().toISOString()
               }, { onConflict: 'agent_id' });
-              
+               
             if (error) {
               console.error('Failed to update agent location in DB:', error);
-            } else {
-              console.log('Successfully updated agent location in DB:', latitude, longitude);
             }
           } catch (error) {
             console.error('Failed to update agent location:', error);

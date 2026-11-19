@@ -1,5 +1,5 @@
 import db from './db';
-import { supabase } from './supabase';
+import { supabase, getSessionUserId } from './supabase';
 import {
   extractBpclReportFromNotes,
   findSettlementRowForAgent,
@@ -8,12 +8,23 @@ import {
 
 const LAST_PULL_KEY = 'bgcls_last_pull_timestamp';
 
+// Several components call pullLatestCloudData on mount/online. Coalesce those
+// into at most one incremental pull every 2 minutes unless explicitly forced.
+let lastPullStartedAt = 0;
+const PULL_MIN_INTERVAL_MS = 2 * 60 * 1000;
+
 /**
  * Downloads new/updated locations, photos, and notes from Supabase into local IndexedDB.
  * Ensures all devices/logins quickly see locations and photos added by other devices.
  */
-export async function pullLatestCloudData() {
+export async function pullLatestCloudData(
+  options: { force?: boolean } = {}
+) {
   if (!navigator.onLine) return;
+
+  const now = Date.now();
+  if (!options.force && now - lastPullStartedAt < PULL_MIN_INTERVAL_MS) return;
+  lastPullStartedAt = now;
 
   try {
     const lastPull = localStorage.getItem(LAST_PULL_KEY);
@@ -141,10 +152,8 @@ export async function syncOfflineData() {
   console.log('Online: Starting background sync...');
 
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
+    const userId = await getSessionUserId();
+    if (!userId) {
       console.log('No authenticated user. Sync skipped.');
       return;
     }
@@ -212,7 +221,7 @@ export async function syncOfflineData() {
             latitude: loc.latitude,
             longitude: loc.longitude,
             accuracy: loc.accuracy,
-            uploaded_by: user.id,
+            uploaded_by: userId,
             uploaded_at: loc.uploaded_at,
           });
           if (!error) {
@@ -274,7 +283,7 @@ export async function syncOfflineData() {
                   photo_url: publicUrl,
                   photo_type: photo.photo_type,
                   status: 'Pending',
-                  uploaded_by: user.id,
+                  uploaded_by: userId,
                   uploaded_at: photo.uploaded_at,
                 });
 
@@ -312,7 +321,7 @@ export async function syncOfflineData() {
             const { error } = await supabase.from('delivery_notes').insert({
               consumer_id: note.consumer_id,
               note: note.note,
-              uploaded_by: user.id,
+              uploaded_by: userId,
               created_at: note.created_at,
             });
             if (!error) await db.delivery_notes.update(note.id, { synced: true });

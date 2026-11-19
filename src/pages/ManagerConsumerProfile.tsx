@@ -4,7 +4,7 @@ import { ArrowLeft, MapPin, Camera, Navigation, Loader2, X, Edit2, Trash2, Check
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { supabase } from '../lib/supabase';
+import { supabase, getSessionUserId } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { compressImage } from '../lib/imageUtils';
 import { ManagerConsumerModal } from '../components/ManagerConsumerModal';
@@ -153,7 +153,7 @@ export const ManagerConsumerProfile = () => {
     
     setIsCapturingGPS(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getSessionUserId();
       
       // Delete any existing locations to prevent duplicates
       await supabase.from('consumer_locations').delete().eq('consumer_id', id);
@@ -163,7 +163,7 @@ export const ManagerConsumerProfile = () => {
         latitude: pendingLocation.coords.latitude,
         longitude: pendingLocation.coords.longitude,
         accuracy: pendingLocation.coords.accuracy,
-        uploaded_by: user?.id,
+        uploaded_by: userId,
         uploaded_at: new Date().toISOString()
       });
       
@@ -210,7 +210,7 @@ export const ManagerConsumerProfile = () => {
       setIsCompressing(true);
       toast.loading('Compressing and Uploading...', { id: 'upload' });
       
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getSessionUserId();
       const compressedBase64 = await compressImage(file, 1280, 1280, 0.7);
       
       const response = await fetch(compressedBase64);
@@ -235,7 +235,7 @@ export const ManagerConsumerProfile = () => {
           photo_url: publicUrl,
           photo_type: typeStr,
           status: 'Pending',
-          uploaded_by: user?.id,
+          uploaded_by: userId,
           uploaded_at: new Date().toISOString()
         });
 
@@ -276,11 +276,11 @@ export const ManagerConsumerProfile = () => {
   const handleAddNote = async () => {
     if (!id || !newNote.trim()) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getSessionUserId();
       await supabase.from('delivery_notes').insert({
         consumer_id: id,
         note: newNote.trim(),
-        uploaded_by: user?.id,
+        uploaded_by: userId,
         created_at: new Date().toISOString()
       });
       setNewNote('');

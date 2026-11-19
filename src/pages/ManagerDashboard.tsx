@@ -157,10 +157,12 @@ export const ManagerDashboard = () => {
 
     const fetchTimeoutRef = { current: null as any };
     const triggerFetch = () => {
+      // Do not spend 6 count queries while the dashboard is in the background.
+      if (document.hidden) return;
       if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
       fetchTimeoutRef.current = setTimeout(() => {
         fetchDashboardData();
-      }, 1000);
+      }, 5000);
     };
 
     // Set up realtime subscriptions for live updates

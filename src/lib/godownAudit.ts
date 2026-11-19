@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUserId } from './supabase';
 
 export type GodownAuditAction =
   | 'SETTLEMENT_SAVE'
@@ -35,8 +35,7 @@ export async function logGodownAudit(entry: GodownAuditEntry): Promise<void> {
 
     let changedBy: string | null = null;
     try {
-      const { data } = await supabase.auth.getUser();
-      changedBy = data?.user?.id ?? null;
+      changedBy = await getSessionUserId();
     } catch (_) {}
 
     await supabase.from('godown_audit').insert({

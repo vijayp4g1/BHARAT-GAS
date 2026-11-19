@@ -40,7 +40,7 @@ export const AgentBottomNav = () => {
 
           if (!matches) return;
 
-          refreshCurrentStaffPermission().then((liveStaff) => {
+          refreshCurrentStaffPermission({ force: true }).then((liveStaff) => {
             setIsStaff(liveStaff);
           });
         }

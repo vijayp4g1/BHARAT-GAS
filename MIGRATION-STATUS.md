@@ -43,6 +43,12 @@ Do not reintroduce full-table scans on an interval.
 | Staff Book tab focus | Refetch at most once per 60 seconds |
 | Master consumer sync | **Manual only** (Manager Dashboard → Resync Customers, or Agent Search → database icon). No automatic call on app start/online/interval. The full 33k master is intended to be updated about once a week. |
 | Day-end roster query | Explicit column list (stops pulling unused/large columns) |
+| Staff permission checks | 2-minute cache + in-flight dedupe; permission broadcasts force a refresh |
+| Auth user lookups | Uploads/audit/logs use the local session id instead of `auth.getUser()` network calls |
+| Tab/background polling | No 5-minute `pullLatestCloudData` timer; app-open, reconnect, and manual refresh only (2-minute coalescing) |
+| Manager map | Agent names cached; no per-location `agents` query |
+| GPS tracking | At most 1 write/minute while moving, 5-minute heartbeat while stationary (was every 15s) |
+| Manager dashboard | Realtime count refresh debounced 5s and paused while hidden |
 
 **Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
 

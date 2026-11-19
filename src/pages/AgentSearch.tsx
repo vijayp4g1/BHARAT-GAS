@@ -224,7 +224,7 @@ export const AgentSearch = () => {
     
     toast.loading('Syncing latest updates...', { id: 'sync' });
     try {
-      await pullLatestCloudData();
+      await pullLatestCloudData({ force: true });
       toast.success('Data synced successfully!', { id: 'sync' });
     } catch (err) {
       console.error(err);
