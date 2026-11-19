@@ -22,8 +22,10 @@
 
 const CACHE_PREFIXES = [
   'bgcls_bpcl_report_',
-  'bgcls_day_end_cloud_cache_',
+  'bgcls_bpcl_cloud_fetched_',
   'bgcls_past_7days_bills_',
+  'bgcls_past_7days_fetched_',
+  'bgcls_day_end_cloud_cache_',
   'bgcls_archived_boys_',
   'bgcls_no_supply_boys_',
   'bgcls_recent_interactions_',
