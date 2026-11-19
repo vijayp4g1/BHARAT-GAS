@@ -1,6 +1,7 @@
 import { supabase, readPersistedAuthSession } from './supabase';
 import { staffAction, staffDb } from './staffDb';
 import { broadcastPermissionsEvent } from './realtimeBus';
+import { safeSetItem } from './storageCleanup';
 
 const STAFF_PERMISSIONS_STORAGE_KEY = 'bgcls_staff_permissions_list';
 const DEFAULT_STAFF = ['john', 'ganesh'];
@@ -186,12 +187,11 @@ export async function refreshCurrentStaffPermission(): Promise<boolean> {
     isManager: boolean,
     isStaff: boolean
   ) => {
-    localStorage.setItem('bgcls_user_role', isManager ? 'MANAGER' : role || 'AGENT');
-    if (username) localStorage.setItem('bgcls_logged_username', username);
-    if (name) localStorage.setItem('bgcls_agent_name', name);
-    if (userId) localStorage.setItem('bgcls_agent_id', userId);
-    localStorage.setItem('bgcls_is_staff', isStaff ? 'true' : 'false');
-  };
+    safeSetItem('bgcls_user_role', isManager ? 'MANAGER' : role || 'AGENT');
+    if (username) safeSetItem('bgcls_logged_username', username);
+    if (name) safeSetItem('bgcls_agent_name', name);
+    if (userId) safeSetItem('bgcls_agent_id', userId);
+    safeSetItem('bgcls_is_staff', isStaff ? 'true' : 'false');  };
 
   try {
     // Auth-js may still be restoring/refreshing the stored session; retry once
@@ -207,7 +207,7 @@ export async function refreshCurrentStaffPermission(): Promise<boolean> {
       if (readPersistedAuthSession()) {
         return localStorage.getItem('bgcls_is_staff') === 'true';
       }
-      localStorage.setItem('bgcls_is_staff', 'false');
+      safeSetItem('bgcls_is_staff', 'false');
       return false;
     }
 
@@ -271,7 +271,7 @@ export async function grantStaffPermission(
   const previousList = [...current];
   const cleanUsername = username.toLowerCase().replace('@', '').trim();
   const updated = Array.from(new Set([...current, agentId.toLowerCase(), cleanUsername]));
-  localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
+  safeSetItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
 
   // Server-side update: only a manager may change is_staff.
   try {
@@ -306,7 +306,7 @@ export async function grantStaffPermission(
     console.warn('Staff permission update notice:', err);
     // Do not keep a local-only grant: the database is authoritative and a
     // reload would silently revert it.
-    localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
+    safeSetItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
     return { ok: false, error: err?.message || 'Could not update staff access.' };
   }
 
@@ -332,7 +332,7 @@ export async function revokeStaffPermission(
   const updated = current.filter(
     (item) => item.toLowerCase() !== agentId.toLowerCase() && item.toLowerCase() !== cleanUsername && item.toLowerCase() !== 'john'
   );
-  localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
+  safeSetItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(updated));
 
   try {
     let updatedRows = 0;
@@ -362,7 +362,7 @@ export async function revokeStaffPermission(
     }
   } catch (err: any) {
     console.warn('Staff permission update notice:', err);
-    localStorage.setItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
+    safeSetItem(STAFF_PERMISSIONS_STORAGE_KEY, JSON.stringify(previousList));
     return { ok: false, error: err?.message || 'Could not update staff access.' };
   }
 

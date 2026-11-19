@@ -22,15 +22,28 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'PLACEHOLDER_K
 const quotaSafeAuthStorage = {
   getItem(key: string): string | null {
     try {
-      return window.localStorage.getItem(key);
+      const value = window.localStorage.getItem(key);
+      if (value !== null) return value;
+    } catch (_) {}
+    // A full localStorage may have forced the session into sessionStorage.
+    try {
+      return window.sessionStorage.getItem(key);
     } catch (_) {
       return null;
     }
   },
 
   setItem(key: string, value: string): void {
-    try {
+    // A successful localStorage write makes any sessionStorage fallback stale.
+    const saveLocal = () => {
       window.localStorage.setItem(key, value);
+      try {
+        window.sessionStorage.removeItem(key);
+      } catch (_) {}
+    };
+
+    try {
+      saveLocal();
       return;
     } catch (err) {
       if (!isStorageQuotaError(err)) throw err;
@@ -39,7 +52,7 @@ const quotaSafeAuthStorage = {
     // 1st retry: remove caches, trim the audit log, prune old drafts.
     freeLocalStorageSpace({ aggressive: true });
     try {
-      window.localStorage.setItem(key, value);
+      saveLocal();
       return;
     } catch (err) {
       if (!isStorageQuotaError(err)) throw err;
@@ -50,7 +63,20 @@ const quotaSafeAuthStorage = {
     // these caches are rebuilt from Supabase (or settlement notes) afterwards.
     freeLocalStorageSpace({ aggressive: true, critical: true });
     try {
-      window.localStorage.setItem(key, value);
+      saveLocal();
+      return;
+    } catch (err) {
+      if (!isStorageQuotaError(err)) throw err;
+    }
+
+    // 3rd retry: a bloated old session can block its own replacement because
+    // the browser needs room for the new value before releasing the old one.
+    // Drop the previous auth value for this key, then write the new one.
+    try {
+      window.localStorage.removeItem(key);
+    } catch (_) {}
+    try {
+      saveLocal();
       return;
     } catch (err) {
       if (!isStorageQuotaError(err)) throw err;
@@ -61,15 +87,28 @@ const quotaSafeAuthStorage = {
     for (let attempt = 0; attempt < 10; attempt++) {
       if (!evictOldestDraft()) break;
       try {
-        window.localStorage.setItem(key, value);
+        saveLocal();
         return;
       } catch (err) {
         if (!isStorageQuotaError(err)) throw err;
       }
     }
 
+    // Absolute fallback: keep the session for this tab in sessionStorage
+    // instead of leaving the user stuck on the login screen forever. The app
+    // keeps working until the tab/app is closed; logging in again is enough
+    // after a cold start.
+    try {
+      window.sessionStorage.setItem(key, value);
+      console.warn(
+        '[Auth] localStorage is full; keeping this session in sessionStorage. ' +
+          'Free device storage to keep the login after closing the app.'
+      );
+      return;
+    } catch (_) {}
+
     console.error(
-      '[Auth] Could not persist the session because localStorage is full. ' +
+      '[Auth] Could not persist the session because browser storage is full. ' +
         'Free device storage and reload the app.'
     );
     throw new Error('localStorage quota exceeded while saving the session');
@@ -78,6 +117,9 @@ const quotaSafeAuthStorage = {
   removeItem(key: string): void {
     try {
       window.localStorage.removeItem(key);
+    } catch (_) {}
+    try {
+      window.sessionStorage.removeItem(key);
     } catch (_) {}
   },
 };
@@ -104,12 +146,19 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  */
 export function readPersistedAuthSession(): { userId: string; email: string } | null {
   try {
-    const key = Object.keys(localStorage).find(
-      (k) => k.startsWith('sb-') && k.endsWith('-auth-token')
-    );
-    if (!key) return null;
+    const findKey = (storage: Storage): string | null =>
+      Object.keys(storage).find(
+        (k) => k.startsWith('sb-') && k.endsWith('-auth-token')
+      ) || null;
 
-    const raw = localStorage.getItem(key);
+    let key = findKey(localStorage);
+    let raw = key ? localStorage.getItem(key) : null;
+
+    // A full localStorage can push the session into sessionStorage.
+    if (!raw) {
+      key = findKey(sessionStorage);
+      raw = key ? sessionStorage.getItem(key) : null;
+    }
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
