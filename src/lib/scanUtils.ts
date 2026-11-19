@@ -74,29 +74,32 @@ export function isAddableConsumerNumber(raw: string | null | undefined): boolean
   return num.length >= 1 && num.length <= 12 && !DISTRIBUTOR_BLACKLIST.has(num);
 }
 
-const AMBIGUOUS_DOT_MATRIX_DIGITS = ['0', '6', '8'] as const;
+const AMBIGUOUS_DIGIT_GROUPS: string[][] = [
+  ['0', '6', '8'],
+  ['2', '7'],
+];
 
 function otherAmbiguousDigits(digit: string): string[] {
-  return AMBIGUOUS_DOT_MATRIX_DIGITS.filter((d) => d !== digit);
+  const group = AMBIGUOUS_DIGIT_GROUPS.find((digits) => digits.includes(digit));
+  return group ? group.filter((d) => d !== digit) : [];
 }
 
 /**
  * Generates consumer numbers that differ from `num` ONLY at dot-matrix
- * ambiguous positions (8 ↔ 6 ↔ 0).
+ * ambiguous positions (8 ↔ 6 ↔ 0, and 2 ↔ 7).
  *
  * This is deliberately narrow: a variant can never change a 4 into a 9, so a
- * guessed number can only ever differ by the digits a worn printer pin is known
- * to corrupt. Callers must still verify the variant exists in the database AND
- * ask the operator before using it.
+ * guessed number can only ever differ by the digits a worn printer pin (or a
+ * faint bottom bar) is known to corrupt. Callers must still verify the variant
+ * exists in the database AND ask the operator before using it.
  *
- * Limits to at most 2 changed digits to keep the candidate list small (a
- * 10-digit number yields at most ~200 variants instead of 3^10).
+ * Limits to at most 2 changed digits to keep the candidate list small.
  */
 export function generateAmbiguousDigitVariants(num: string, maxSubstitutions = 2): string[] {
   if (!num) return [];
   const chars = num.split('');
   const positions = chars
-    .map((digit, index) => (AMBIGUOUS_DOT_MATRIX_DIGITS.includes(digit as any) ? index : -1))
+    .map((digit, index) => (otherAmbiguousDigits(digit).length > 0 ? index : -1))
     .filter((index) => index >= 0);
 
   const variants = new Set<string>();

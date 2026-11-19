@@ -197,7 +197,7 @@ export interface AmbiguousConsumerMatch {
 
 /**
  * Finds database consumers whose number differs from the printed number ONLY at
- * dot-matrix ambiguous positions (8 ↔ 6 ↔ 0).
+ * dot-matrix ambiguous positions (8 ↔ 6 ↔ 0, and 2 ↔ 7).
  *
  * IMPORTANT: this never selects or adds a consumer. It is used only to offer a
  * "possible match" that the operator must confirm, so a worn printer pin can be

@@ -71,7 +71,7 @@ export interface ActiveScanFailAlert {
   consumer_name?: string;
   /**
    * A database consumer that differs from the printed number only at
-   * dot-matrix ambiguous 8/6/0 positions. Offered for confirmation only —
+   * dot-matrix ambiguous positions (8/6/0, 2/7). Offered for confirmation only —
    * never added automatically.
    */
   suggested_match?: {
@@ -738,10 +738,10 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // If consumer is not verified in the database, show prominent alert directly on screen!
     if (!match.found) {
       if (!silent) {
-        // Before declaring "not found", look for the one printer defect we can
-        // reason about safely: faint dot-matrix 8/6/0 digits. Only a single
-        // candidate whose name matches the printed name is offered, and the
-        // operator must confirm it — the scanner never auto-adds it.
+        // Before declaring "not found", look for the printer defects we can
+        // reason about safely: faint dot-matrix 8/6/0 and 2/7 digits. Only a
+        // single candidate whose name matches the printed name is offered, and
+        // the operator must confirm it — the scanner never auto-adds it.
         let suggestedMatch: ActiveScanFailAlert['suggested_match'];
         if (isAddableConsumerNumber(cleanNum) && extractedName) {
           const variants = await findConsumersByAmbiguousVariants(rawNum);
@@ -763,7 +763,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
           consumer_name: extractedName || '',
           suggested_match: suggestedMatch,
           reason: suggestedMatch
-            ? `#${cleanNum} is not in the data, but it differs from #${suggestedMatch.consumer_number} only in 8/6/0 digits and the name matches. Confirm the database number below.`
+            ? `#${cleanNum} is not in the data, but it differs from #${suggestedMatch.consumer_number} only in look-alike digits (8/6/0 or 2/7) and the name matches. Confirm the database number below.`
             : `Consumer number #${cleanNum} not found in data.`,
         });
 
@@ -784,6 +784,47 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     // to be valid cannot slip in silently — the operator still sees the bill.
     const nameMismatch =
       Boolean(extractedName) && Boolean(finalName) && !areNamesSimilar(extractedName as string, finalName);
+
+    // If the OCR number exists in the database but its name is a different
+    // customer, do NOT silently add it. Look for a 8/6/0 or 2/7 look-alike
+    // whose database name matches the printed name and ask the operator.
+    if (nameMismatch && extractedName) {
+      const variants = await findConsumersByAmbiguousVariants(rawNum);
+      const named = variants.filter(
+        (candidate) =>
+          numberKey(candidate.consumer_number) !== numberKey(match.consumer_number) &&
+          areNamesSimilar(extractedName as string, candidate.consumer_name)
+      );
+
+      if (named.length >= 1) {
+        if (!silent) {
+          playWarningAlarm();
+          if (navigator.vibrate) navigator.vibrate([400, 150, 400]);
+
+          if (named.length === 1) {
+            setActiveScanFailAlert({
+              type: 'NOT_FOUND',
+              consumer_number: cleanNum,
+              consumer_name: extractedName as string,
+              suggested_match: named[0],
+              reason: `#${cleanNum} matched #${match.consumer_number} (${finalName}), but the printed name matches #${named[0].consumer_number} (${named[0].consumer_name}). Confirm the correct database number below.`,
+            });
+            setStatusText(`Name mismatch — confirm #${named[0].consumer_number}`);
+            recordFailedScan(cleanNum, 'Name mismatch — confirm suggested number');
+          } else {
+            setActiveScanFailAlert({
+              type: 'NOT_FOUND',
+              consumer_number: cleanNum,
+              consumer_name: extractedName as string,
+              reason: `#${cleanNum} matched a different customer name, and several look-alike numbers could be correct. Rescan the Cons No line or type it manually.`,
+            });
+            setStatusText('Ambiguous number — rescan or type manually');
+            recordFailedScan(cleanNum, 'Ambiguous number — name mismatch');
+          }
+        }
+        return 'failed';
+      }
+    }
 
     // Anti-spam cooldown (5 seconds for the same number). Skipped for internal
     // silent passes so they never suppress the final user-facing error.
@@ -959,8 +1000,8 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
         const offY = (vh * scale - f.height) / 2;
 
         // Small margin so ascenders/descenders of the dot-matrix line aren't clipped.
-        const padX = g.width * 0.03;
-        const padY = g.height * 0.18;
+        const padX = g.width * 0.05;
+        const padY = g.height * 0.24;
 
         sx = (g.left - f.left + offX - padX) / scale;
         sy = (g.top - f.top + offY - padY) / scale;
@@ -995,7 +1036,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-    return canvas.toDataURL('image/jpeg', 0.92);
+    return canvas.toDataURL('image/jpeg', 0.97);
   };
 
   /**
@@ -1085,7 +1126,7 @@ export const LiveCameraScannerModal: React.FC<LiveCameraScannerModalProps> = ({
       toast.loading('Re-reading faint print...', { id: 'scan-snap' });
       const enhanced = await enhanceImageForOcr(imageInput);
       if (enhanced) {
-        const retry = await scanBillWithGemini(enhanced);
+        const retry = await scanBillWithGemini(enhanced, { thinkingLevel: 'low' });
         if (retry.found && retry.consumerNumber) {
           const recovered = await processMatchedConsumerNumber(
             retry.consumerNumber,

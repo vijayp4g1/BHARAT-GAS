@@ -23,7 +23,8 @@ export interface GeminiOcrResult {
 /* -------------------------------------------------------------------------- */
 
 export const CHEAP_SCAN_MODEL = 'gemini-3.1-flash-lite';
-export const FALLBACK_SCAN_MODEL = 'gemini-3.5-flash-lite';
+// Cheapest vision fallback; only used if the primary model is unavailable.
+export const FALLBACK_SCAN_MODEL = 'gemini-2.5-flash-lite';
 
 /** Model used for Smart Dispatch / Smart Route (was gemini-3.6-flash). */
 export const CHEAP_AGENT_MODEL = 'gemini-3.5-flash-lite';
@@ -257,7 +258,12 @@ Carefully examine the receipt image:
      * A '6' has an open upper-right stem and only ONE bottom loop.
      * A '0' is a single hollow oval with NO middle cross-bar.
      * If the digit has a middle horizontal cross-bar or two stacked loops, it is strictly an '8' (eight), NOT a '6' or '0'.
-   - Read the exact printed digits one by one. Never merge digits from the label, date, amount or a neighbouring field.
+   - Pay extreme attention to distinguishing '7' vs '2':
+     * A '7' has a top horizontal bar and a diagonal down-left stem. It has NO bottom horizontal bar.
+     * A '2' has a curved top, a diagonal down-left and a straight horizontal bottom bar.
+     * If a bottom horizontal stroke is present, it is '2' (two), NOT '7' (seven).
+     * If the bottom stroke is faint or broken, look for the curved top of a '2'; do not default to '7'.
+   - Read the exact printed digits one by one, then read the number a second time and confirm the same digits. Never merge digits from the label, date, amount or a neighbouring field.
    - If the consumer number is printed with a leading zero, keep that zero in the output.
    - Never invent digits. If the number is genuinely unreadable, return an empty string.
 2. "consumerName": The customer's full name printed next to "Name:" under "Details of Receiver:" or directly under "Cons No:".
@@ -276,7 +282,8 @@ Return ONLY a valid JSON object matching this schema:
  * per-scan cost to a fraction of a cent.
  */
 export async function scanBillWithGemini(
-  imageSource: File | Blob | string
+  imageSource: File | Blob | string,
+  options: { thinkingLevel?: 'minimal' | 'low' } = {}
 ): Promise<GeminiOcrResult> {
   const apiKey = getGeminiApiKey();
 
@@ -318,8 +325,11 @@ export async function scanBillWithGemini(
       };
 
       if (thinking === 'level') {
-        // Gemini 3.x: "minimal" keeps thinking (and its output-priced tokens) near zero.
-        generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
+        // Cheap by default; the rare "no digits detected" retry asks for low
+        // thinking to recover a faint dot-matrix line.
+        generationConfig.thinkingConfig = {
+          thinkingLevel: options.thinkingLevel ?? 'minimal',
+        };
       }
 
       return {
