@@ -180,7 +180,6 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Realtime channel reference for instant multi-staff broadcast
   const syncChannelRef = useRef<any>(null);
-  const lastSettlementFetchRef = useRef<number>(0);
 
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
@@ -534,23 +533,11 @@ export const StaffCylinderSettlement: React.FC = () => {
 
     syncChannelRef.current = channel;
 
-    // Auto re-sync when switching back to tab / unlocking phone
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState !== 'visible') return;
-      // Realtime already keeps the list current. Avoid re-downloading every
-      // settlement's notes each time the tab regains focus.
-      if (Date.now() - lastSettlementFetchRef.current < 60_000) return;
-      lastSettlementFetchRef.current = Date.now();
-      fetchSettlements(selectedDate);
-    };
-
-    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener('focus', handleVisibilityOrFocus);
+    // Realtime keeps this list current. Do NOT refetch on every tab focus /
+    // app resume: doing so interrupts an operator who switched away and back.
 
     return () => {
       if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
-      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener('focus', handleVisibilityOrFocus);
       supabase.removeChannel(channel);
     };
   }, [selectedDate, fetchSettlements]);

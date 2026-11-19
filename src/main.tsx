@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
+import toast from 'react-hot-toast'
 import './index.css'
 import App from './App.tsx'
 
@@ -10,39 +11,12 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-const UPDATE_CHECK_INTERVAL_MS = 60_000
-
-// Do not force-reload the page while somebody is typing/pasting into a field.
-// The BPCL paste editor is a textarea; reloading it mid-paste made the report
-// disappear. A per-boy/date draft is also stored by the modal, but waiting for
-// the field to lose focus avoids the disruption entirely.
-let pendingSwUpdate = false
-let applyPendingUpdate: ((reloadPage?: boolean) => Promise<void>) | null = null
-
-function isTextEntryFocused(): boolean {
-  // Modal editors (BPCL paste, live scanner) mark themselves so an automatic
-  // app-update reload never interrupts an operator mid-entry.
-  if (document.querySelector('[data-bgcls-editing="true"]')) return true
-
-  const el = document.activeElement as HTMLElement | null
-  if (!el) return false
-  const tag = el.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
-}
-
-function activatePendingSwUpdate() {
-  if (!pendingSwUpdate) return
-  if (!applyPendingUpdate) {
-    window.setTimeout(activatePendingSwUpdate, 300)
-    return
-  }
-  if (isTextEntryFocused()) {
-    window.setTimeout(activatePendingSwUpdate, 1500)
-    return
-  }
-  pendingSwUpdate = false
-  void applyPendingUpdate(true)
-}
+// Check at most every 30 minutes. Do NOT check/reload on every visibility
+// change: switching to another app and back must never discard the operator's
+// selected delivery boy or scanned bills.
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+let applyUpdate: ((reloadPage?: boolean) => Promise<void>) | null = null
+let updatePromptShown = false
 
 const updateSW = registerSW({
   immediate: true,
@@ -51,33 +25,59 @@ const updateSW = registerSW({
     const checkForUpdate = () => {
       registration.update().catch(() => {})
     }
-    checkForUpdate()
+    window.setTimeout(checkForUpdate, 30_000)
     window.setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') checkForUpdate()
-    })
   },
   onNeedRefresh() {
-    // A newer build is ready. Activate it and reload once so a device can never
-    // keep running an old bundle after a fix has been deployed — but wait until
-    // the operator is not in the middle of typing/pasting.
-    pendingSwUpdate = true
-    activatePendingSwUpdate()
+    if (updatePromptShown) return
+    updatePromptShown = true
+
+    toast(
+      (t) => (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontWeight: 600 }}>New version ready</span>
+          <button
+            type="button"
+            onClick={() => {
+              toast.dismiss(t.id)
+              updatePromptShown = false
+            }}
+            style={{
+              background: 'transparent',
+              color: '#cbd5e1',
+              border: '1px solid rgba(255,255,255,0.25)',
+              borderRadius: 8,
+              padding: '6px 8px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              toast.dismiss(t.id)
+              updatePromptShown = false
+              void applyUpdate?.(true)
+            }}
+            style={{
+              background: '#f59e0b',
+              color: '#0f172a',
+              border: 0,
+              borderRadius: 8,
+              padding: '6px 10px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Reload
+          </button>
+        </span>
+      ),
+      { duration: Infinity, id: 'sw-update-ready' }
+    )
   },
 })
 
-applyPendingUpdate = updateSW
-
-// When a new service worker takes control, reload exactly once. The app writes
-// unsaved bills to the local draft on pagehide/beforeunload, so this is safe.
-// The first-ever install (no controller yet) must not reload the page.
-let isReloadingForUpdate = false
-if ('serviceWorker' in navigator) {
-  const hadController = Boolean(navigator.serviceWorker.controller)
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || isReloadingForUpdate) return
-    isReloadingForUpdate = true
-    window.location.reload()
-  })
-}
-
+applyUpdate = updateSW

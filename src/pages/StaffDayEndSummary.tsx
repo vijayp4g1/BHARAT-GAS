@@ -119,9 +119,21 @@ export const StaffDayEndSummary: React.FC = () => {
   
   // Date State
   const todayIso = useMemo(() => getIstDateString(), []);
-  const [reportDate, setReportDate] = useState<string>(todayIso);
+  const [reportDate, setReportDate] = useState<string>(() => {
+    try {
+      const saved = sessionStorage.getItem('bgcls_day_end_date');
+      if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) return saved;
+    } catch (_) {}
+    return todayIso;
+  });
   const activeDateRef = useRef<string>(todayIso);
   const [isDayLockedState, setIsDayLockedState] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('bgcls_day_end_date', reportDate);
+    } catch (_) {}
+  }, [reportDate]);
 
   useEffect(() => {
     let mounted = true;
@@ -140,7 +152,28 @@ export const StaffDayEndSummary: React.FC = () => {
   const [boySearchQuery, setBoySearchQuery] = useState<string>('');
 
   // View Mode: 'ROSTER' (All delivery boys overview) vs 'SCAN' (Individual bill scanner for selected boy)
-  const [activeTab, setActiveTab] = useState<'ROSTER' | 'SCAN'>('ROSTER');
+  const [activeTab, setActiveTab] = useState<'ROSTER' | 'SCAN'>(() => {
+    try {
+      return sessionStorage.getItem('bgcls_day_end_tab') === 'SCAN' ? 'SCAN' : 'ROSTER';
+    } catch (_) {
+      return 'ROSTER';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('bgcls_day_end_tab', activeTab);
+    } catch (_) {}
+  }, [activeTab]);
+
+  // Remember the selected boy for this date so a browser/PWA reload on resume
+  // returns to the same scan list instead of the first boy in the roster.
+  useEffect(() => {
+    if (!selectedBoy) return;
+    try {
+      sessionStorage.setItem(`bgcls_day_end_boy_${reportDate}`, selectedBoy.name);
+    } catch (_) {}
+  }, [selectedBoy, reportDate]);
 
   // Multi-Agent Roster Cache for selected date
   const [rosterSummaries, setRosterSummaries] = useState<Record<string, DayEndReportSummary>>({});
@@ -598,6 +631,8 @@ export const StaffDayEndSummary: React.FC = () => {
   entriesRef.current = entries;
   const selectedBoyRef = useRef<DeliveryBoy | null>(selectedBoy);
   selectedBoyRef.current = selectedBoy;
+  // Set when a saved/agent boy must be loaded once after initialization.
+  const needsScanRestoreRef = useRef(false);
   const reportDateRef = useRef<string>(reportDate);
   reportDateRef.current = reportDate;
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -858,7 +893,20 @@ export const StaffDayEndSummary: React.FC = () => {
         const currentAgentName = localStorage.getItem('bgcls_remember_username') || '';
 
         let defaultBoy: DeliveryBoy | undefined;
-        if (currentAgentId) {
+        let restoredSavedBoy = false;
+
+        // Prefer the boy the operator was scanning before the app was reloaded.
+        try {
+          const savedBoyName = sessionStorage.getItem(`bgcls_day_end_boy_${reportDate}`) || '';
+          if (savedBoyName) {
+            defaultBoy = boys.find(
+              (b) => b.name.trim().toUpperCase() === savedBoyName.trim().toUpperCase()
+            );
+            restoredSavedBoy = Boolean(defaultBoy);
+          }
+        } catch (_) {}
+
+        if (!defaultBoy && currentAgentId) {
           defaultBoy = boys.find((b) => b.id === currentAgentId);
         }
         if (!defaultBoy && currentAgentName) {
@@ -870,6 +918,9 @@ export const StaffDayEndSummary: React.FC = () => {
 
         if (defaultBoy) {
           setSelectedBoy(defaultBoy);
+          if (restoredSavedBoy || !isStaffOrManager) {
+            needsScanRestoreRef.current = true;
+          }
         }
 
         // If user is a delivery boy (not staff/manager), open directly into Scan mode
@@ -1476,8 +1527,15 @@ export const StaffDayEndSummary: React.FC = () => {
   // device saved while this screen was backgrounded (Realtime sockets are
   // often suspended by mobile browsers, so this is the reliable path).
   useEffect(() => {
+    let lastVisibleRefresh = 0;
     const handleVisible = () => {
       if (document.visibilityState !== 'visible') return;
+
+      // Switching briefly to another app and back must not refresh/re-render
+      // the scan screen. Catch up only after a longer background period.
+      if (Date.now() - lastVisibleRefresh < 5 * 60 * 1000) return;
+      lastVisibleRefresh = Date.now();
+
       loadRosterData(reportDateRef.current, true);
       if (isLiveScannerOpenRef.current) return;
       if (explicitWritePromiseRef.current) return;
@@ -1650,6 +1708,15 @@ export const StaffDayEndSummary: React.FC = () => {
     if (isLiveScannerOpenRef.current) return;
     loadBillsForSelectedBoy(selectedBoy, reportDate);
   }, [reportDate, loadBillsForSelectedBoy]);
+
+  // Restore the saved/agent scan list once after initialization. Normal boy
+  // clicks already load their bills in handleSelectBoy, so this does not
+  // duplicate work.
+  useEffect(() => {
+    if (!needsScanRestoreRef.current || !selectedBoy) return;
+    needsScanRestoreRef.current = false;
+    void loadBillsForSelectedBoy(selectedBoy, reportDate);
+  }, [selectedBoy, reportDate, loadBillsForSelectedBoy]);
 
   // 4. Real-time Multi-Staff Sync Listener (Silent & Debounced - No Screen Flickers, No Disruptive Toasts)
   useEffect(() => {
