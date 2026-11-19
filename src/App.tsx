@@ -46,13 +46,14 @@ function App() {
     // Automatically check and sync new master consumers without needing any button click
     autoSyncMasterConsumers().catch(console.error);
 
-    // Periodically pull latest data from cloud every 60 seconds when online
+    // Periodically pull latest data from cloud every 5 minutes when online.
+    // This was 60 seconds, which multiplied database egress on every device.
     const intervalId = setInterval(() => {
       if (navigator.onLine) {
         pullLatestCloudData().catch(console.error);
         autoSyncMasterConsumers().catch(console.error);
       }
-    }, 60000);
+    }, 5 * 60 * 1000);
 
     return () => {
       window.removeEventListener('online', syncSettings);
