@@ -60,6 +60,13 @@ export const ManagerDashboard = () => {
       toast.error('You are offline. Connect to the internet and try again.');
       return;
     }
+    if (
+      !window.confirm(
+        'Download the full customer master (33,000+ records)?\n\nUse this at most once a week; it consumes database egress.'
+      )
+    ) {
+      return;
+    }
     setIsResyncing(true);
     try {
       const result = await autoSyncMasterConsumers({
