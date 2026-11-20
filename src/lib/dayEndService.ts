@@ -1045,6 +1045,13 @@ export async function saveDayEndReportToDatabase(payload: {
     agent_name: payload.agent_name,
     agent_id: payload.agent_id,
     total_deliveries: summary.total,
+    // Small load numbers allow the Day End roster to update without a full
+    // settlement row (whose notes blob is expensive).
+    supplied_cylinders: summary.total,
+    cash_cylinders: summary.cashCount,
+    online_cylinders: summary.onlineCount,
+    upi_cylinders: Math.max(0, summary.upiCount - summary.onlineCount),
+    due_cylinders: summary.dueCount,
     sender_session_id: payload.sender_session_id,
     updated_at: nowIso,
   });

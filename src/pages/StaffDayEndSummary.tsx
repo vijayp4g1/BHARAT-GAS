@@ -984,71 +984,9 @@ export const StaffDayEndSummary: React.FC = () => {
   // A settlement row changed (Staff Book load/cash edit). Only the small load
   // summary is needed for the roster — do not re-download the day-end entries,
   // BPCL notes and past-7-days notes for every change.
-  const refreshSettlementLoads = useCallback(async (dateStr: string) => {
-    const loads = await fetchSettlementLoadsForDate(dateStr);
-    if (reportDateRef.current === dateStr) {
-      setSettlementLoadsMap(loads || {});
-    }
-  }, []);
-
   useEffect(() => {
     loadRosterData(reportDate);
   }, [reportDate, loadRosterData]);
-
-  // Keep the morning-load comparison live when the Staff Book saves a
-  // settlement on another device/tab.
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const channel = supabase
-      .channel('bgcls_settlement_loads')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
-        (payload) => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            // The realtime row already contains the load numbers. Merge it
-            // directly instead of issuing a fresh settlement query per change.
-            if (payload.eventType === 'DELETE') {
-              const oldRow = payload.old as any;
-              if (oldRow?.agent_name) {
-                const norm = String(oldRow.agent_name).trim().toUpperCase();
-                setSettlementLoadsMap((prev) => {
-                  const next = { ...prev };
-                  delete next[norm];
-                  return next;
-                });
-              } else {
-                void refreshSettlementLoads(reportDateRef.current);
-              }
-              return;
-            }
-
-            const row = payload.new as any;
-            if (!row?.agent_name || String(row.settlement_date) !== reportDateRef.current) {
-              return;
-            }
-            const norm = String(row.agent_name).trim().toUpperCase();
-            setSettlementLoadsMap((prev) => ({
-              ...prev,
-              [norm]: {
-                supplied_cylinders: Number(row.supplied_cylinders || 0),
-                cash_cylinders: Number(row.cash_cylinders || 0),
-                online_cylinders: Number(row.online_cylinders || 0),
-                upi_cylinders: Number(row.upi_cylinders || 0),
-                due_cylinders: Number(row.due_cylinders || 0),
-              },
-            }));
-          }, 300);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      if (timer) clearTimeout(timer);
-      supabase.removeChannel(channel);
-    };
-  }, [refreshSettlementLoads]);
 
   // Write-Ahead Engine: Immediately writes to local storage (0ms) and auto-saves to database (debounced 800ms)
   const triggerAutoSave = useCallback((updatedEntries: ItemEntry[], boy: DeliveryBoy, dateStr: string) => {
@@ -1790,6 +1728,34 @@ export const StaffDayEndSummary: React.FC = () => {
           // every boy's entries + BPCL notes + 7 days of notes again.
           const norm = (data.agent_name || '').trim().toUpperCase();
           if (norm) {
+            // Update the load summary from the small broadcast payload; no
+            // settlement row / notes query is needed.
+            setSettlementLoadsMap((prev) => {
+              const current = prev[norm] || {
+                supplied_cylinders: 0,
+                cash_cylinders: 0,
+                online_cylinders: 0,
+                upi_cylinders: 0,
+                due_cylinders: 0,
+              };
+              return {
+                ...prev,
+                [norm]: {
+                  supplied_cylinders: Number(
+                    data.supplied_cylinders ?? current.supplied_cylinders ?? 0
+                  ),
+                  cash_cylinders: Number(
+                    data.cash_cylinders ?? current.cash_cylinders ?? 0
+                  ),
+                  online_cylinders: Number(
+                    data.online_cylinders ?? current.online_cylinders ?? 0
+                  ),
+                  upi_cylinders: Number(data.upi_cylinders ?? current.upi_cylinders ?? 0),
+                  due_cylinders: Number(data.due_cylinders ?? current.due_cylinders ?? 0),
+                },
+              };
+            });
+
             const reportedTotal = Number(data.total_deliveries || 0);
             if (reportedTotal === 0) {
               setRosterSummaries((prev) => {

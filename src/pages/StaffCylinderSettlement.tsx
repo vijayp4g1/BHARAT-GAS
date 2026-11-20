@@ -463,10 +463,6 @@ export const StaffCylinderSettlement: React.FC = () => {
       config: { broadcast: { self: false } },
     });
 
-    // The money self-heal can update several rows at once; debounce the
-    // postgres_changes refresh so one repair burst does not fire many fetches.
-    let pgRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-
     channel
       .on('broadcast', { event: 'settlement_changed' }, async ({ payload }) => {
         if (!payload) return;
@@ -495,33 +491,6 @@ export const StaffCylinderSettlement: React.FC = () => {
       })
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
-        (payload) => {
-          if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
-          pgRefreshTimer = setTimeout(() => {
-            if (payload.eventType === 'DELETE') {
-              const oldRow = payload.old as any;
-              if (oldRow?.id) {
-                setSettlements((prev) => prev.filter((row) => row.id !== oldRow.id));
-                void db.staff_cylinder_settlements.delete(oldRow.id);
-              }
-              return;
-            }
-
-            const row = payload.new as SettlementRecord;
-            if (!row?.id || String(row.settlement_date) !== selectedDate) return;
-
-            setSettlements((prev) => {
-              const next = prev.filter((item) => item.id !== row.id);
-              next.push(row);
-              return next;
-            });
-            void db.staff_cylinder_settlements.put(row);
-          }, 600);
-        }
-      )
-      .on(
-        'postgres_changes',
         { event: '*', schema: 'public', table: 'agency_settings' },
         () => {
           void fetchAgencySettings().then((settings) => {
@@ -537,10 +506,45 @@ export const StaffCylinderSettlement: React.FC = () => {
     // app resume: doing so interrupts an operator who switched away and back.
 
     return () => {
-      if (pgRefreshTimer) clearTimeout(pgRefreshTimer);
       supabase.removeChannel(channel);
     };
   }, [selectedDate, fetchSettlements]);
+
+  // Day End saves change settlement load quantities. Use the small broadcast
+  // payload instead of subscribing to full settlement rows (whose notes blob is
+  // expensive in realtime egress).
+  useEffect(() => {
+    const channel = supabase
+      .channel('bgcls_cash_memo_live_sync')
+      .on('broadcast', { event: 'cash_memos_updated' }, ({ payload }) => {
+        if (!payload || payload.report_date !== selectedDate) return;
+        const norm = String(payload.agent_name || '').trim().toUpperCase();
+        if (!norm) return;
+
+        setSettlements((prev) =>
+          prev.map((row) => {
+            if (row.agent_name.trim().toUpperCase() !== norm) return row;
+            return {
+              ...row,
+              supplied_cylinders: Number(
+                payload.supplied_cylinders ?? row.supplied_cylinders
+              ),
+              cash_cylinders: Number(payload.cash_cylinders ?? row.cash_cylinders),
+              online_cylinders: Number(
+                payload.online_cylinders ?? row.online_cylinders
+              ),
+              upi_cylinders: Number(payload.upi_cylinders ?? row.upi_cylinders),
+              due_cylinders: Number(payload.due_cylinders ?? row.due_cylinders),
+            };
+          })
+        );
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedDate]);
 
   // Save cylinder rate (manager-only shared setting)
   const handleSaveRate = async (newRate: number) => {
@@ -865,24 +869,45 @@ export const StaffCylinderSettlement: React.FC = () => {
   };
 
   // Open Form to Edit
-  const handleEdit = (item: SettlementRecord) => {
+  const handleEdit = async (item: SettlementRecord) => {
     if (isDayLockedState) {
       toast.error('This day is locked. Unlock it before editing.');
       return;
     }
-    setEditingId(item.id);
-    setSelectedAgentId(item.agent_id);
-    setFormCylinderRate(Number(item.cylinder_price) > 0 ? Number(item.cylinder_price) : cylinderRate);
-    setSuppliedCylinders(item.supplied_cylinders);
-    setCashCylinders(item.cash_cylinders);
-    setOnlineCylinders(item.online_cylinders);
-    setUpiCylinders(item.upi_cylinders);
-    setDueCylinders(item.due_cylinders);
-    setReturnedFullCylinders(item.returned_full_cylinders);
-    setEmptyCylinders(item.empty_cylinders);
-    setActualCashInput(item.actual_cash);
-    setNotes(getDisplayRemarks(item.notes));
-    setShowAdvancedFields(Boolean(item.due_cylinders || item.returned_full_cylinders));
+
+    // The list no longer receives full settlement rows over realtime (notes are
+    // too large). Fetch this one row so an edit never overwrites newer notes
+    // written by a Day End scan.
+    let latest = item;
+    try {
+      const { data } = await supabase
+        .from('staff_cylinder_settlements')
+        .select('*')
+        .eq('id', item.id)
+        .maybeSingle();
+      if (data) {
+        latest = { ...item, ...(data as SettlementRecord) };
+        setSettlements((prev) =>
+          prev.map((row) => (row.id === latest.id ? latest : row))
+        );
+      }
+    } catch (err) {
+      console.warn('Could not refresh settlement before editing:', err);
+    }
+
+    setEditingId(latest.id);
+    setSelectedAgentId(latest.agent_id);
+    setFormCylinderRate(Number(latest.cylinder_price) > 0 ? Number(latest.cylinder_price) : cylinderRate);
+    setSuppliedCylinders(latest.supplied_cylinders);
+    setCashCylinders(latest.cash_cylinders);
+    setOnlineCylinders(latest.online_cylinders);
+    setUpiCylinders(latest.upi_cylinders);
+    setDueCylinders(latest.due_cylinders);
+    setReturnedFullCylinders(latest.returned_full_cylinders);
+    setEmptyCylinders(latest.empty_cylinders);
+    setActualCashInput(latest.actual_cash);
+    setNotes(getDisplayRemarks(latest.notes));
+    setShowAdvancedFields(Boolean(latest.due_cylinders || latest.returned_full_cylinders));
     setIsFormOpen(true);
   };
 

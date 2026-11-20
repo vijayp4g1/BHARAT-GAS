@@ -51,6 +51,7 @@ Do not reintroduce full-table scans on an interval.
 | Manager dashboard | Realtime count refresh debounced 5s and paused while hidden |
 | App resume / PWA update | No visibility-based reload and no `autoUpdate`; updates use a manual “Reload” prompt. Day End persists date/tab/boy in `sessionStorage`. |
 | Staff Book resume | No focus/visibility refetch; realtime rows keep it current |
+| Settlement realtime | Removed full-row `postgres_changes` subscriptions (they carried the large `notes` blob). Loads use the small `cash_memos_updated` broadcast; full notes are fetched only on edit/manual refresh. |
 
 **Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
 
