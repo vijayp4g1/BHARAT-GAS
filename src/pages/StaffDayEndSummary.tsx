@@ -1004,11 +1004,42 @@ export const StaffDayEndSummary: React.FC = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'staff_cylinder_settlements' },
-        () => {
+        (payload) => {
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
-            void refreshSettlementLoads(reportDateRef.current);
-          }, 600);
+            // The realtime row already contains the load numbers. Merge it
+            // directly instead of issuing a fresh settlement query per change.
+            if (payload.eventType === 'DELETE') {
+              const oldRow = payload.old as any;
+              if (oldRow?.agent_name) {
+                const norm = String(oldRow.agent_name).trim().toUpperCase();
+                setSettlementLoadsMap((prev) => {
+                  const next = { ...prev };
+                  delete next[norm];
+                  return next;
+                });
+              } else {
+                void refreshSettlementLoads(reportDateRef.current);
+              }
+              return;
+            }
+
+            const row = payload.new as any;
+            if (!row?.agent_name || String(row.settlement_date) !== reportDateRef.current) {
+              return;
+            }
+            const norm = String(row.agent_name).trim().toUpperCase();
+            setSettlementLoadsMap((prev) => ({
+              ...prev,
+              [norm]: {
+                supplied_cylinders: Number(row.supplied_cylinders || 0),
+                cash_cylinders: Number(row.cash_cylinders || 0),
+                online_cylinders: Number(row.online_cylinders || 0),
+                upi_cylinders: Number(row.upi_cylinders || 0),
+                due_cylinders: Number(row.due_cylinders || 0),
+              },
+            }));
+          }, 300);
         }
       )
       .subscribe();

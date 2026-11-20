@@ -34,7 +34,7 @@ const BPCL_STORAGE_PREFIX = 'bgcls_bpcl_report_';
  * full scanned-bill JSON and the pasted BPCL raw text. Re-downloading all of
  * them on every roster refresh is expensive, so keep a short per-date cache.
  */
-const BPCL_CLOUD_CACHE_TTL_MS = 5 * 60 * 1000;
+const BPCL_CLOUD_CACHE_TTL_MS = 15 * 60 * 1000;
 const bpclCloudCache = new Map<
   string,
   { at: number; data: Record<string, BpclReportData> }

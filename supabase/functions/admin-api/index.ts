@@ -26,6 +26,37 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+/**
+ * Caller identity cache.
+ *
+ * Every admin-api request used to run `auth.getUser()` (which issues several
+ * auth-schema queries) plus one or two `agents` lookups. A busy scanner sends
+ * thousands of requests a day, so the same token was paying that cost over and
+ * over. Cache the resolved caller for a short, safe window.
+ */
+const CALLER_CACHE_TTL_MS = 2 * 60 * 1000
+const CALLER_CACHE_MAX = 200
+const callerCache = new Map<string, { caller: Caller; at: number }>()
+
+function readCachedCaller(token: string): Caller | null {
+  const hit = callerCache.get(token)
+  if (!hit) return null
+  if (Date.now() - hit.at > CALLER_CACHE_TTL_MS) {
+    callerCache.delete(token)
+    return null
+  }
+  return hit.caller
+}
+
+function writeCachedCaller(token: string, caller: Caller) {
+  callerCache.set(token, { caller, at: Date.now() })
+  while (callerCache.size > CALLER_CACHE_MAX) {
+    const oldest = callerCache.keys().next().value
+    if (oldest === undefined) break
+    callerCache.delete(oldest)
+  }
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -606,12 +637,18 @@ Deno.serve(async (req) => {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim()
     if (!token) return fail('Missing authorization token', 'UNAUTHORIZED', 401)
 
-    const { data: { user }, error: userError } = await admin.auth.getUser(token)
-    if (userError || !user) {
-      return fail('Invalid or expired session', 'UNAUTHORIZED', 401)
+    let caller = readCachedCaller(token)
+
+    if (!caller) {
+      const { data: { user }, error: userError } = await admin.auth.getUser(token)
+      if (userError || !user) {
+        return fail('Invalid or expired session', 'UNAUTHORIZED', 401)
+      }
+
+      caller = await loadCaller(admin, user as Record<string, any>)
+      writeCachedCaller(token, caller)
     }
 
-    const caller = await loadCaller(admin, user as Record<string, any>)
     const body = await req.json().catch(() => ({}))
     const action = asString(body.action, 40)
 

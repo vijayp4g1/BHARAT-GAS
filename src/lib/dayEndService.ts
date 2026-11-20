@@ -9,7 +9,7 @@ import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
 
 /** Past days rarely change; avoid re-downloading 7 days of settlement notes. */
-const PAST_7_DAYS_CACHE_TTL_MS = 30 * 60 * 1000;
+const PAST_7_DAYS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Current godown cylinder rate saved by the Staff Book. Used when the day-end

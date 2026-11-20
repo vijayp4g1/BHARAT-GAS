@@ -930,7 +930,11 @@ export const StaffCylinderSettlement: React.FC = () => {
       }
 
       await db.staff_cylinder_settlements.update(item.id, fields);
-      await fetchSettlements(selectedDate);
+      // The saved row is already in memory; no need to re-download every
+      // settlement's notes just to update one row.
+      setSettlements((prev) =>
+        prev.map((row) => (row.id === item.id ? { ...row, ...fields } : row))
+      );
 
       void logGodownAudit({
         action: 'SETTLEMENT_SAVE',
@@ -1215,7 +1219,19 @@ export const StaffCylinderSettlement: React.FC = () => {
         }
       }
 
-      await fetchSettlements(selectedDate);
+      // The row was written to Dexie/cloud above. Update the list in place;
+      // re-querying would re-download every settlement's notes after each save.
+      setSettlements((prev) => [
+        ...prev.filter(
+          (row) =>
+            row.id !== record.id &&
+            !(
+              row.agent_id === record.agent_id &&
+              row.settlement_date === record.settlement_date
+            )
+        ),
+        record,
+      ]);
       setIsFormOpen(false);
 
       void logGodownAudit({
