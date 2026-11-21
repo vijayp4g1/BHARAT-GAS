@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { seedDatabase } from './lib/seed';
 import { setupSyncListeners, syncOfflineData, pullLatestCloudData } from './lib/sync';
@@ -20,7 +20,6 @@ import { ManagerReports } from './pages/ManagerReports';
 import { ManagerConsumers } from './pages/ManagerConsumers';
 import { ManagerConsumerProfile } from './pages/ManagerConsumerProfile';
 import { FindDeliveryAgent } from './pages/FindDeliveryAgent';
-import { StaffCylinderSettlement } from './pages/StaffCylinderSettlement';
 import { StaffDayEndSummary } from './pages/StaffDayEndSummary';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -67,10 +66,8 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/portal" element={<ConsumerPortal />} />
         
-        {/* Staff Cylinder Settlement (Strictly for Authorized Staff and Owners/Managers) */}
-        <Route path="/staff/settlement" element={
-          <ProtectedRoute allowedRole="STAFF"><StaffCylinderSettlement /></ProtectedRoute>
-        } />
+        {/* Staff Book was removed. Old links/bookmarks land on Day End. */}
+        <Route path="/staff/settlement" element={<Navigate to="/staff/day-end" replace />} />
         <Route path="/staff/day-end" element={
           <ProtectedRoute allowedRole="STAFF"><StaffDayEndSummary /></ProtectedRoute>
         } />

@@ -1855,21 +1855,9 @@ export const OldAgentDayEnd: React.FC = () => {
           <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-amber-900">
             <AlertTriangle size={15} className="text-amber-600 shrink-0" />
             <span>
-              {reportDate} is locked.{' '}
-              {isStaffOrManager
-                ? 'Unlock it in the Staff Book to edit.'
-                : 'Ask staff or a manager to unlock it.'}
+              {reportDate} is locked. Ask staff or a manager to unlock it from Day End.
             </span>
           </div>
-          {isStaffOrManager && (
-            <button
-              type="button"
-              onClick={() => navigate('/staff/settlement')}
-              className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
-            >
-              Open Staff Book
-            </button>
-          )}
         </div>
       )}
       {/* Sleek Mobile Compact Header */}

@@ -43,8 +43,9 @@ import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
 import { matchConsumerWithDatabase } from '../lib/consumerMatcher';
 import { numberKey } from '../lib/scanUtils';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
-import { isDayLocked } from '../lib/dayLock';
+import { isDayLocked, unlockDay } from '../lib/dayLock';
 import { getIstDateString } from '../lib/dateUtils';
+import { logGodownAudit } from '../lib/godownAudit';
 import { 
   getDayEndDeliveryBoys, 
   fetchAllDayEndReportsForDate, 
@@ -144,6 +145,33 @@ export const StaffDayEndSummary: React.FC = () => {
       mounted = false;
     };
   }, [reportDate]);
+
+  const handleUnlockDay = async () => {
+    if (!isStaffOrManager) {
+      toast.error('Staff permission required to unlock a day.');
+      return;
+    }
+    const reason = window.prompt(
+      `Unlock ${reportDate} for editing?\n\nEnter a reason (required):`
+    );
+    if (!reason || !reason.trim()) return;
+
+    const result = await unlockDay(reportDate, reason.trim());
+    if (!result.ok) {
+      toast.error(result.error || 'Could not unlock this day');
+      return;
+    }
+
+    setIsDayLockedState(false);
+    void logGodownAudit({
+      action: 'DAY_UNLOCK',
+      entity_type: 'day',
+      settlement_date: reportDate,
+      reason: reason.trim(),
+      source: 'day_end',
+    });
+    toast.success(`${reportDate} unlocked for editing`);
+  };
 
   // Delivery Boys Roster State
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
@@ -3160,16 +3188,21 @@ export const StaffDayEndSummary: React.FC = () => {
             <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-amber-900">
               <AlertTriangle size={15} className="text-amber-600 shrink-0" />
               <span>
-                {reportDate} is locked. Staff/manager can unlock it in the Staff Book.
+                {reportDate} is locked.{' '}
+                {isStaffOrManager
+                  ? 'Staff/manager can unlock it to edit.'
+                  : 'Ask staff or a manager to unlock it.'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate('/staff/settlement')}
-              className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
-            >
-              Open Staff Book
-            </button>
+            {isStaffOrManager && (
+              <button
+                type="button"
+                onClick={handleUnlockDay}
+                className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all"
+              >
+                Unlock {reportDate}
+              </button>
+            )}
           </div>
         )}
         {/* Top Header Card */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Search, Compass, Map, ClipboardCheck, Flame } from 'lucide-react';
+import { Search, Compass, Map, ClipboardCheck } from 'lucide-react';
 import { isCurrentStaffOrManager, refreshCurrentStaffPermission } from '../lib/staffAuth';
 import { supabase } from '../lib/supabase';
 import { PERMISSIONS_TOPIC } from '../lib/realtimeBus';
@@ -122,25 +122,6 @@ export const AgentBottomNav = () => {
             </>
           )}
         </NavLink>
-
-        {isStaff && (
-          <NavLink 
-            to="/staff/settlement" 
-            className={({ isActive }) => `
-              flex flex-col items-center py-1 px-2.5 rounded-xl transition-all
-              ${isActive 
-                ? 'text-amber-600 bg-amber-50 font-bold' 
-                : 'text-amber-600 hover:text-amber-700 hover:bg-amber-50/60 font-semibold'}
-            `}
-          >
-            {({ isActive }) => (
-              <>
-                <Flame size={20} className={`mb-1 transition-transform ${isActive ? 'scale-110 fill-amber-500' : 'fill-amber-500/30'}`} />
-                <span className="text-[10px] uppercase tracking-wider font-bold">Staff Book</span>
-              </>
-            )}
-          </NavLink>
-        )}
       </div>
     </nav>
   );

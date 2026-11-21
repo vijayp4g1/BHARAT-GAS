@@ -13,7 +13,6 @@ import {
   Edit2, 
   Search, 
   ShieldCheck, 
-  Flame,
   Truck,
   Lock,
   CheckCircle2
@@ -338,13 +337,6 @@ export const ManagerAgents = () => {
           Team Members
         </h1>
         <Link 
-          to="/staff/settlement"
-          className="flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 sm:px-4 py-2 rounded-xl font-black transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
-        >
-          <Flame size={16} className="fill-slate-950" /> <span className="hidden sm:inline">Cylinder Settlement Book</span>
-          <span className="sm:hidden">Staff Book</span>
-        </Link>
-        <Link 
           to="/manager/find-agent"
           className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm active:scale-95 shrink-0"
         >
@@ -412,7 +404,7 @@ export const ManagerAgents = () => {
                   return (
                     <div className="mb-2 pt-2.5 pb-2 border-t border-slate-100 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-600 font-semibold">Staff Book:</span>
+                        <span className="text-xs text-slate-600 font-semibold">Staff Access:</span>
                         {isStaff && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300">
                             GRANTED

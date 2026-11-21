@@ -50,9 +50,8 @@ Do not reintroduce full-table scans on an interval.
 | GPS tracking | At most 1 write/minute while moving, 5-minute heartbeat while stationary (was every 15s) |
 | Manager dashboard | Realtime count refresh debounced 5s and paused while hidden |
 | App resume / PWA update | No visibility-based reload and no `autoUpdate`; updates use a manual “Reload” prompt. Day End persists date/tab/boy in `sessionStorage`. |
-| Staff Book resume | No focus/visibility refetch; realtime rows keep it current |
+| Staff Book | Removed. Day End is the only staff working page; past dates can be unlocked inline there. `/staff/settlement` redirects to Day End. |
 | Settlement realtime | Removed full-row `postgres_changes` subscriptions (they carried the large `notes` blob). Loads use the small `cash_memos_updated` broadcast; full notes are fetched only on edit/manual refresh. |
-| Staff Book list | Reads the `staff_cylinder_settlements_list` view (remarks only, no scanned-bill/BPCL JSON). Full notes are fetched for one row on edit/save. |
 
 **Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
 
