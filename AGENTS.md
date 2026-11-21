@@ -20,6 +20,7 @@ The **old** project `skkebmqxhrtarpfwffgx` is **egress-restricted** on the Free 
 - Do **not** re-enable PWA `autoUpdate` or reload on `visibilitychange`/app resume. Updates must be an explicit “Reload” prompt; the Day End page persists date/tab/selected boy in `sessionStorage` so a resume/reload returns to the same scan list.
 - Do **not** refetch the Staff Book list on tab focus/app resume; realtime keeps it current.
 - Do **not** subscribe to full `staff_cylinder_settlements` rows over Realtime: the `notes` blob is large. Use the small `cash_memos_updated`/load broadcast and fetch the full notes only when editing or manually refreshing.
+- Staff Book list reads `staff_cylinder_settlements_list` (remarks only); never switch it back to `select('*')` on the base table. Full notes are fetched per row only on edit/save.
 - Existing users must log in again once: the new project has a new JWT secret. Their old passwords were migrated.
 
 ### Pending task

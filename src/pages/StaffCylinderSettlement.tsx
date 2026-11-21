@@ -183,6 +183,8 @@ export const StaffCylinderSettlement: React.FC = () => {
 
   // Settlements for the selected date
   const [settlements, setSettlements] = useState<SettlementRecord[]>([]);
+  const settlementsRef = useRef<SettlementRecord[]>([]);
+  settlementsRef.current = settlements;
   const [isLoadingSettlements, setIsLoadingSettlements] = useState<boolean>(true);
   const [isDayLockedState, setIsDayLockedState] = useState<boolean>(false);
 
@@ -298,7 +300,7 @@ export const StaffCylinderSettlement: React.FC = () => {
       if (navigator.onLine) {
         try {
           const { data: remoteData, error } = await supabase
-            .from('staff_cylinder_settlements')
+            .from('staff_cylinder_settlements_list')
             .select('*')
             .eq('settlement_date', date);
 
@@ -521,6 +523,16 @@ export const StaffCylinderSettlement: React.FC = () => {
         const norm = String(payload.agent_name || '').trim().toUpperCase();
         if (!norm) return;
 
+        // A brand-new settlement row created by Day End is not in the list yet.
+        // Refresh once from the lightweight view so it appears immediately.
+        const exists = settlementsRef.current.some(
+          (row) => row.agent_name.trim().toUpperCase() === norm
+        );
+        if (!exists) {
+          void fetchSettlements(selectedDate);
+          return;
+        }
+
         setSettlements((prev) =>
           prev.map((row) => {
             if (row.agent_name.trim().toUpperCase() !== norm) return row;
@@ -544,7 +556,7 @@ export const StaffCylinderSettlement: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedDate]);
+  }, [selectedDate, fetchSettlements]);
 
   // Save cylinder rate (manager-only shared setting)
   const handleSaveRate = async (newRate: number) => {
