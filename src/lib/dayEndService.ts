@@ -334,6 +334,8 @@ export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Rec
  */
 export interface SettlementLoadSummary {
   supplied_cylinders: number;
+  /** Total bills / morning load entered from Day End. Null = not set. */
+  load_target: number | null;
   cash_cylinders: number;
   online_cylinders: number;
   upi_cylinders: number;
@@ -348,7 +350,7 @@ export async function fetchSettlementLoadsForDate(
     const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
       .select(
-        'agent_id, agent_name, supplied_cylinders, cash_cylinders, online_cylinders, upi_cylinders, due_cylinders'
+        'id, agent_id, agent_name, supplied_cylinders, load_target, cash_cylinders, online_cylinders, upi_cylinders, due_cylinders'
       )
       .eq('settlement_date', dateStr);
 
@@ -358,6 +360,10 @@ export async function fetchSettlementLoadsForDate(
         if (!norm) continue;
         result[norm] = {
           supplied_cylinders: Number(row.supplied_cylinders || 0),
+          load_target:
+            row.load_target === null || row.load_target === undefined
+              ? null
+              : Number(row.load_target),
           cash_cylinders: Number(row.cash_cylinders || 0),
           online_cylinders: Number(row.online_cylinders || 0),
           upi_cylinders: Number(row.upi_cylinders || 0),
@@ -369,6 +375,87 @@ export async function fetchSettlementLoadsForDate(
     console.warn('Failed to load settlement loads:', err);
   }
   return result;
+}
+
+/**
+ * Save the manually entered "total bills" (morning load) for a delivery boy.
+ *
+ * Stored in its own `load_target` column: Day End rewrites
+ * `supplied_cylinders` with the count of bills currently scanned on every
+ * save, so keeping the target separate is what makes "45/46 bills" survive.
+ */
+export async function setSettlementLoadTarget(params: {
+  report_date: string;
+  agent_name: string;
+  agent_id?: string | null;
+  load_target: number | null;
+  sender_session_id?: string;
+}): Promise<{ success: boolean; error?: string; load_target: number | null }> {
+  const target =
+    params.load_target === null || !Number.isFinite(params.load_target)
+      ? null
+      : Math.max(0, Math.floor(params.load_target));
+  const nowIso = new Date().toISOString();
+
+  try {
+    const { data, error } = await staffDb
+      .from('staff_cylinder_settlements')
+      .select('id')
+      .eq('settlement_date', params.report_date)
+      .eq('agent_name', params.agent_name)
+      .limit(1);
+
+    if (error) {
+      return { success: false, error: error.message, load_target: target };
+    }
+
+    const existingId = Array.isArray(data) ? (data[0] as any)?.id : null;
+
+    if (existingId) {
+      const { error: updateError } = await staffDb
+        .from('staff_cylinder_settlements')
+        .update({ load_target: target, updated_at: nowIso })
+        .eq('id', existingId)
+        .select('id');
+      if (updateError) {
+        return { success: false, error: updateError.message, load_target: target };
+      }
+    } else {
+      const { error: insertError } = await staffDb
+        .from('staff_cylinder_settlements')
+        .insert({
+          settlement_date: params.report_date,
+          agent_id: params.agent_id || null,
+          agent_name: params.agent_name,
+          cylinder_price: getStoredCylinderRate(),
+          load_target: target,
+          notes: '',
+          updated_at: nowIso,
+        })
+        .select('id');
+      if (insertError) {
+        return { success: false, error: insertError.message, load_target: target };
+      }
+    }
+
+    // Small broadcast so other open phones update the target without reading
+    // the settlement notes blob.
+    void broadcastCashMemosUpdated({
+      report_date: params.report_date,
+      agent_name: params.agent_name,
+      agent_id: params.agent_id || null,
+      load_target: target,
+      sender_session_id: params.sender_session_id,
+    });
+
+    return { success: true, load_target: target };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Could not save total bills',
+      load_target: target,
+    };
+  }
 }
 
 /**

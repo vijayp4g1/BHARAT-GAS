@@ -20,6 +20,7 @@ The **old** project `skkebmqxhrtarpfwffgx` is **egress-restricted** on the Free 
 - Do **not** re-enable PWA `autoUpdate` or reload on `visibilitychange`/app resume. Updates must be an explicit “Reload” prompt; the Day End page persists date/tab/selected boy in `sessionStorage` so a resume/reload returns to the same scan list.
 - Do **not** subscribe to full `staff_cylinder_settlements` rows over Realtime: the `notes` blob is large. Use the small `cash_memos_updated`/load broadcast and fetch the full notes only when editing or manually refreshing.
 - Staff Book was removed. Day End is the only staff working page and has an inline past-date unlock. Do **not** re-add `/staff/settlement` or a Staff Book page without explicit direction.
+- “Total bills” for a boy is `staff_cylinder_settlements.load_target`, edited from Day End. Do **not** store it in `supplied_cylinders`: every Day End save rewrites that column with the scanned bill count.
 - Existing users must log in again once: the new project has a new JWT secret. Their old passwords were migrated.
 
 ### Pending task

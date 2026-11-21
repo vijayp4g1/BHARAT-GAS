@@ -39,8 +39,7 @@ Do not reintroduce full-table scans on an interval.
 | BPCL reports | 5-minute in-memory + localStorage TTL; page reloads reuse per-boy local reports instead of re-reading every settlement note |
 | Day-end realtime | A `cash_memos_updated` broadcast now refreshes only the affected boy’s report, not the whole roster |
 | BPCL realtime | Broadcast payload updates the single boy’s report; no full `notes` re-query |
-| Staff Book realtime | Uses the postgres/broadcast row directly; no `fetchSettlements` notes re-query on each change |
-| Staff Book tab focus | Refetch at most once per 60 seconds |
+| Day End total bills | “Total bills” (morning load) is a separate `load_target` column, editable from the roster badge or the scanner KPI. Day End saves rewrite `supplied_cylinders` but never the target, so `45/46 bills` survives. |
 | Master consumer sync | **Manual only** (Manager Dashboard → Resync Customers, or Agent Search → database icon). No automatic call on app start/online/interval. The full 33k master is intended to be updated about once a week. |
 | Day-end roster query | Explicit column list (stops pulling unused/large columns) |
 | Staff permission checks | 2-minute cache + in-flight dedupe; permission broadcasts force a refresh |

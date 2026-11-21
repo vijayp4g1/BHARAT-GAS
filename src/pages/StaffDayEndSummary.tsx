@@ -36,7 +36,8 @@ import {
   Printer,
   Archive,
   Ban,
-  ListChecks
+  ListChecks,
+  Pencil
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LiveCameraScannerModal } from '../components/LiveCameraScannerModal';
@@ -59,6 +60,7 @@ import {
   filterEntriesCrossDateDuplicates,
   mergeDayEndEntries,
   fetchSettlementLoadsForDate,
+  setSettlementLoadTarget,
   type DayEndEntry, 
   type DayEndReportSummary,
   type PastClaimantInfo,
@@ -172,6 +174,42 @@ export const StaffDayEndSummary: React.FC = () => {
     });
     toast.success(`${reportDate} unlocked for editing`);
   };
+
+  // Shared inline unlock for actions on a locked past date (delete a bill,
+  // edit total bills). Only staff/managers may unlock; the reason is audited.
+  const ensureDayUnlockedForEdit = useCallback(
+    async (actionLabel: string): Promise<boolean> => {
+      const lockedNow = await isDayLocked(reportDate, { force: true });
+      if (!lockedNow) return true;
+
+      if (!isStaffOrManager) {
+        toast.error('This day is locked. A staff member or manager must unlock it.');
+        return false;
+      }
+
+      const reason = window.prompt(
+        `${reportDate} is locked.\n\nEnter a reason to unlock it and ${actionLabel}:`
+      );
+      if (!reason || !reason.trim()) return false;
+
+      const result = await unlockDay(reportDate, reason.trim());
+      if (!result.ok) {
+        toast.error(result.error || 'Could not unlock this day');
+        return false;
+      }
+
+      setIsDayLockedState(false);
+      void logGodownAudit({
+        action: 'DAY_UNLOCK',
+        entity_type: 'day',
+        settlement_date: reportDate,
+        reason: reason.trim(),
+        source: 'day_end',
+      });
+      return true;
+    },
+    [reportDate, isStaffOrManager]
+  );
 
   // Delivery Boys Roster State
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
@@ -604,7 +642,10 @@ export const StaffDayEndSummary: React.FC = () => {
   const selectedBoyLoad = useMemo(() => {
     if (!selectedBoy) return 0;
     const norm = selectedBoy.name.trim().toUpperCase();
-    return Number(settlementLoadsMap[norm]?.supplied_cylinders || 0);
+    const info = settlementLoadsMap[norm];
+    const target = Number(info?.load_target ?? 0);
+    if (target > 0) return target;
+    return Number(info?.supplied_cylinders || 0);
   }, [selectedBoy, settlementLoadsMap]);
 
   const selectedOnlineStats = useMemo(() => {
@@ -1755,12 +1796,19 @@ export const StaffDayEndSummary: React.FC = () => {
           // identity to fetch one report; a full roster reload would download
           // every boy's entries + BPCL notes + 7 days of notes again.
           const norm = (data.agent_name || '').trim().toUpperCase();
+          // A load-target-only broadcast has no bill counts. Never treat that
+          // as "0 bills" or it would wipe the roster numbers.
+          const reportedTotal =
+            data.total_deliveries === undefined || data.total_deliveries === null
+              ? null
+              : Number(data.total_deliveries || 0);
           if (norm) {
             // Update the load summary from the small broadcast payload; no
             // settlement row / notes query is needed.
             setSettlementLoadsMap((prev) => {
               const current = prev[norm] || {
                 supplied_cylinders: 0,
+                load_target: null,
                 cash_cylinders: 0,
                 online_cylinders: 0,
                 upi_cylinders: 0,
@@ -1772,6 +1820,12 @@ export const StaffDayEndSummary: React.FC = () => {
                   supplied_cylinders: Number(
                     data.supplied_cylinders ?? current.supplied_cylinders ?? 0
                   ),
+                  load_target:
+                    data.load_target !== undefined
+                      ? data.load_target === null
+                        ? null
+                        : Number(data.load_target)
+                      : current.load_target ?? null,
                   cash_cylinders: Number(
                     data.cash_cylinders ?? current.cash_cylinders ?? 0
                   ),
@@ -1784,7 +1838,6 @@ export const StaffDayEndSummary: React.FC = () => {
               };
             });
 
-            const reportedTotal = Number(data.total_deliveries || 0);
             if (reportedTotal === 0) {
               setRosterSummaries((prev) => {
                 const existing = prev[norm];
@@ -1808,7 +1861,7 @@ export const StaffDayEndSummary: React.FC = () => {
                   } as DayEndReportSummary,
                 };
               });
-            } else {
+            } else if (reportedTotal !== null) {
               void fetchDayEndReportForAgent(reportDate, data.agent_name, data.agent_id).then(
                 (summary) => {
                   if (reportDateRef.current !== reportDate || !summary) return;
@@ -1820,6 +1873,7 @@ export const StaffDayEndSummary: React.FC = () => {
 
           // If current user is in SCAN view for this delivery boy, sync bills silently without clobbering unsaved edits
           if (
+            reportedTotal !== null &&
             activeTabRef.current === 'SCAN' &&
             !isLiveScannerOpenRef.current &&
             !explicitWritePromiseRef.current &&
@@ -2512,30 +2566,8 @@ export const StaffDayEndSummary: React.FC = () => {
     // A locked past date must be unlocked before the delete can reach the
     // database. Do it inline so the trash icon works without hunting for the
     // banner.
-    const lockedNow = await isDayLocked(reportDate, { force: true });
-    if (lockedNow) {
-      if (!isStaffOrManager) {
-        toast.error('This day is locked. A staff member or manager must unlock it.');
-        return;
-      }
-      const reason = window.prompt(
-        `${reportDate} is locked.\n\nEnter a reason to unlock it and delete this bill:`
-      );
-      if (!reason || !reason.trim()) return;
-      const unlockResult = await unlockDay(reportDate, reason.trim());
-      if (!unlockResult.ok) {
-        toast.error(unlockResult.error || 'Could not unlock this day');
-        return;
-      }
-      setIsDayLockedState(false);
-      void logGodownAudit({
-        action: 'DAY_UNLOCK',
-        entity_type: 'day',
-        settlement_date: reportDate,
-        reason: reason.trim(),
-        source: 'day_end_delete',
-      });
-    }
+    const canEdit = await ensureDayUnlockedForEdit('delete this bill');
+    if (!canEdit) return;
 
     const removeKey = numberKey(consumerNumber);
     const current = entriesRef.current;
@@ -2697,6 +2729,67 @@ export const StaffDayEndSummary: React.FC = () => {
       if (explicitWritePromiseRef.current === deletePromise) {
         explicitWritePromiseRef.current = null;
       }
+    }
+  };
+
+  // Edit the "total bills" (morning load) for a delivery boy. Stored in its
+  // own settlement column so Day End saves cannot overwrite it with the
+  // number of bills scanned so far.
+  const handleEditSettlementLoad = async (boy: DeliveryBoy) => {
+    const norm = boy.name.trim().toUpperCase();
+    const info = settlementLoadsMap[norm];
+    const currentTarget =
+      info?.load_target != null && info.load_target > 0
+        ? info.load_target
+        : Number(info?.supplied_cylinders || 0);
+
+    const input = window.prompt(
+      `Total bills (morning load) for ${boy.name} on ${reportDate}:\n\n` +
+        `Enter the total number of bills given to this boy.\n` +
+        `Leave blank and press OK to clear it.`,
+      currentTarget > 0 ? String(currentTarget) : ''
+    );
+    if (input === null) return;
+
+    const trimmed = input.trim();
+    const parsed = trimmed === '' ? null : Number(trimmed);
+    if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+      toast.error('Enter a valid number of bills (0 or more).');
+      return;
+    }
+
+    const canEdit = await ensureDayUnlockedForEdit('change the total bills');
+    if (!canEdit) return;
+
+    const result = await setSettlementLoadTarget({
+      report_date: reportDate,
+      agent_id: boy.id,
+      agent_name: boy.name,
+      load_target: parsed,
+      sender_session_id: sessionClientIdRef.current,
+    });
+
+    if (!result.success) {
+      toast.error(result.error || `Could not save total bills for ${boy.name}`);
+      return;
+    }
+
+    setSettlementLoadsMap((prev) => ({
+      ...prev,
+      [norm]: {
+        supplied_cylinders: Number(prev[norm]?.supplied_cylinders || 0),
+        load_target: result.load_target,
+        cash_cylinders: Number(prev[norm]?.cash_cylinders || 0),
+        online_cylinders: Number(prev[norm]?.online_cylinders || 0),
+        upi_cylinders: Number(prev[norm]?.upi_cylinders || 0),
+        due_cylinders: Number(prev[norm]?.due_cylinders || 0),
+      },
+    }));
+
+    if (result.load_target === null) {
+      toast.success(`Cleared total bills for ${boy.name}`);
+    } else {
+      toast.success(`Total bills for ${boy.name} set to ${result.load_target}`);
     }
   };
 
@@ -2889,7 +2982,8 @@ export const StaffDayEndSummary: React.FC = () => {
     const onlineDelivered = Math.min(onlineAdded, onlineTotal);
 
     const loadInfo = settlementLoadsMap[normName];
-    const loadSupplied = Number(loadInfo?.supplied_cylinders || 0);
+    const loadTarget = Number(loadInfo?.load_target ?? 0);
+    const loadSupplied = loadTarget > 0 ? loadTarget : Number(loadInfo?.supplied_cylinders || 0);
     const billCount = Number(summary?.total_deliveries || 0);
     const missingBills = loadSupplied > 0 ? Math.max(0, loadSupplied - billCount) : 0;
     const extraBills = loadSupplied > 0 ? Math.max(0, billCount - loadSupplied) : 0;
@@ -2941,17 +3035,24 @@ export const StaffDayEndSummary: React.FC = () => {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <h3 className="font-bold text-sm text-slate-900 truncate">{boy.name}</h3>
-                {hasBills ? (
-                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs ${
-                    hasScams ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
-                  }`}>
-                    {billCount}{loadSupplied > 0 ? `/${loadSupplied}` : ''} Bills
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
-                    0{loadSupplied > 0 ? `/${loadSupplied}` : ''} Bills
-                  </span>
-                )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleEditSettlementLoad(boy);
+                  }}
+                  title="Edit total bills (morning load)"
+                  className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs inline-flex items-center gap-1 active:scale-95 transition-transform ${
+                    hasBills
+                      ? hasScams
+                        ? 'bg-slate-800 text-white'
+                        : 'bg-emerald-600 text-white'
+                      : 'bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  {billCount}{loadSupplied > 0 ? `/${loadSupplied}` : ''} Bills
+                  <Pencil className="w-2.5 h-2.5 opacity-80" />
+                </button>
                 {onlineTotal > 0 && (
                   <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-300 px-2 py-0.5 rounded-full">
                     🌐 {onlineDelivered}/{onlineTotal} Online
@@ -3838,12 +3939,22 @@ export const StaffDayEndSummary: React.FC = () => {
           {/* Real-time KPI Metric Summary Strip */}
           <div className="bg-white rounded-2xl p-2.5 sm:p-3 shadow-sm border border-slate-200">
             <div className="grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
-              <div className="bg-blue-50/80 rounded-xl p-1.5 sm:p-2 border border-blue-100">
+              <div className="relative bg-blue-50/80 rounded-xl p-1.5 sm:p-2 border border-blue-100">
                 <span className="text-[9px] sm:text-[10px] font-bold text-blue-600 block uppercase truncate">Total Bills</span>
                 <span className="text-sm sm:text-base font-black text-blue-950">
                   {kpis.totalDeliveries}
                   {selectedBoyLoad > 0 ? `/${selectedBoyLoad}` : ''}
                 </span>
+                {selectedBoy && (
+                  <button
+                    type="button"
+                    onClick={() => void handleEditSettlementLoad(selectedBoy)}
+                    title="Edit total bills (morning load)"
+                    className="absolute top-1 right-1 p-0.5 rounded-md text-blue-600 hover:bg-blue-200/70 active:scale-90 transition"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                )}
               </div>
               <div className="bg-purple-50/80 rounded-xl p-1.5 sm:p-2 border border-purple-100">
                 <span className="text-[9px] sm:text-[10px] font-bold text-purple-600 block uppercase truncate">10kg Lite</span>
