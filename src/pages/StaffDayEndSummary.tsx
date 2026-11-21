@@ -2509,6 +2509,34 @@ export const StaffDayEndSummary: React.FC = () => {
   };
 
   const handleRemoveEntry = async (consumerNumber: string) => {
+    // A locked past date must be unlocked before the delete can reach the
+    // database. Do it inline so the trash icon works without hunting for the
+    // banner.
+    const lockedNow = await isDayLocked(reportDate, { force: true });
+    if (lockedNow) {
+      if (!isStaffOrManager) {
+        toast.error('This day is locked. A staff member or manager must unlock it.');
+        return;
+      }
+      const reason = window.prompt(
+        `${reportDate} is locked.\n\nEnter a reason to unlock it and delete this bill:`
+      );
+      if (!reason || !reason.trim()) return;
+      const unlockResult = await unlockDay(reportDate, reason.trim());
+      if (!unlockResult.ok) {
+        toast.error(unlockResult.error || 'Could not unlock this day');
+        return;
+      }
+      setIsDayLockedState(false);
+      void logGodownAudit({
+        action: 'DAY_UNLOCK',
+        entity_type: 'day',
+        settlement_date: reportDate,
+        reason: reason.trim(),
+        source: 'day_end_delete',
+      });
+    }
+
     const removeKey = numberKey(consumerNumber);
     const current = entriesRef.current;
     const itemToRemove = current.find(
@@ -3184,7 +3212,7 @@ export const StaffDayEndSummary: React.FC = () => {
       {/* Day End Page Main Content - Strictly Hidden on Print */}
       <div className="day-end-main-page print:hidden">
         {isDayLockedState && (
-          <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="sticky top-0 z-30 mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 shadow-lg">
             <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-amber-900">
               <AlertTriangle size={15} className="text-amber-600 shrink-0" />
               <span>
@@ -3716,6 +3744,18 @@ export const StaffDayEndSummary: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 w-full sm:w-auto">
+              {isDayLockedState && isStaffOrManager && (
+                <button
+                  type="button"
+                  onClick={handleUnlockDay}
+                  className="flex-1 sm:flex-initial justify-center active:scale-95 font-black px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 shadow-xs transition-all border bg-amber-500 text-slate-950 border-amber-400"
+                  title="Unlock this day to edit or delete bills"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Unlock</span>
+                </button>
+              )}
+
               {!isCurrentBoyHasBills && (
                 <button
                   type="button"
