@@ -965,6 +965,7 @@ export const StaffDayEndSummary: React.FC = () => {
   // Supervisor Contact (Optional WhatsApp share)
   const [supervisorPhone] = useState<string>(() => localStorage.getItem('bgcls_supervisor_phone') || '917337487571');
   const [copiedCsv, setCopiedCsv] = useState<boolean>(false);
+  const [copiedAllCsv, setCopiedAllCsv] = useState<boolean>(false);
 
   // 1. Initial Load: Fetch Delivery Boys and Managers
   useEffect(() => {
@@ -2921,6 +2922,110 @@ export const StaffDayEndSummary: React.FC = () => {
     setTimeout(() => setCopiedCsv(false), 2000);
   };
 
+  // Copy ALL bills for the selected date (every delivery boy) as a CSV table.
+  // Uses the roster already in memory plus the current in-memory list, so it
+  // does not need another network download.
+  const handleCopyAllBillsCsv = async () => {
+    const escapeCsv = (value: unknown) => {
+      const str = String(value ?? '');
+      return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const byBoy = new Map<string, { name: string; entries: DayEndEntry[] }>();
+    for (const [norm, summary] of Object.entries(rosterSummaries)) {
+      byBoy.set(norm, {
+        name: summary.agent_name || norm,
+        entries: Array.isArray(summary.entries) ? summary.entries : [],
+      });
+    }
+    // The open boy may have bills that were just scanned and are not in the
+    // last roster snapshot yet. Prefer the in-memory list for that boy.
+    if (selectedBoy) {
+      byBoy.set(selectedBoy.name.trim().toUpperCase(), {
+        name: selectedBoy.name,
+        entries,
+      });
+    }
+
+    const cylinderLabel = (type: string) => {
+      if (type === '14.2KG_STD') return '14.2 KG';
+      if (type === '10KG_LITE') return '10 KG Lite';
+      if (type === '19KG_COMM') return '19 KG Commercial';
+      return type || '';
+    };
+    const scannedTime = (iso?: string) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    };
+
+    const rows: string[][] = [];
+    const boys = [...byBoy.values()].sort((a, b) => a.name.localeCompare(b.name));
+    for (const boy of boys) {
+      for (const entry of boy.entries) {
+        rows.push([
+          reportDate,
+          boy.name,
+          entry.consumer_number,
+          entry.consumer_name,
+          cylinderLabel(entry.cylinder_type),
+          entry.payment_mode,
+          entry.bpcl_paid ? 'Yes' : 'No',
+          entry.empty_collected ? 'Yes' : 'No',
+          scannedTime(entry.scanned_at),
+        ]);
+      }
+    }
+
+    if (rows.length === 0) {
+      toast.error(`No bills recorded for ${reportDate} yet.`);
+      return;
+    }
+
+    const header = [
+      'Report Date',
+      'Delivery Boy',
+      'Consumer Number',
+      'Consumer Name',
+      'Cylinder Type',
+      'Payment Mode',
+      'BPCL Online',
+      'Empty Collected',
+      'Scanned At',
+    ];
+    const csv = [header, ...rows]
+      .map((row) => row.map(escapeCsv).join(','))
+      .join('\r\n');
+
+    try {
+      await navigator.clipboard.writeText(csv);
+    } catch (_) {
+      // Older Android WebViews have no Clipboard API on insecure contexts.
+      const textarea = document.createElement('textarea');
+      textarea.value = csv;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+
+    setCopiedAllCsv(true);
+    toast.success(
+      `Copied ${rows.length} bill${rows.length === 1 ? '' : 's'} for ${reportDate} as CSV`
+    );
+    setTimeout(() => setCopiedAllCsv(false), 2500);
+  };
+
   // Filtered deliveries for list view
   const displayedEntries = useMemo(() => {
     return entries.filter((item) => {
@@ -3574,6 +3679,19 @@ export const StaffDayEndSummary: React.FC = () => {
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Online Bills ({totalRosterOnlineCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyAllBillsCsv()}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all active:scale-95 shadow-2xs"
+                  title="Copy every delivery boy's bills for this date as CSV"
+                >
+                  {copiedAllCsv ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-emerald-600" />
+                  )}
+                  <span>{copiedAllCsv ? 'Copied!' : 'Copy All CSV'}</span>
                 </button>
                 <button
                   onClick={() => loadRosterData(reportDate)}
