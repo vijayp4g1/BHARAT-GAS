@@ -659,17 +659,26 @@ export async function findSettlementRowForAgent(
 
     const match = matches[0];
 
-    // Fetch the notes blob for the single matched row only.
-    try {
-      const { data: notesRow } = await staffDb
-        .from('staff_cylinder_settlements')
-        .select('notes')
-        .eq('id', match.id)
-        .maybeSingle();
-      return { ...match, notes: (notesRow as any)?.notes ?? null };
-    } catch (_) {
-      return { ...match, notes: null };
+    // Fetch the notes blob for the single matched row only. Retry once: a
+    // transient failure here must not make the caller think the row has no
+    // notes (a save merges against them and could overwrite existing bills).
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { data: notesRow, error: notesError } = await staffDb
+          .from('staff_cylinder_settlements')
+          .select('notes')
+          .eq('id', match.id)
+          .maybeSingle();
+        if (!notesError) {
+          return { ...match, notes: (notesRow as any)?.notes ?? null };
+        }
+      } catch (_) {
+        // retry once
+      }
     }
+
+    // Do not return a match without its notes: callers merge against them.
+    return null;
   } catch (err) {
     console.warn('Settlement lookup error:', err);
     return null;
