@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { staffDb } from './staffDb';
+import { isCurrentStaffOrManager } from './staffAuth';
 
 export interface BpclBillItem {
   consumer_number: string;
@@ -627,9 +628,12 @@ export async function findSettlementRowForAgent(
   agentId?: string
 ): Promise<SettlementStatusRow | null> {
   try {
+    // Read only the small status columns first. `notes` is ~13.6 KB/row, so
+    // downloading it for every delivery boy just to find one row was one of
+    // the largest egress sources in the app.
     const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
-      .select('id, agent_id, agent_name, notes, updated_at, cylinder_price, online_cylinders, returned_full_cylinders, actual_cash')
+      .select('id, agent_id, agent_name, updated_at, cylinder_price, online_cylinders, returned_full_cylinders, actual_cash')
       .eq('settlement_date', dateStr);
 
     if (error) {
@@ -653,7 +657,19 @@ export async function findSettlementRowForAgent(
       return bTime - aTime;
     });
 
-    return matches[0];
+    const match = matches[0];
+
+    // Fetch the notes blob for the single matched row only.
+    try {
+      const { data: notesRow } = await staffDb
+        .from('staff_cylinder_settlements')
+        .select('notes')
+        .eq('id', match.id)
+        .maybeSingle();
+      return { ...match, notes: (notesRow as any)?.notes ?? null };
+    } catch (_) {
+      return { ...match, notes: null };
+    }
   } catch (err) {
     console.warn('Settlement lookup error:', err);
     return null;
@@ -714,36 +730,92 @@ export async function fetchAllBpclReportsForDate(
     if (cachedCloud) Object.assign(result, cachedCloud.data);
   } else {
     try {
-      const { data, error } = await staffDb
-        .from('staff_cylinder_settlements')
-        .select('agent_name, agent_id, notes, updated_at')
-        .eq('settlement_date', dateStr);
+      // Preferred: the BPCL-only view returns just the BPCL JSON, not the
+      // ~13.6 KB `notes` blob that also carries every scanned bill.
+      let data: any = null;
+      let error: any = null;
 
-      if (!error && Array.isArray(data)) {
+      ({ data, error } = await staffDb
+        .from('staff_cylinder_settlements_bpcl')
+        .select('agent_id, agent_name, updated_at, bpcl_report')
+        .eq('settlement_date', dateStr));
+
+      // Direct staff read if the Edge Function has not been redeployed with the
+      // new view in its allowlist yet.
+      if (error?.code === 'TABLE_NOT_ALLOWED' && isCurrentStaffOrManager()) {
+        ({ data, error } = await supabase
+          .from('staff_cylinder_settlements_bpcl')
+          .select('agent_id, agent_name, updated_at, bpcl_report')
+          .eq('settlement_date', dateStr));
+      }
+
+      if (error) throw error;
+
+      if (Array.isArray(data)) {
         data.forEach((row) => {
           const normName = (row.agent_name || '').trim().toUpperCase();
-          if (row.notes) {
-            const parsed = extractBpclReportFromNotes(row.notes);
-            if (parsed) {
-              const existing = result[normName];
-              const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
-              const existingTime = new Date(existing?.updated_at || 0).getTime();
-              if (!existing || parsedTime >= existingTime) {
-                result[normName] = parsed;
-                setLocalBpclReport(dateStr, normName, parsed);
-              }
-            }
+          const raw = row.bpcl_report as BpclReportData | null;
+          if (!raw || typeof raw !== 'object') return;
+
+          const parsed: BpclReportData = {
+            ...raw,
+            agent_name: raw.agent_name || row.agent_name,
+            report_date: raw.report_date || dateStr,
+            pending_bills: Array.isArray(raw.pending_bills) ? raw.pending_bills : [],
+            online_bills: Array.isArray(raw.online_bills) ? raw.online_bills : [],
+          };
+          parsed.raw_text = sanitizeRawTextWithActiveBills(
+            parsed.raw_text,
+            parsed.pending_bills,
+            parsed.online_bills
+          );
+
+          const existing = result[normName];
+          const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
+          const existingTime = new Date(existing?.updated_at || 0).getTime();
+          if (!existing || parsedTime >= existingTime) {
+            result[normName] = parsed;
+            setLocalBpclReport(dateStr, normName, parsed);
           }
         });
-        if (!error) {
+
+        bpclCloudCache.set(dateStr, { at: Date.now(), data: { ...result } });
+        try {
+          localStorage.setItem(fetchedStampKey, String(Date.now()));
+        } catch (_) {}
+      }
+    } catch (err) {
+      // Legacy fallback: parse the BPCL JSON out of the full notes blob
+      // (used until the lightweight view is deployed).
+      try {
+        const { data, error } = await staffDb
+          .from('staff_cylinder_settlements')
+          .select('agent_name, agent_id, notes, updated_at')
+          .eq('settlement_date', dateStr);
+
+        if (!error && Array.isArray(data)) {
+          data.forEach((row) => {
+            const normName = (row.agent_name || '').trim().toUpperCase();
+            if (!row.notes) return;
+            const parsed = extractBpclReportFromNotes(row.notes);
+            if (!parsed) return;
+            const existing = result[normName];
+            const parsedTime = new Date(parsed.updated_at || row.updated_at || 0).getTime();
+            const existingTime = new Date(existing?.updated_at || 0).getTime();
+            if (!existing || parsedTime >= existingTime) {
+              result[normName] = parsed;
+              setLocalBpclReport(dateStr, normName, parsed);
+            }
+          });
+
           bpclCloudCache.set(dateStr, { at: Date.now(), data: { ...result } });
           try {
             localStorage.setItem(fetchedStampKey, String(Date.now()));
           } catch (_) {}
         }
+      } catch (fallbackErr) {
+        console.warn('Failed to fetch all BPCL reports for date:', fallbackErr);
       }
-    } catch (err) {
-      console.warn('Failed to fetch all BPCL reports for date:', err);
     }
   }
 

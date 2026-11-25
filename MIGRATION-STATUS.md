@@ -1,6 +1,6 @@
 # Supabase Migration Status (BHARATHGAS → BHARATHGAS-2)
 
-**Last updated:** 2026-11-19  
+**Last updated:** 2026-11-25  
 **Status:** Database/auth/functions/app migration complete. **Old photo files are pending until 2026-12-16.**
 
 > **If you are an AI agent or developer reading this before touching Supabase, auth, storage, or deployment:**  
@@ -52,7 +52,64 @@ Do not reintroduce full-table scans on an interval.
 | Staff Book | Removed. Day End is the only staff working page; past dates can be unlocked inline there. `/staff/settlement` redirects to Day End. |
 | Settlement realtime | Removed full-row `postgres_changes` subscriptions (they carried the large `notes` blob). Loads use the small `cash_memos_updated` broadcast; full notes are fetched only on edit/manual refresh. |
 
-**Residual risk:** BPCL reports and scanned bills are still stored inside the `staff_cylinder_settlements.notes` text column. The first load of a date (and every 5 minutes for BPCL, every 30 minutes for past-7-days) still downloads those notes. If egress ever climbs again, the next step is to add structured summary columns (counts/status) and stop selecting `notes` for roster views.
+### Egress burn fix (2026-11-25)
+
+Measured from the live project and `migration/data.sql`:
+
+| Blob | Size |
+|---|---|
+| `staff_cylinder_settlements.notes` | **avg 13.6 KB/row** (max 39 KB) |
+| `day_end_reports.entries` | **avg 15.3 KB/row** (max 34 KB) |
+
+Three roster reads were downloading those blobs for **every** delivery boy, several times a day:
+
+1. `fetchPast7DaysBills` — 7 days × every boy of `notes` (~1.9 MB per call, every 6 h). **~585 MB/week.**
+2. `fetchAllDayEndReportsForDate` — every boy's `entries` (~306 KB per call). **~353 MB/week.**
+3. `fetchAllBpclReportsForDate` — every boy's full `notes` just for the BPCL section (~272 KB per call). **~209 MB/week.**
+
+Fix (migration `20261125000100_egress_lightweight_views.sql`):
+
+| Change | Effect |
+|---|---|
+| `bgcls_claim_map(start, end)` RPC over `day_end_claim_history` | One compact `jsonb` map of `{consumer: {a: agent, d: date}}`. No notes, no 1000-row pagination. |
+| `day_end_report_summaries` view | Roster gets aggregates + 4-field trimmed entries; full entries only for the selected boy. |
+| `staff_cylinder_settlements_bpcl` view | Roster gets only the BPCL JSON (no scanned-bill blob). |
+| `findSettlementRowForAgent` | Reads small status columns for the date, then `notes` for the **one** matched row (was all rows). |
+| Past-7-days cache TTL | 6 h → **24 h** (the window is static once the days are over). |
+
+All client paths keep a legacy fallback, so the app works before and after deployment.
+
+**Deployment status (2026-11-25):**
+
+| Step | Status |
+|---|---|
+| SQL migration applied to `zdipbxhgjhxfslpoizkj` | ✅ Applied and verified via the pooler |
+| `anon` access revoked on the new views/RPC | ✅ Verified (`permission denied`) |
+| Frontend production deploy | ✅ `https://bharat-gas-two.vercel.app` (bundle contains `bgcls_claim_map`, `day_end_report_summaries`, `staff_cylinder_settlements_bpcl`) |
+| `admin-api` Edge Function redeploy | ⏳ Optional — see below |
+
+The client reads the new views directly for staff (`isCurrentStaffOrManager()`)
+when the deployed `admin-api` has not been redeployed yet, so the egress fix is
+active without it. Redeploying the function is still recommended so every role
+and the service-role path share the same allowlist:
+
+```powershell
+npx supabase login   # must be the project owner account
+npx supabase functions deploy admin-api --project-ref zdipbxhgjhxfslpoizkj
+```
+
+If the CLI account still returns `403 ... necessary privileges`, use the
+dashboard's Edge Functions → `admin-api` → Deploy from the updated source.
+
+Measured live savings (latest date in the DB):
+
+| Read | Before | After |
+|---|---|---|
+| Roster (`entries`) | 230,911 B | 39,393 B |
+| BPCL section | 265,952 B | 50,075 B |
+| 7-day claims | ~1.9 MB | 168,304 B (`3,438` keys) |
+
+**Residual risk:** the Day End save path still merges against `day_end_reports.entries` / `notes` for the single edited boy. That is now ~14 KB per save instead of ~272 KB. If egress climbs again, move the merge server-side into an RPC.
 
 ---
 

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { staffDb } from './staffDb';
+import { isCurrentStaffOrManager } from './staffAuth';
 import { fetchCylinderBookDeliveryBoys, type DeliveryBoy } from './agentService';
 import { numberKey } from './scanUtils';
 import { findSettlementRowForAgent } from './bpclReportService';
@@ -8,8 +9,12 @@ import cylinderBookPreset from '../data/cylinderBookDeliveryBoys.json';
 
 const LIVE_SYNC_TOPIC = 'bgcls_cash_memo_live_sync';
 
-/** Past days rarely change; avoid re-downloading 7 days of settlement notes. */
-const PAST_7_DAYS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+/**
+ * Past days are static for duplicate-detection purposes: the window for a given
+ * report date is fixed once those days are over. Keep it for a full day instead
+ * of re-downloading the same claims every 6 hours.
+ */
+const PAST_7_DAYS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Current godown cylinder rate saved by the Staff Book. Used when the day-end
@@ -183,7 +188,78 @@ export async function getDayEndDeliveryBoys(): Promise<DeliveryBoy[]> {
 export async function fetchAllDayEndReportsForDate(dateStr: string): Promise<Record<string, DayEndReportSummary>> {
   const result: Record<string, DayEndReportSummary> = {};
 
-  // 1. Try querying day_end_reports from Supabase
+  // 1. Try querying the lightweight summary view (no heavy `entries`/`raw_csv`).
+  try {
+    const columns =
+      'id, report_date, agent_id, agent_name, total_deliveries, domestic_14kg, composite_10kg, commercial_19kg, empties_collected, cash_count, upi_count, due_count, entries_compact, updated_at, created_at';
+
+    let data: any = null;
+    let error: any = null;
+
+    ({ data, error } = await staffDb
+      .from('day_end_report_summaries')
+      .select(columns)
+      .eq('report_date', dateStr));
+
+    // The Edge Function may not have been redeployed yet with the new view in
+    // its allowlist. Staff can read the view directly (RLS allows it); agents
+    // keep the legacy cross-agent path below so duplicate detection still sees
+    // every boy's bills.
+    if (error?.code === 'TABLE_NOT_ALLOWED' && isCurrentStaffOrManager()) {
+      ({ data, error } = await supabase
+        .from('day_end_report_summaries')
+        .select(columns)
+        .eq('report_date', dateStr));
+    }
+
+    if (!error && data && data.length > 0) {
+      data.forEach((r: any) => {
+        const normName = (r.agent_name || '').trim().toUpperCase();
+        // entries_compact is [consumer_number, consumer_name, scanned_at,
+        // duplicate_of_agent] per bill. Only these fields are read from the
+        // roster; the full entry (address/mobile/…) is loaded for the selected
+        // boy by fetchDayEndReportForAgent.
+        const entries: DayEndEntry[] = Array.isArray(r.entries_compact)
+          ? r.entries_compact
+              .filter((e: any) => Array.isArray(e) && e[0])
+              .map((e: any[]) => ({
+                consumer_number: String(e[0] || ''),
+                consumer_name: String(e[1] || ''),
+                found: true,
+                cylinder_type: '14.2KG_STD' as const,
+                payment_mode: 'CASH' as const,
+                empty_collected: false,
+                scanned_at: e[2] || undefined,
+                duplicate_of_agent: e[3] || undefined,
+              }))
+          : [];
+        result[normName] = {
+          id: r.id,
+          report_date: r.report_date,
+          agent_id: r.agent_id,
+          agent_name: r.agent_name,
+          total_deliveries: r.total_deliveries || entries.length,
+          domestic_14kg: r.domestic_14kg || 0,
+          composite_10kg: r.composite_10kg || 0,
+          commercial_19kg: r.commercial_19kg || 0,
+          empties_collected: r.empties_collected || 0,
+          cash_count: r.cash_count || 0,
+          upi_count: r.upi_count || 0,
+          due_count: r.due_count || 0,
+          entries,
+          raw_csv: '',
+          supervisor_phone: '',
+          scanned_by_staff: '',
+          updated_at: r.updated_at || r.created_at,
+        };
+      });
+      return result;
+    }
+  } catch (err) {
+    console.warn('day_end_report_summaries query notice, checking fallback:', err);
+  }
+
+  // 1b. Fallback: legacy day_end_reports (used until the summary view is deployed)
   try {
     const { data, error } = await staffDb
       .from('day_end_reports')
@@ -1226,7 +1302,40 @@ export async function fetchPast7DaysBills(
     const dP = String(prevDate.getDate()).padStart(2, '0');
     const prevDateStr = `${yP}-${mP}-${dP}`;
 
-    // Query settlements in the 7-day range preceding reportDate
+    // Preferred path: one compact JSON map built server-side from the
+    // lightweight claim view. No `notes` blobs and no 1000-row pagination.
+    try {
+      const { data: claimMap, error: rpcError } = await supabase.rpc(
+        'bgcls_claim_map',
+        { p_start: startDateStr, p_end: prevDateStr }
+      );
+      if (!rpcError && claimMap && typeof claimMap === 'object') {
+        Object.entries(
+          claimMap as Record<string, { a?: string; d?: string }>
+        ).forEach(([rawKey, info]) => {
+          const clean = numberKey(rawKey);
+          if (!clean || result[clean]) return;
+          result[clean] = {
+            agentName: info?.a || 'Delivery Boy',
+            date: info?.d || '',
+            isPast7Days: true,
+          };
+        });
+
+        try {
+          localStorage.setItem(
+            `bgcls_past_7days_bills_${reportDateStr}`,
+            JSON.stringify(result)
+          );
+          localStorage.setItem(stampKey, String(Date.now()));
+        } catch (_) {}
+        return result;
+      }
+    } catch (_) {
+      // Fall through to the legacy notes query below.
+    }
+
+    // Legacy fallback: settlement notes (used until the migration is applied).
     const { data, error } = await staffDb
       .from('staff_cylinder_settlements')
       .select('agent_name, agent_id, settlement_date, notes')

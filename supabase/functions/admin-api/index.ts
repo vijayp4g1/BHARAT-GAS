@@ -80,7 +80,10 @@ const READ_TABLES = new Set([
 /** Tables only staff may read (settlements, reports, customer data). */
 const STAFF_READ_TABLES = new Set([
   'day_end_reports',
+  'day_end_report_summaries',
+  'day_end_claim_history',
   'staff_cylinder_settlements',
+  'staff_cylinder_settlements_bpcl',
   'dispatch_items',
   'daily_dispatch',
   'consumers',
@@ -106,6 +109,8 @@ const WRITE_TABLES = new Set([
  */
 const SELF_SERVICE_TABLES = new Set([
   'day_end_reports',
+  'day_end_report_summaries',
+  'day_end_claim_history',
   'staff_cylinder_settlements',
 ])
 
