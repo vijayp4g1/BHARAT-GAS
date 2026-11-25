@@ -677,6 +677,18 @@ export async function findSettlementRowForAgent(
       }
     }
 
+    // Fallback: a direct read (RLS still applies) if the Edge Function failed.
+    try {
+      const { data: directRow, error: directError } = await supabase
+        .from('staff_cylinder_settlements')
+        .select('notes')
+        .eq('id', match.id)
+        .maybeSingle();
+      if (!directError) {
+        return { ...match, notes: (directRow as any)?.notes ?? null };
+      }
+    } catch (_) {}
+
     // Do not return a match without its notes: callers merge against them.
     return null;
   } catch (err) {
